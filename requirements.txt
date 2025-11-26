@@ -1,5 +1,0 @@
-# This repo assumes you are in the baseline environment:
-#  - install baseline repo + its requirements first
-#  - then run: pip install -e .
-
--e .

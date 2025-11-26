@@ -33,13 +33,8 @@ pip install -e .
 git clone https://github.com/<org>/multi-modal-transformer.git
 cd multi-modal-transformer
 
-pip install -r requirements.txt
-```
-
-The requirements.txt here contains only:
-
-```
--e .
+pip install -e .
+pip install -e ".[dev]"
 ```
 
 --- 
