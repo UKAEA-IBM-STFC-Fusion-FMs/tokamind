@@ -23,8 +23,7 @@ Follow these steps:
 git clone https://github.com/<org>/<baseline-repo>.git
 cd <baseline-repo>
     
-pip install -r requirements.txt
-pip install -e .
+complete block
 ```
 
 ### 2. Install the Multi-Modal Transformer
