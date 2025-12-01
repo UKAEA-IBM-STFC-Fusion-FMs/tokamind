@@ -1,0 +1,50 @@
+# mmt/configs/task2_1/experiment_base.yaml
+
+
+task: "task_2-1"
+
+baseline_config: "scripts/pipelines/configs/configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"
+
+global:
+  seed: 54
+
+data:
+  local: false         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: 5   # None / null → uses all shots;
+
+preprocessing:
+  drop_nan:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+
+  chunking:
+    chunk_length: 0.005          # 5 ms per chunk (placeholder)
+    max_context_length: 0.20     # 200 ms of history (placeholder)
+    stride: null                 # null => uses dt in baseline windows segmenter
+
+  cache:
+    enabled: true
+
+model:
+  backbone:
+    d_model: 128
+    n_layers: 2
+    n_heads: 2
+    dim_ff: 256
+    dropout: 0.1
+
+  modality_heads:
+    timeseries:
+      hidden: 128
+      out_dim: 128
+    profile:
+      hidden: 128
+      out_dim: 128
+    video:
+      hidden: 192
+      out_dim: 128
+
+  adapters:
+    hidden_default: 0
+    hidden_overrides:
+      equilibrium-psi: 32

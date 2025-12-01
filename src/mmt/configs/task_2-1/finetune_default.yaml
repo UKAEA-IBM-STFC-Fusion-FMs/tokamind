@@ -1,0 +1,14 @@
+# mmt/configs/task2_1/finetune_default.yaml
+#
+# Fine-tuning config for task 2-1.
+# This file should only contain parameters that are *phase-specific*.
+# Everything else (task definition, model shape, embedding strategy)
+# comes from:
+#   - experiment_base.yaml
+#   - embeddings_*.yaml
+
+# PLACEHOLDER
+
+experiment_base: "mmt/configs/task_2-1/experiment_base.yaml"
+embedding_config: "mmt/configs/task_2-1/embeddings_default.yaml"
+phase: "finetune"
