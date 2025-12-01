@@ -47,11 +47,11 @@ def main() -> None:
     args = parse_args_finetune()
     mp.set_start_method("spawn", force=True)
 
-    # Baseline: config_task con override (subset_of_shots, local)
-    cfg_task = build_baseline_task_config(cfg_mmt)
-
     # MMT config (phase + experiment_base + embeddings + baseline path)
     cfg_mmt = load_experiment_config(args.phase_config)
+
+    # Baseline: config_task con override (subset_of_shots, local)
+    cfg_task = build_baseline_task_config(cfg_mmt)
 
     # setting the seed
     set_seed(cfg_mmt.seed, deterministic=True, warn_only=True)
