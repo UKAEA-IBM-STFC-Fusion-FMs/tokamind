@@ -4,7 +4,7 @@ Logging utilities for the multi-modal-transformer project.
 This module provides a small helper to set up a logger that writes to both:
 
   - stdout (so you see logs in the console),
-  - an optional log file under a given output directory (e.g. runs/.../train.log).
+  - an optional log file under a given output directory (e.g. runs/.../out.log).
 
 Typical usage in a script:
 
@@ -34,6 +34,7 @@ def setup_logging(
     level: str = "INFO",
     log_to_file: bool = True,
     filename: str = "out.log",
+    console: bool = True,
 ) -> py_logging.Logger:
     """
     Create (or retrieve) a logger configured for console + optional file logging.
@@ -51,8 +52,9 @@ def setup_logging(
     log_to_file :
         If True, add a FileHandler pointing to `output_dir / filename`.
     filename :
-        Name of the log file (default: "train.log").
-
+        Name of the log file (default: "out.log").
+    console:
+        True to print logs
     Returns
     -------
     logger :
@@ -74,9 +76,10 @@ def setup_logging(
     )
 
     # Console handler
-    console_handler = py_logging.StreamHandler(stream=sys.stdout)
-    console_handler.setFormatter(formatter)
-    logger.addHandler(console_handler)
+    if console:
+        console_handler = py_logging.StreamHandler(stream=sys.stdout)
+        console_handler.setFormatter(formatter)
+        logger.addHandler(console_handler)
 
     # Optional file handler
     if log_to_file:

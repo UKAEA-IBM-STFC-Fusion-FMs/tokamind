@@ -4,6 +4,8 @@
 # These are used for all signals of that role+modality,
 # unless a specific per-signal override is present below.
 
+# possible embeddings "dct3d" or "identity"
+
 embeddings:
   defaults:
     input:

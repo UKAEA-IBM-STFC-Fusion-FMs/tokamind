@@ -13,14 +13,18 @@ data:
   subset_of_shots: 5   # None / null → uses all shots;
 
 preprocessing:
-  drop_nan:
-    min_valid_inputs_actuators: 1
-    min_valid_outputs: 1
 
   chunking:
     chunk_length: 0.005          # 5 ms per chunk (placeholder)
-    max_context_length: 0.20     # 200 ms of history (placeholder)
     stride: null                 # null => uses dt in baseline windows segmenter
+
+  history:
+     max_history_chunks: 0.40     # 200 ms of history (placeholder)
+
+  drop_nan:
+    min_valid_inputs_actuators: 1
+    min_valid_chunks: 1
+    min_valid_outputs: 1
 
   cache:
     enabled: true
