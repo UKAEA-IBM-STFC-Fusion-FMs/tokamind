@@ -266,7 +266,7 @@ if __name__ == "__main__":
     T_prof = 128
     t_prof = np.linspace(0, 2 * np.pi, T_prof, endpoint=False)
 
-    # ogni canale ha una frequenza e fase diversa
+    # each channel has a difference frequencies
     x_profile = []
     for c in range(C):
         freq = 1 + c  # 1x, 2x, 3x, ...

@@ -12,3 +12,26 @@
 experiment_base: "mmt/configs/task_2-1/experiment_base.yaml"
 embedding_config: "mmt/configs/task_2-1/embeddings_default.yaml"
 phase: "finetune"
+
+collate:
+  # INPUTS DROPOUT
+  p_drop_inputs: 0.08
+  p_drop_inputs_overrides:
+    pf_active-solenoid_current: 0.1
+  # OUTPUTS DROPOUT
+  p_drop_outputs: 0.
+  p_drop_outputs_overrides: {}
+  # ACTUATORS DROPOUT
+  p_drop_actuators: 0.
+  p_drop_actuators_overrides: {}
+  # CHUNK DROPOUT (coarse time-based masking)
+  p_drop_inputs_chunks: 0.08
+  p_drop_actuators_chunks: 0.0
+
+
+training:
+  loader:
+    batch_size: 24
+    num_workers: 4
+    shuffle: true
+    drop_last: false

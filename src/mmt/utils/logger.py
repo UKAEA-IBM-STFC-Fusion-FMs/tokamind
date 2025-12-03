@@ -28,7 +28,7 @@ import logging as py_logging
 
 
 def setup_logging(
-    output_dir: Path,
+    run_dir: Path,
     *,
     logger_name: str = "mmt",
     level: str = "INFO",
@@ -83,7 +83,7 @@ def setup_logging(
 
     # Optional file handler
     if log_to_file:
-        output_dir = Path(output_dir)
+        output_dir = Path(run_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         file_path = output_dir / filename
 

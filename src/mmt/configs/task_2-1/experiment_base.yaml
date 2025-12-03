@@ -5,8 +5,7 @@ task: "task_2-1"
 
 baseline_config: "scripts/pipelines/configs/configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"
 
-global:
-  seed: 54
+seed: 54
 
 data:
   local: false         # True = uses local dataset, False = HPC / remote
@@ -14,14 +13,14 @@ data:
 
 preprocessing:
 
-  chunking:
+  chunk:
     chunk_length: 0.005          # 5 ms per chunk (placeholder)
-    stride: null                 # null => uses dt in baseline windows segmenter
+    stride: null                 # null => non-overlapping chunks
 
-  history:
-     max_history_chunks: 0.40     # 200 ms of history (placeholder)
+  trim_chunks:
+     max_chunks: 50     # maximum number of chunks in the history
 
-  drop_nan:
+  drop_na:
     min_valid_inputs_actuators: 1
     min_valid_chunks: 1
     min_valid_outputs: 1

@@ -43,7 +43,7 @@ def build_baseline_task_config(cfg: ExperimentConfig) -> Dict[str, Any]:
         Dictionary representing the baseline task configuration, ready
         to be passed to initialize_datasets_and_metadata_for_task().
     """
-    baseline_cfg_path: Path = cfg.baseline_config_path
+    baseline_cfg_path = Path(cfg.baseline_config_path)
 
     with baseline_cfg_path.open("r") as f:
         config_task = yaml.safe_load(f) or {}

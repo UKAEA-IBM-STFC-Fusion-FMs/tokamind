@@ -1,8 +1,10 @@
-# src/mmt/data/signal_spec.py
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
+
+from mmt.data.embeddings.dct3d_codec import DCT3DCodec
+from mmt.data.embeddings.identity_codec import IdentityCodec
 
 import logging
 
@@ -259,6 +261,38 @@ def build_signal_specs(
         )
 
     return registry
+
+
+def build_codecs(signal_specs: SignalSpecRegistry) -> Dict[int, Any]:
+    """
+    Build one encoder codec instance per signal.
+    This keeps the mapping from *semantic* signal specs
+    (role, modality, encoder name/kwargs) to concrete encoder objects
+    in a single place, so the rest of the pipeline can just look up
+    `signal_id -> codec` without re-instantiating encoders.
+
+    Parameters
+    ----------
+    signal_specs : SignalSpecRegistry
+        Registry describing all signals (roles, modalities, encoders).
+
+    Returns
+    -------
+    codecs : dict
+        Mapping ``signal_id -> codec`` where each codec exposes
+        at least an ``encode(x: np.ndarray) -> np.ndarray(D,)`` method.
+    """
+    codecs: Dict[int, Any] = {}
+    for spec in signal_specs.specs:
+        if spec.encoder_name == "dct3d":
+            codecs[spec.signal_id] = DCT3DCodec(**spec.encoder_kwargs)
+        elif spec.encoder_name == "identity":
+            codecs[spec.signal_id] = IdentityCodec()
+        else:
+            raise ValueError(
+                f"Unknown encoder_name={spec.encoder_name!r} for signal {spec.name!r}"
+            )
+    return codecs
 
 
 # ---------------------------------------------------------------------------

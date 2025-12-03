@@ -1,50 +1,55 @@
-"""
-Configuration loading and merging utilities for the multi-modal-transformer project.
-
-This module is responsible for turning a *phase config* (e.g.
-`mmt/configs/task1_1/finetune_default.yaml`) into a single structured
-`ExperimentConfig` object.
-
-The loader:
-  1. Reads the phase config (finetune / eval / pretrain).
-  2. Reads the corresponding `experiment_base.yaml`.
-  3. Reads the embedding config (e.g. `embeddings_default.yaml`).
-  4. Merges them into a single nested dictionary.
-  5. Resolves the baseline task config path (from the FAIRMAST baseline repo).
-  6. Creates a unique run directory under `runs/` with:
-       - `output_root` and `cache_root` subfolders,
-       - a `config_merged.yaml` file containing the full merged config.
-  7. Returns an `ExperimentConfig` dataclass with convenient access to:
-       - `phase`, `task`, `seed`
-       - `preprocessing`, `model`, `data`, `embeddings`
-       - all important paths (output, cache, baseline config, etc.).
-
-Typical usage from scripts:
-
-    from mmt.utils.config_loader import load_experiment_config
-
-    cfg = load_experiment_config("mmt/configs/task1_1/finetune_default.yaml")
-    # use cfg.model, cfg.preprocessing, cfg.paths["output_root"], ...
-
-This keeps all YAML handling, path resolution and run bookkeeping in one place,
-so the rest of the code can stay simple.
-"""
+# src/mmt/utils/config_loader.py
 
 from __future__ import annotations
+
+import copy
+import yaml
+import datetime
 
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict
 from importlib.resources import files
 
-import datetime
-import yaml
-
 from .paths import get_repo_root
 
 
-# ----------------------------------------------------------------------------------------------------------------------
-# Small helpers
+"""
+Configuration loading utilities for the Multi-Modal Transformer project.
+
+This module loads and merges experiment configuration files in a flexible,
+reproducible, and open-source-friendly way.
+
+Each experiment is defined by three YAML files stored inside the same
+directory:
+
+    • experiment_base.yaml          – global experiment structure
+    • embeddings_default.yaml       – embedding configuration
+    • <phase>_default.yaml          – phase-specific config (finetune/eval/pretrain)
+
+Given a *phase config path*, the loader:
+
+  1. Resolves paths relative to the repository root.
+  2. Loads the phase config YAML (e.g. finetune_default.yaml).
+  3. Loads experiment_base.yaml and the embedding config referenced by the phase.
+  4. Deep-merges dictionaries in the order:
+         experiment_base ← embeddings ← phase_config
+  5. Resolves the FAIRMAST baseline config inside the installed baseline package.
+     (Uses the first path component of `baseline_config` as the package name.)
+  6. Creates a run directory (output_root + cache_root) and stores merged config.
+  7. Returns an ExperimentConfig object providing dynamic attribute access
+     to all merged YAML fields (cfg.preprocessing, cfg.model, cfg.collate, etc.).
+
+This preserves the complete functionality expected by the FAIRMAST baseline
+bridge while allowing new configuration fields to be added without modifying
+the loader.
+"""
+
+
+# ---------------------------------------------------------------------------
+# YAML helpers
+# ---------------------------------------------------------------------------
+
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
     with path.open("r") as f:
@@ -52,217 +57,172 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
 
 
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively merge override into base. Values in override win."""
-    out = dict(base)
-    for k, v in (override or {}).items():
-        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
-            out[k] = _deep_merge(out[k], v)
+    """Recursively merge two dictionaries."""
+    merged = copy.deepcopy(base)
+    for k, v in override.items():
+        if k in merged and isinstance(merged[k], dict) and isinstance(v, dict):
+            merged[k] = _deep_merge(merged[k], v)
         else:
-            out[k] = v
-    return out
+            merged[k] = copy.deepcopy(v)
+    return merged
+
+
+# ---------------------------------------------------------------------------
+# Path resolution
+# ---------------------------------------------------------------------------
 
 
 def _resolve_from_repo_root(path_str: str) -> Path:
     """
-    Resolve a path that is either absolute or relative to the repo root.
+    Resolve a path relative to the repository root.
 
-    Convention:
-      - if `path_str` is absolute, return it as-is;
-      - if it starts with "mmt/", treat it as inside `src/`:
-            repo_root / "src" / "mmt/..."
-      - otherwise, treat it as relative to repo_root directly.
+    Rules:
+      • absolute paths are returned unchanged
+      • paths beginning with "mmt/" map to <repo_root>/src/mmt/...
+      • all other relative paths are resolved under repo_root
     """
     p = Path(path_str)
-
-    # Absolute path → trust the caller
     if p.is_absolute():
         return p
 
-    # Paths like "mmt/configs/..." live under src/mmt in this repo layout
-    if p.parts and p.parts[0] == "mmt":
-        return (get_repo_root() / "src" / p).resolve()
+    repo_root = get_repo_root()
 
-    # Fallback: relative to repo root
-    return (get_repo_root() / p).resolve()
+    # Path inside src/mmt
+    if p.parts and p.parts[0] == "mmt":
+        return (repo_root / "src" / p).resolve()
+
+    return (repo_root / p).resolve()
 
 
 def _resolve_baseline_config(baseline_config_str: str) -> Path:
     """
-    Resolve the baseline config path.
+    Resolve a FAIRMAST baseline config path.
 
-    Convention for now:
+    Convention:
       baseline_config: "scripts/pipelines/configs/.../config_task_2-1.yaml"
 
-    i.e. first component is the installed package name of the baseline ("scripts"),
-    the rest is a relative path inside that package.
+    The first component is the installed baseline package name (e.g. "scripts").
+    The rest is a relative path inside that package.
 
-    If you later change the format, adapt this function only.
+    This mechanism keeps the baseline repository independent of the MMT one.
     """
     parts = Path(baseline_config_str).parts
     if not parts:
         raise ValueError("baseline_config is empty")
 
-    pkg_name = parts[0]         # "scripts"
-    rel_inside_pkg = Path(*parts[1:])  # "pipelines/configs/.../config_task_2-1.yaml"
+    pkg_name = parts[0]  # baseline package
+    rel_inside_pkg = Path(*parts[1:])  # internal path in that package
 
     pkg_root = files(pkg_name)
     return (pkg_root / rel_inside_pkg).resolve()
 
 
-# ----------------------------------------------------------------------------------------------------------------------
-# Main config object
-# ----------------------------------------------------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Dynamic ExperimentConfig
+# ---------------------------------------------------------------------------
 
 
 @dataclass
 class ExperimentConfig:
     """
-    Unified configuration for a single experiment run.
+    Dynamic configuration object.
 
-    This is what the rest of the code should use, instead of reading YAMLs
-    directly and re-implementing path/merge logic everywhere.
+    Every top-level key in the merged YAML dictionary is available
+    as an attribute: cfg.model, cfg.preprocessing, cfg.collate, etc.
+
+    The full merged dictionary is stored in cfg.raw.
     """
 
-    phase: str                    # "finetune", "eval", "pretrain", ...
-    task: str                     # e.g. "task_2-1"
-    seed: int
-    baseline_config_path: Path
-
-    # Sub-configs (typed views over the raw dict)
-    preprocessing: Dict[str, Any]
-    model: Dict[str, Any]
-    data: Dict[str, Any]
-    embeddings: Dict[str, Any]
-
-    # Paths that are important for the run
-    paths: Dict[str, Path]
-
-    # Full merged dict (useful for debugging / saving)
     raw: Dict[str, Any]
 
+    def __getattr__(self, key: str) -> Any:
+        if key in self.raw:
+            return self.raw[key]
+        raise AttributeError(f"'ExperimentConfig' has no attribute '{key}'")
 
-# ----------------------------------------------------------------------------------------------------------------------
-# Public API
-# ----------------------------------------------------------------------------------------------------------------------
+    def get(self, key: str, default=None):
+        return self.raw.get(key, default)
+
+
+# ---------------------------------------------------------------------------
+# Main loader
+# ---------------------------------------------------------------------------
 
 
 def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     """
-    Load and merge:
-      - phase config (e.g. finetune_default.yaml or eval_default.yaml)
-      - experiment_base.yaml
-      - embeddings_default.yaml (or tuned)
-    Then:
-      - resolve the baseline config path,
-      - compute run_id, output_root, cache_root,
-      - save the merged config under output_root/config_merged.yaml.
+    Load and merge experiment configuration files.
 
     Parameters
     ----------
-    phase_config_path:
-        Path to the phase config file, either absolute or relative to the
-        repo root (e.g. "mmt/configs/task1_1/finetune_default.yaml").
+    phase_config_path : str or Path
+        Path to the phase-specific config file, e.g.:
+        mmt/configs/task_2-1/finetune_default.yaml
 
     Returns
     -------
     ExperimentConfig
-        Structured object with all the information needed by the rest
-        of the pipeline.
+        Dynamic configuration object with merged fields and path metadata.
     """
-    # 1) Resolve and load phase config
+
+    # --- Resolve & load phase config ---
     phase_config_path = _resolve_from_repo_root(str(phase_config_path))
+    if not phase_config_path.is_file():
+        raise FileNotFoundError(f"Phase config not found: {phase_config_path}")
+
     phase_cfg = _load_yaml(phase_config_path)
 
-    # Required keys in the phase config
-    exp_base_rel = phase_cfg["experiment_base"]
-    emb_cfg_rel = phase_cfg["embedding_config"]
-    phase = phase_cfg.get("phase", "unknown")
+    # Required keys
+    try:
+        exp_base_rel = phase_cfg["experiment_base"]
+        emb_cfg_rel = phase_cfg["embedding_config"]
+    except KeyError:
+        raise KeyError(
+            "Phase config must contain 'experiment_base' and 'embedding_config'"
+        )
 
-    # 2) Load experiment_base and embeddings configs
+    # --- Load base & embedding YAML ---
     exp_base_path = _resolve_from_repo_root(exp_base_rel)
     emb_cfg_path = _resolve_from_repo_root(emb_cfg_rel)
 
-    exp_cfg = _load_yaml(exp_base_path)
+    base_cfg = _load_yaml(exp_base_path)
     emb_cfg = _load_yaml(emb_cfg_path)
 
-    # 3) Start building the raw merged dict
-    raw: Dict[str, Any] = dict(exp_cfg)  # copy
+    # --- Merge dictionaries ---
+    merged = {}
+    merged = _deep_merge(merged, base_cfg)
+    merged = _deep_merge(merged, emb_cfg)
+    merged = _deep_merge(merged, phase_cfg)
 
-    # Attach embeddings under a clear top-level key
-    raw["embeddings"] = emb_cfg.get("embeddings", {})
+    # --- Compute run paths ---
+    repo_root = get_repo_root()
+    runs_root = repo_root / "runs"
 
-    # Attach phase
-    raw["phase"] = phase
+    task = merged.get("task", "unknown_task")
+    phase = merged.get("phase", "unknown_phase")
 
-    # Merge extra keys from phase config (training, evaluation, run, data overrides, etc.)
-    for key, value in phase_cfg.items():
-        if key in {"experiment_base", "embedding_config", "phase"}:
-            continue
-        if key in raw and isinstance(raw[key], dict) and isinstance(value, dict):
-            raw[key] = _deep_merge(raw[key], value)
-        else:
-            raw[key] = value
-
-    # 4) Resolve baseline config path
-    baseline_config_str = raw["baseline_config"]
-    baseline_cfg_path = _resolve_baseline_config(baseline_config_str)
-
-    # 5) Compute run_id, output_root and cache_root
-    task = raw["task"]
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     run_id = f"{task}__{phase}__{timestamp}"
 
-    repo_root = get_repo_root()
-    runs_root = repo_root / "runs"
-    output_root = runs_root / run_id
-    cache_root = output_root / "cache"
+    run_dir = runs_root / run_id
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-    output_root.mkdir(parents=True, exist_ok=True)
-
-    paths: Dict[str, Path] = {
-        "repo_root": repo_root,
-        "runs_root": runs_root,
-        "output_root": output_root,
-        "cache_root": cache_root,
-        "phase_config": phase_config_path,
-        "experiment_base": exp_base_path,
-        "embedding_config": emb_cfg_path,
-        "baseline_config": baseline_cfg_path,
+    merged["paths"] = {
+        "repo_root": str(repo_root),
+        "runs_root": str(runs_root),
+        "run_dir": str(run_dir),
     }
 
-    # Inject paths into raw (useful when saving / inspecting)
-    raw.setdefault("paths", {})
-    raw["paths"]["run_id"] = run_id
-    raw["paths"]["output_root"] = str(output_root)
-    raw["paths"]["phase_config"] = str(phase_config_path)
-    raw["paths"]["experiment_base"] = str(exp_base_path)
-    raw["paths"]["embedding_config"] = str(emb_cfg_path)
-    raw["paths"]["baseline_config"] = str(baseline_cfg_path)
+    # --- Resolve baseline config exactly as expected by baseline bridge ---
+    if "baseline_config" in merged:
+        merged["baseline_config_path"] = str(
+            _resolve_baseline_config(merged["baseline_config"])
+        )
 
-    # 6) Save merged config for reproducibility
-    merged_cfg_path = output_root / "config_merged.yaml"
-    with merged_cfg_path.open("w") as f:
-        yaml.safe_dump(raw, f, sort_keys=False)
-    paths["merged_config"] = merged_cfg_path
+    # --- Save merged config in run directory ---
+    merged_yaml_out = run_dir / "config_merged.yaml"
+    with merged_yaml_out.open("w") as f:
+        yaml.safe_dump(merged, f, sort_keys=False)
 
-    # 7) Extract sub-configs and seed
-    global_cfg = raw.get("global", {})
-    preprocessing = raw.get("preprocessing", {})
-    model = raw.get("model", {})
-    data = raw.get("data", {})
-    embeddings = raw.get("embeddings", {})
-
-    seed = int(global_cfg.get("seed", 0))
-
-    return ExperimentConfig(
-        phase=phase,
-        task=task,
-        seed=seed,
-        baseline_config_path=baseline_cfg_path,
-        preprocessing=preprocessing,
-        model=model,
-        data=data,
-        embeddings=embeddings,
-        paths=paths,
-        raw=raw,
-    )
+    # --- Return dynamic config ---
+    return ExperimentConfig(raw=merged)

@@ -8,7 +8,7 @@ import logging
 logger = logging.getLogger("mmt.Chunking")
 
 
-class ChunkingTransform:
+class ChunkWindowsTransform:
     """
     Chunk input and actuator signals from a single baseline window into fixed-length segments.
 
@@ -39,14 +39,15 @@ class ChunkingTransform:
             {
                 "role": "input" | "actuator",
                 "chunk_index_in_window": int,
-                "chunk_index_global": int,
-                "chunk_start_time": float,  # seconds
-                "signals": { var_name: np.ndarray[chunk_size, ...], ... },
+                "chunk_index_global": int,      # == chunk_start_sample (global sample index)
+                "chunk_start_sample": int,      # global sample index on the shot timeline
+                "chunk_start_time": float,      # seconds
+                "chunk_size_samples": int,      # number of time samples in this chunk
+                "signals": { var_name: np.ndarray[..., T_chunk], ... },
             }
 
     NOTE: shot_id and window_index are added OUTSIDE the transform by
-          TaskModelTransformWrapper in its final yield, so they are not
-          available here.
+          TaskModelTransformWrapper in its final yield.
     """
 
     def __init__(
@@ -72,8 +73,8 @@ class ChunkingTransform:
 
         Convention: **time is the last axis**.
           - 1D: (T,)
-          - 2D: (C, T)      # C = channels, T = time
-          - 3D: (H, W, T)   # images/videos with time last
+          - 2D: (C, T)
+          - 3D: (H, W, T)
         """
         if not group:
             return None
@@ -86,21 +87,26 @@ class ChunkingTransform:
                 continue
             arr = np.asarray(vals)
             if arr.ndim >= 1:
-                return arr.shape[-1]  # <-- time dimension
+                return arr.shape[-1]  # time dimension
 
         return None
 
     @staticmethod
     def _slice_time(vals: Any, start: int, end: int) -> Optional[np.ndarray]:
         """
-        Slice vals[start:end] on the first axis, if possible.
+        Slice along the **last** axis (time) between [start:end].
         """
         if vals is None:
             return None
         arr = np.asarray(vals)
-        if arr.shape[0] < end:
+        T = arr.shape[-1]
+        if T < end:
             return None
-        return arr[start:end]
+
+        # Build a slice that keeps all leading dims, slices only last dim
+        idx = [slice(None)] * arr.ndim
+        idx[-1] = slice(start, end)
+        return arr[tuple(idx)]
 
     def _build_chunks_for_group(
         self,
@@ -114,7 +120,7 @@ class ChunkingTransform:
         """
         Chunk all signals in a given group ("input" or "actuator").
 
-        index k along the time axis corresponds to absolute time:
+        Index k along the time axis corresponds to absolute time:
             t_k = t0 + k * dt
         """
         if not group:
@@ -145,17 +151,20 @@ class ChunkingTransform:
             if signals_chunk:
                 # Absolute start time for this chunk
                 chunk_start_time = t0 + start * dt
-                # Global index along the shot timeline
-                chunk_index_global = int(
-                    np.floor(chunk_start_time / self.chunk_length_sec)
-                )
+
+                # Global sample index on the shot timeline:
+                # map time → sample index at resolution dt
+                chunk_start_sample = int(round(chunk_start_time / dt))
 
                 chunks.append(
                     {
                         "role": role,
                         "chunk_index_in_window": chunk_index_in_window,
-                        "chunk_index_global": chunk_index_global,
+                        # Keep name for back-compat, but semantics are now "global sample index"
+                        "chunk_index_global": chunk_start_sample,
+                        "chunk_start_sample": chunk_start_sample,
                         "chunk_start_time": chunk_start_time,
+                        "chunk_size_samples": int(chunk_size_samples),
                         "signals": signals_chunk,
                     }
                 )
@@ -175,7 +184,6 @@ class ChunkingTransform:
         """
         # Basic sanity checks for required metadata
         if "t_cut" not in window or "input_length" not in window:
-            # If metadata is missing, leave the window unchanged.
             logger.debug(
                 "[ChunkingTransform] window missing 't_cut' or 'input_length'; skipping chunking."
             )
@@ -189,6 +197,12 @@ class ChunkingTransform:
 
         # Compute dt from INPUT only (baseline guarantees fixed input_length)
         T_input = self._time_axis_length(input_group)
+        if T_input is None or T_input <= 0:
+            logger.debug(
+                "[ChunkingTransform] could not infer input T; skipping chunking."
+            )
+            return window
+
         dt = input_length / float(T_input)
 
         # Convert chunk_length / stride from seconds → samples
@@ -232,10 +246,20 @@ class ChunkingTransform:
             f"{len(chunks_input)} input chunks, {len(chunks_act)} actuator chunks"
         )
 
+        for ch in chunks_input + chunks_act:
+            logger.debug(
+                "[Chunking] t_cut=%.6f, role=%s, chunk_sample=%d, t_start=%.6f",
+                t_cut,
+                ch["role"],
+                ch["chunk_start_sample"],
+                ch["chunk_start_time"],
+            )
+
         # Attach chunks; keep original input/actuator/output untouched for now
         window = dict(window)  # shallow copy to avoid side effects if needed
         window["chunks"] = {
             "input": chunks_input,
             "actuator": chunks_act,
         }
+
         return window

@@ -6,7 +6,7 @@ import argparse
 from scripts.pipelines.utils.utils import (
     ComposeTransforms,
     initialize_model_datasets,
-    # initialize_dataloaders,
+    initialize_dataloaders,
 )
 from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
@@ -18,18 +18,23 @@ from mmt.data.baseline_bridge import (
 
 from mmt.utils.config_loader import load_experiment_config
 from mmt.utils.seed import set_seed
-from mmt.utils.logging import setup_logging
+from mmt.utils.logger import setup_logging
 
 from mmt.data.embeddings.signal_spec import (
     build_signal_role_modality_map,
     build_signal_specs,
+    build_codecs,
 )
 
-from mmt.data.transforms.chunking import ChunkingTransform
+from mmt.data.transforms.chunk_windows import ChunkWindowsTransform
 from mmt.data.transforms.drop_na import DropNaChunksTransform
+from mmt.data.transforms.trim_chunks import TrimChunksTransform
+from mmt.data.transforms.embed_chunks import EmbedChunksTransform
+from mmt.data.transforms.build_tokens import BuildTokensTransform
+from mmt.data.collate import MMTCollate
 
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def parse_args_finetune() -> argparse.Namespace:
@@ -53,13 +58,15 @@ def parse_args_finetune() -> argparse.Namespace:
 
 
 def main() -> None:
-    args = parse_args_finetune()
     mp.set_start_method("spawn", force=True)
 
     # MMT config (phase + experiment_base + embeddings + baseline path)
+    args = parse_args_finetune()
     cfg_mmt = load_experiment_config(args.phase_config)
-    cfg_chunks = cfg_mmt.preprocessing["chunking"]
-    cfg_drop_nan = cfg_mmt.preprocessing["drop_nan"]
+    cfg_chunks = cfg_mmt.preprocessing["chunk"]
+    cfg_trim = cfg_mmt.preprocessing["trim_chunks"]
+    cfg_drop_nan = cfg_mmt.preprocessing["drop_na"]
+    cfg_loader = cfg_mmt.training["loader"]
 
     # Baseline: config_task con override (subset_of_shots, local)
     cfg_task = build_baseline_task_config(cfg_mmt)
@@ -69,12 +76,13 @@ def main() -> None:
 
     # setting the logger
     logger = setup_logging(
-        cfg_mmt.paths["output_root"],
+        cfg_mmt.paths["run_dir"],
         logger_name="mmt",
         filename="finetune.log",
         console=True,
     )
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
+    logger.info(f"task = {cfg_mmt.task} | phase = {cfg_mmt.phase}")
 
     # Baseline: datasets + metadata
     datasets_train_val_test, dict_metadata = initialize_datasets_and_metadata_for_task(
@@ -82,13 +90,14 @@ def main() -> None:
     )
 
     # Build signals_by_role from baseline config + metadata and signal specs
-    signals_by_role = build_signal_role_modality_map(cfg_task, dict_metadata)
-    signal_specs = build_signal_specs(cfg_mmt.embeddings, signals_by_role)
+    signals_role_modality_map = build_signal_role_modality_map(cfg_task, dict_metadata)
+    signal_specs = build_signal_specs(cfg_mmt.embeddings, signals_role_modality_map)
+    codecs = build_codecs(signal_specs)
 
     # Model-specific transform (per ora: identity chain)
     model_specific_transform = ComposeTransforms(
         [
-            ChunkingTransform(
+            ChunkWindowsTransform(
                 chunk_length_sec=cfg_chunks["chunk_length"],
                 stride_sec=cfg_chunks["stride"],
             ),
@@ -96,6 +105,22 @@ def main() -> None:
                 min_valid_inputs_actuators=cfg_drop_nan["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_drop_nan["min_valid_chunks"],
                 min_valid_outputs=cfg_drop_nan["min_valid_outputs"],
+            ),
+            TrimChunksTransform(
+                chunk_length_sec=cfg_chunks["chunk_length"],
+                delta=cfg_task["task_window_segmenter"]["delta"],
+                output_length=cfg_task["task_window_segmenter"]["output_length"],
+                max_chunks=cfg_trim["max_chunks"],
+            ),
+            EmbedChunksTransform(
+                signal_specs=signal_specs,
+                codecs=codecs,
+            ),
+            BuildTokensTransform(
+                chunk_length_sec=cfg_chunks["chunk_length"],
+                delta=cfg_task["task_window_segmenter"]["delta"],
+                output_length=cfg_task["task_window_segmenter"]["output_length"],
+                signal_specs=signal_specs,
             ),
         ]
     )
@@ -106,21 +131,20 @@ def main() -> None:
         dict_metadata,
         cfg_task,
         model_specific_transform=model_specific_transform,
-        verbose=False,
+        verbose=True,
     )
 
-    # Dataloaders (quando avremo collate + parametri nel config)
-    # placeholder:
-    # collate_fn = collate_finetune_mmt(cfg, dict_metadata)
-    # dataloaders_mmt = initialize_dataloaders(
-    #     datasets_mmt,
-    #     collate_fn,
-    #     batch_size=cfg.training["batch_size"],
-    #     num_workers=cfg.training["num_workers"],
-    #     shuffle=True,
-    #     drop_last=False,
-    #     seed=cfg.seed,
-    # )
+    # Dataloaders
+    collate_fn = MMTCollate(cfg_mmt.collate)
+    dataloaders_mmt = initialize_dataloaders(
+        datasets_mmt,
+        collate_fn,
+        batch_size=cfg_loader["batch_size"],
+        num_workers=cfg_loader["num_workers"],
+        shuffle=cfg_loader["shuffle"],
+        drop_last=cfg_loader["drop_last"],
+        seed=cfg_mmt.seed,
+    )
 
     # small debug printing
     print("\n[Debug] Shots per split (TaskModelTransformWrapper):")
@@ -136,20 +160,33 @@ def main() -> None:
     gen = ds_train[3]  # generator over windows for shot 0
 
     for i, win in enumerate(gen):
-        chunks = win.get("chunks", {})
-        # logger.info(
-        #     f"[Test] Window {i}: after DropNa → signals: {list(win['chunks']['input'][0]['signals'].keys())}"
-        # )
-        # n_input = len(chunks.get("input", []))
-        # n_act = len(chunks.get("actuator", []))
-        # t_cut = win.get("t_cut", None)
-        #
-        # print(
-        #     f"  window {i:02d}: t_cut={t_cut:.6f} → "
-        #     f"{n_input} input chunks, {n_act} actuator chunks"
-        # )
-        if i >= 10:
+        if i >= 100:
             break
+
+    # ------------------------------------------------------------------
+    # Debug: inspect one batch from the MMT train dataloader
+    # ------------------------------------------------------------------
+    train_loader = dataloaders_mmt["train"]
+
+    print("\n[Debug] Fetching one batch from MMT train dataloader...")
+    batch = next(iter(train_loader))
+
+    print("[Debug] Batch keys and shapes:")
+    for key, value in batch.items():
+        if hasattr(value, "shape"):
+            dtype = getattr(value, "dtype", None)
+            print(f"  {key}: shape={tuple(value.shape)}, dtype={dtype}")
+        else:
+            print(f"  {key}: type={type(value)} -> {value}")
+
+    # If masks are present, print some basic stats to see dropout/masking
+    for mask_name in ("padding_mask", "input_mask", "actuator_mask", "output_mask"):
+        if mask_name in batch:
+            mask = batch[mask_name]
+            if hasattr(mask, "numel"):
+                total = mask.numel()
+                kept = int(mask.sum().item())
+                print(f"  {mask_name}: kept {kept}/{total} tokens ({kept / total:.1%})")
 
 
 if __name__ == "__main__":
