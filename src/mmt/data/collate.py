@@ -37,6 +37,9 @@ class MMTCollate:
         "actuator_mask"  : (B, L)
         "outputs_emb"    : dict[signal_id -> list[np.ndarray]]
         "outputs_mask"   : dict[signal_id -> (B,)]
+
+      If cfg_collate["keep_output_native"] == True, also:
+        "output_native"  : dict[signal_id -> np.ndarray of shape (B, *orig_shape)]
     """
 
     # ------------------------------------------------------------------ #
@@ -60,8 +63,12 @@ class MMTCollate:
           # CHUNK DROPOUT (coarse time-based masking)
           p_drop_inputs_chunks: 0.08
           p_drop_actuators_chunks: 0.0
+
+          # EVAL-ONLY: include native outputs (Y_native)
+          # keep_output_native: false
         """
         self.cfg = cfg_collate
+        self.keep_output_native = bool(cfg_collate.get("keep_output_native", False))
 
         # Override dicts (keyed by *names* now)
         self.drop_inputs_overrides = cfg_collate.get("p_drop_inputs_overrides", {})
@@ -106,13 +113,19 @@ class MMTCollate:
             # Otherwise assume it's an iterable of windows (list/generator)
             try:
                 for w in item:
-                    if w is not None:
-                        flat_windows.append(w)
+                    if w is None:
+                        continue
+                    if not isinstance(w, dict):
+                        raise TypeError(
+                            "MMTCollate expected inner elements to be window dicts, "
+                            f"got {type(w)}"
+                        )
+                    flat_windows.append(w)
             except TypeError:
                 raise TypeError(
-                    "MMTCollate expected each batch element to be either "
-                    "a window dict or an iterable of window dicts, "
-                    f"got type {type(item)}"
+                    "MMTCollate expected each batch element to be an iterable "
+                    "of window dicts (as returned by TaskModelTransformWrapper), "
+                    f"got {type(item)}"
                 )
 
         B = len(flat_windows)
@@ -286,8 +299,56 @@ class MMTCollate:
             outputs_mask_batch[sig_id] = sig_mask
 
         # --------------------------------------------------------------- #
-        # 8. Final batch
+        # 8. Optionally collate native outputs (Y_native) for evaluation
         # --------------------------------------------------------------- #
+        output_native_batch: Dict[int, np.ndarray] = {}
+        if self.keep_output_native:
+            # For each target signal, gather per-window native outputs.
+            for sig_id in sorted(all_target_ids):
+                out_name = id_to_output_name.get(sig_id, str(sig_id))
+                per_sig_vals: List[np.ndarray] = []
+
+                for i in range(B):
+                    w = flat_windows[i]
+                    out_group = w.get("output") or {}
+                    out_info = out_group.get(out_name)
+
+                    val = None
+                    if isinstance(out_info, dict):
+                        val = out_info.get("values", None)
+                    elif out_info is not None:
+                        # Allow shorthand "name: values"
+                        val = out_info
+
+                    if val is None:
+                        # If the native value is missing (e.g. dropped by DropNa),
+                        # create a zero array with the correct shape so that
+                        # downstream code can use outputs_mask to ignore it.
+                        shape = None
+                        shapes_dict = tgt_shapes_dicts[i]
+                        if shapes_dict and sig_id in shapes_dict:
+                            shape = tuple(shapes_dict[sig_id])
+                        else:
+                            # Fall back to any other window that has this signal.
+                            for sd in tgt_shapes_dicts:
+                                if sig_id in sd:
+                                    shape = tuple(sd[sig_id])
+                                    break
+
+                        if shape is None:
+                            raise ValueError(
+                                f"Missing shape for output signal_id={sig_id} "
+                                f"(needed to build output_native_batch)"
+                            )
+
+                        arr = np.zeros(shape, dtype=np.float32)
+                    else:
+                        arr = np.asarray(val, dtype=np.float32)
+
+                    per_sig_vals.append(arr)
+
+                output_native_batch[sig_id] = np.stack(per_sig_vals, axis=0)
+
         batch_out = {
             "emb": emb_batch,
             "pos": pos_batch,
@@ -301,5 +362,8 @@ class MMTCollate:
             "outputs_emb": outputs_emb_batch,
             "outputs_mask": outputs_mask_batch,
         }
+
+        if self.keep_output_native:
+            batch_out["output_native"] = output_native_batch
 
         return batch_out

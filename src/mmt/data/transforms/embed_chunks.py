@@ -36,7 +36,8 @@ class EmbedChunksTransform:
           * embeds each non-masked output signal using the same
             SignalSpec + codec machinery,
           * stores embeddings and original shapes in the window dict,
-          * clears output["values"] to save memory.
+          * clears output["values"] to save memory (unless
+            ``keep_output_values=True``).
 
     It does **not**:
       - flatten chunks into a model-ready sequence,
@@ -59,14 +60,17 @@ class EmbedChunksTransform:
     Each chunk_dict has:
 
         {
-          "role": "input" | "actuator",
-          "chunk_index_in_window": int,
-          "chunk_start_sample": int,      # absolute sample index
-          "chunk_size_samples": int,
-          "chunk_start_time": float,
-          "signals": {
-              var_name: np.ndarray | None,  # chunk time axis is the last axis
-          },
+            "role": "input" | "actuator",
+            "chunk_index_in_window": int,
+            "chunk_start_sample": int,         # absolute sample index on shot
+            "chunk_size_samples": int | None,  # if None, infer from values
+            "signals": {
+                "<signal_name>": np.ndarray | None,
+                ...
+            },
+            # will be filled:
+            "embeddings":  { signal_id: np.ndarray(D,) },
+            "orig_shapes": { signal_id: tuple(...)     },
         }
 
     Output
@@ -82,7 +86,7 @@ class EmbedChunksTransform:
         window["embedded_output"]        = { signal_id: np.ndarray(D,) }
         window["embedded_output_shapes"] = { signal_id: tuple(...) }
 
-        # raw output values cleared:
+        # raw output values cleared when ``keep_output_native=False``:
         window["output"][name]["values"] = None
 
     Parameters
@@ -94,15 +98,22 @@ class EmbedChunksTransform:
         Mapping from signal_id to an encoder object that exposes:
             encode(x: np.ndarray) -> np.ndarray(D,)
         For example: DCT3DCodec, FPCAEncoder, IdentityCodec.
+
+    keep_output_native : bool, optional
+        If True, do **not** clear ``window['output'][name]['values']`` after
+        embedding outputs. This is intended for evaluation, where we want
+        to retain the original Y values (Y_native). Defaults to False.
     """
 
     def __init__(
         self,
         signal_specs: SignalSpecRegistry,
         codecs: Mapping[int, Any],
+        keep_output_native: bool = False,
     ) -> None:
         self.signal_specs = signal_specs
         self.codecs = dict(codecs)
+        self.keep_output_native = bool(keep_output_native)
 
         # Cache:
         #   (shot_id, role, signal_id, chunk_start_sample, chunk_size_samples) -> embedding (D,)
@@ -238,8 +249,11 @@ class EmbedChunksTransform:
             n_out_signals += 1
             n_out_emb_new += 1
 
-            # Drop raw output values to save memory
-            info["values"] = None
+            # Drop raw output values to save memory unless we explicitly
+            # want to keep them (e.g., for evaluation where we need
+            # Y_native).
+            if not self.keep_output_native:
+                info["values"] = None
 
         if emb_out:
             window["embedded_output"] = emb_out

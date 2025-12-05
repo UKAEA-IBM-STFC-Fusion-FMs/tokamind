@@ -34,7 +34,7 @@ from mmt.data.transforms.build_tokens import BuildTokensTransform
 from mmt.data.collate import MMTCollate
 
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 
 def parse_args_finetune() -> argparse.Namespace:
@@ -115,6 +115,7 @@ def main() -> None:
             EmbedChunksTransform(
                 signal_specs=signal_specs,
                 codecs=codecs,
+                keep_output_native=False,  # TODO: set true for eval
             ),
             BuildTokensTransform(
                 chunk_length_sec=cfg_chunks["chunk_length"],
@@ -135,7 +136,11 @@ def main() -> None:
     )
 
     # Dataloaders
-    collate_fn = MMTCollate(cfg_mmt.collate)
+    cfg_collate = {
+        **cfg_mmt.collate,
+        "keep_output_native": False,
+    }  # TODO: set true for eval
+    collate_fn = MMTCollate(cfg_collate)
     dataloaders_mmt = initialize_dataloaders(
         datasets_mmt,
         collate_fn,
@@ -179,14 +184,14 @@ def main() -> None:
         else:
             print(f"  {key}: type={type(value)} -> {value}")
 
-    # If masks are present, print some basic stats to see dropout/masking
-    for mask_name in ("padding_mask", "input_mask", "actuator_mask", "output_mask"):
-        if mask_name in batch:
-            mask = batch[mask_name]
-            if hasattr(mask, "numel"):
-                total = mask.numel()
-                kept = int(mask.sum().item())
-                print(f"  {mask_name}: kept {kept}/{total} tokens ({kept / total:.1%})")
+    # # If masks are present, print some basic stats to see dropout/masking
+    # for mask_name in ("padding_mask", "input_mask", "actuator_mask", "output_mask"):
+    #     if mask_name in batch:
+    #         mask = batch[mask_name]
+    #         if hasattr(mask, "numel"):
+    #             total = mask.numel()
+    #             kept = int(mask.sum().item())
+    #             print(f"  {mask_name}: kept {kept}/{total} tokens ({kept / total:.1%})")
 
 
 if __name__ == "__main__":

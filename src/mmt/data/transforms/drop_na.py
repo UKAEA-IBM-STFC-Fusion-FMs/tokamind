@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Tuple
 from collections import defaultdict
 import logging
 
@@ -98,38 +98,6 @@ class DropNaChunksTransform:
          → the window is DROPPED (return None).
        - Otherwise, the window is kept and returned, with some signals masked
          to None at chunk or output level.
-
-    Notes
-    -----
-    - This transform does **not** change the time structure of outputs; it only
-      masks entire output variables at window level.
-    - Missing signals (values=None) do not cause a drop by themselves, they
-      simply reduce the counts used in the thresholds.
-    - Intended pipeline:
-
-        baseline window
-          → ChunkingTransform
-          → DropNaChunksTransform
-          → embedding / caching
-          → collate
-          → model
-
-    Parameters
-    ----------
-    min_valid_inputs_actuators : int
-        Minimum number of distinct valid (role, signal_name) pairs across
-        **input + actuator** required to keep the window. If fewer are valid,
-        the window is dropped.
-
-    min_valid_chunks : int
-        Minimum number of valid chunks required **per signal** (within a role)
-        for that signal to be considered usable in this window. If a signal
-        appears in fewer than `min_valid_chunks` valid chunks, it is masked
-        (set to None) in *all* chunks.
-
-    min_valid_outputs : int
-        Minimum number of valid output signals (with finite `values`) required
-        to keep the window. If fewer are valid, the window is dropped.
     """
 
     def __init__(
@@ -175,146 +143,132 @@ class DropNaChunksTransform:
         return False, arr
 
     # ------------------------------------------------------------------ main API
-    def __call__(self, list_windows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    def __call__(self, window: Dict[str, Any] | None) -> Dict[str, Any] | None:
         """
-        Apply chunk-level NaN masking and window dropping to a list of windows.
+        Apply chunk-level NaN masking and window dropping to a single window.
+
+        Parameters
+        ----------
+        window : Dict[str, Any] | None
+            Window dict as produced by ChunkingTransform. If None is passed,
+            returns None directly (for compatibility with composed transforms).
         """
-        if not isinstance(list_windows, list) or not list_windows:
-            return list_windows
+        if window is None:
+            return None
 
-        kept: List[Dict[str, Any]] = []
-        total = len(list_windows)
-        dropped = 0
+        shot_id = window.get("shot_id", None)
+        w_idx = window.get("window_index", None)
 
-        for w in list_windows:
-            shot_id = w.get("shot_id", None)
-            w_idx = w.get("window_index", None)
-            chunks_dict = w.get("chunks") or {}
-            input_chunks = chunks_dict.get("input") or []
-            act_chunks = chunks_dict.get("actuator") or []
-            output_group = w.get("output") or {}
+        chunks_dict = window.get("chunks") or {}
+        input_chunks = chunks_dict.get("input") or []
+        act_chunks = chunks_dict.get("actuator") or []
+        output_group = window.get("output") or {}
 
-            # ------------------------------------------------------------------
-            # 1) First pass: per-chunk masking + count valid chunks per signal
-            # ------------------------------------------------------------------
-            valid_chunks_by_sig = {
-                "input": defaultdict(int),
-                "actuator": defaultdict(int),
-            }
+        # ------------------------------------------------------------------
+        # 1) First pass: per-chunk masking + count valid chunks per signal
+        # ------------------------------------------------------------------
+        valid_chunks_by_sig = {
+            "input": defaultdict(int),
+            "actuator": defaultdict(int),
+        }
 
-            def _process_role_chunks(role: str, chunks: List[Dict[str, Any]]):
-                for ch in chunks:
-                    sigs = ch.get("signals") or {}
-                    for name, val in list(sigs.items()):
-                        mask, new_val = self._mask_if_bad(val)
-                        if mask:
-                            sigs[name] = None
-                        else:
-                            sigs[name] = new_val
-                            valid_chunks_by_sig[role][name] += 1
-
-            _process_role_chunks("input", input_chunks)
-            _process_role_chunks("actuator", act_chunks)
-
-            # ------------------------------------------------------------------
-            # 2) Enforce min_valid_chunks per signal
-            # ------------------------------------------------------------------
-            def _mask_signals_with_too_few_chunks(
-                role: str, chunks: List[Dict[str, Any]]
-            ):
-                if not chunks:
-                    return
-                all_names = set()
-                for ch in chunks:
-                    sigs = ch.get("signals") or {}
-                    all_names.update(sigs.keys())
-
-                for name in all_names:
-                    n_chunks = valid_chunks_by_sig[role].get(name, 0)
-                    if n_chunks < self.min_valid_chunks:
-                        for ch in chunks:
-                            sigs = ch.get("signals") or {}
-                            if name in sigs:
-                                sigs[name] = None
-
-            _mask_signals_with_too_few_chunks("input", input_chunks)
-            _mask_signals_with_too_few_chunks("actuator", act_chunks)
-
-            # ------------------------------------------------------------------
-            # 3) Count how many input+actuator signals remain (window-level)
-            # ------------------------------------------------------------------
-            valid_x_signals = set()  # (role, name)
-
-            def _collect_valid_signals(role: str, chunks: List[Dict[str, Any]]):
-                for ch in chunks:
-                    sigs = ch.get("signals") or {}
-                    for name, val in sigs.items():
-                        if val is not None:
-                            valid_x_signals.add((role, name))
-
-            _collect_valid_signals("input", input_chunks)
-            _collect_valid_signals("actuator", act_chunks)
-
-            n_inputs_actuators = len(valid_x_signals)
-
-            # ------------------------------------------------------------------
-            # 4) Outputs: window-level masking and counting
-            # ------------------------------------------------------------------
-            n_outputs_valid = 0
-            for name, entry in (output_group or {}).items():
-                if not isinstance(entry, dict):
-                    values = entry
-                    mask, new_val = self._mask_if_bad(values)
+        def _process_role_chunks(role: str, chunks) -> None:
+            for ch in chunks:
+                sigs = ch.get("signals") or {}
+                for name, val in list(sigs.items()):
+                    mask, new_val = self._mask_if_bad(val)
                     if mask:
-                        output_group[name] = {"values": None}
+                        sigs[name] = None
                     else:
-                        output_group[name] = {"values": new_val}
-                        n_outputs_valid += 1
-                    continue
+                        sigs[name] = new_val
+                        valid_chunks_by_sig[role][name] += 1
 
-                values = entry.get("values", None)
+        _process_role_chunks("input", input_chunks)
+        _process_role_chunks("actuator", act_chunks)
+
+        # ------------------------------------------------------------------
+        # 2) Enforce min_valid_chunks per signal
+        # ------------------------------------------------------------------
+        def _mask_signals_with_too_few_chunks(role: str, chunks) -> None:
+            if not chunks:
+                return
+            all_names = set()
+            for ch in chunks:
+                sigs = ch.get("signals") or {}
+                all_names.update(sigs.keys())
+
+            for name in all_names:
+                n_chunks = valid_chunks_by_sig[role].get(name, 0)
+                if n_chunks < self.min_valid_chunks:
+                    for ch in chunks:
+                        sigs = ch.get("signals") or {}
+                        if name in sigs:
+                            sigs[name] = None
+
+        _mask_signals_with_too_few_chunks("input", input_chunks)
+        _mask_signals_with_too_few_chunks("actuator", act_chunks)
+
+        # ------------------------------------------------------------------
+        # 3) Count how many input+actuator signals remain (window-level)
+        # ------------------------------------------------------------------
+        valid_x_signals = set()  # (role, name)
+
+        def _collect_valid_signals(role: str, chunks) -> None:
+            for ch in chunks:
+                sigs = ch.get("signals") or {}
+                for name, val in sigs.items():
+                    if val is not None:
+                        valid_x_signals.add((role, name))
+
+        _collect_valid_signals("input", input_chunks)
+        _collect_valid_signals("actuator", act_chunks)
+
+        n_inputs_actuators = len(valid_x_signals)
+
+        # ------------------------------------------------------------------
+        # 4) Outputs: window-level masking and counting
+        # ------------------------------------------------------------------
+        n_outputs_valid = 0
+        for name, entry in (output_group or {}).items():
+            if not isinstance(entry, dict):
+                # Allow shorthand "name: values"
+                values = entry
                 mask, new_val = self._mask_if_bad(values)
                 if mask:
-                    entry["values"] = None
+                    output_group[name] = {"values": None}
                 else:
-                    entry["values"] = new_val
+                    output_group[name] = {"values": new_val}
                     n_outputs_valid += 1
+                continue
 
-            # ------------------------------------------------------------------
-            # 5) Drop / keep decision for this window
-            # ------------------------------------------------------------------
-            keep = True
-            if n_inputs_actuators < self.min_valid_inputs_actuators:
-                keep = False
-            if n_outputs_valid < self.min_valid_outputs:
-                keep = False
-
-            logger.debug(
-                "[DropNaChunks] window %s (shot %s): "
-                "valid_inputs_actuators=%d, valid_outputs=%d → %s",
-                w_idx,
-                shot_id,
-                n_inputs_actuators,
-                n_outputs_valid,
-                "KEEP" if keep else "DROP",
-            )
-
-            if keep:
-                kept.append(w)
+            values = entry.get("values", None)
+            mask, new_val = self._mask_if_bad(values)
+            if mask:
+                entry["values"] = None
             else:
-                dropped += 1
+                entry["values"] = new_val
+                n_outputs_valid += 1
 
-        logger.info(
-            "[DropNaChunks] processed %d windows → kept %d, dropped %d "
-            "(min_valid_inputs_actuators=%d, "
-            "min_valid_chunks=%d, "
-            "min_valid_outputs=%d)",
-            total,
-            len(kept),
-            dropped,
-            self.min_valid_inputs_actuators,
-            self.min_valid_chunks,
-            self.min_valid_outputs,
+        # ------------------------------------------------------------------
+        # 5) Drop / keep decision for this window
+        # ------------------------------------------------------------------
+        keep = True
+        if n_inputs_actuators < self.min_valid_inputs_actuators:
+            keep = False
+        if n_outputs_valid < self.min_valid_outputs:
+            keep = False
+
+        logger.debug(
+            "[DropNaChunks] window %s (shot %s): "
+            "valid_inputs_actuators=%d, valid_outputs=%d → %s",
+            w_idx,
+            shot_id,
+            n_inputs_actuators,
+            n_outputs_valid,
+            "KEEP" if keep else "DROP",
         )
 
-        return kept
+        if not keep:
+            return None
+
+        return window
