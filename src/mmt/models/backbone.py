@@ -4,11 +4,11 @@ import torch
 import torch.nn as nn
 
 
-class Trunk(nn.Module):
+class Backbone(nn.Module):
     """
     Thin wrapper around nn.TransformerEncoder.
 
-    Keeps the trunk as its own module so we can easily freeze / save it.
+    Keeps the Backbone as its own module so we can easily freeze / save it.
     """
 
     def __init__(

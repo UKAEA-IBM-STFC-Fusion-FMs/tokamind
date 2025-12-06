@@ -8,9 +8,9 @@ import torch.nn as nn
 from mmt.data.signal_spec import SignalSpecRegistry
 
 from .token_encoder import TokenEncoder
-from .trunk import Trunk
 from .modality_heads import ModalityHead
 from .output_adapters import OutputAdapter
+from .backbone import Backbone
 
 import logging
 
@@ -28,11 +28,11 @@ class MultiModalTransformer(nn.Module):
 
     The model architecture has four conceptual blocks:
 
-        TokenEncoder  →  Transformer trunk  →  Modality heads  →  Output adapters
+        TokenEncoder  →  Transformer backbone  →  Modality heads  →  Output adapters
 
     Each block is intentionally simple and explicitly separated so that:
         • pretraining and finetuning can freeze/unfreeze components independently,
-        • researchers can swap individual modules (token logic, trunk type,
+        • researchers can swap individual modules (token logic, backbone type,
           modality heads, adapter shapes, etc.) without touching the others,
         • the model stays fully transparent and easy to understand.
 
@@ -54,7 +54,7 @@ class MultiModalTransformer(nn.Module):
     token construction is deterministic and free of task-specific logic.
 
     -------------------------------------------------------------------------------
-    2. Transformer trunk
+    2. Transformer backbone
     -------------------------------------------------------------------------------
     A standard PyTorch `nn.TransformerEncoder` (batch_first=True). It processes the
     token sequence and returns a contextualised representation for each token.
@@ -63,7 +63,7 @@ class MultiModalTransformer(nn.Module):
     On MPS devices a special workaround is applied: padding-only columns are pruned,
     and the padding mask is dropped to avoid PyTorch nested-tensor limitations.
 
-    The trunk output has shape:
+    The backbone output has shape:
         h : (B, L+1, d_model)
 
     -------------------------------------------------------------------------------
@@ -72,9 +72,9 @@ class MultiModalTransformer(nn.Module):
     Each modality (e.g. "timeseries", "profile", "video") receives its own small MLP
     mapping the CLS embedding (h_cls) to a modality-specific latent dimension G_mod.
 
-        group_latent[g] = head_g(h_cls)    # shape (B, G_mod)
+        modality_latent[g] = head_g(h_cls)    # shape (B, G_mod)
 
-    These heads represent “shared modality subspaces”, analogous to group-level
+    These heads represent “shared modality subspaces”, analogous to modality-level
     heads in the original MMT implementation.
 
     -------------------------------------------------------------------------------
@@ -84,7 +84,7 @@ class MultiModalTransformer(nn.Module):
         • an output_dim K_t = SignalSpec.embedding_dim,
         • an OutputAdapter: a simple linear or small MLP mapping G_mod → K_t.
 
-        pred[sid] = adapter_sid(group_latent[modality_of_sid])
+        pred[sid] = adapter_sid(modality_latent[modality_of_sid])
 
     This cleanly separates:
         - modality-level representation learning (shared across many signals),
@@ -110,13 +110,13 @@ class MultiModalTransformer(nn.Module):
 
         {
             "h_cls"       : Tensor (B, d_model),
-            "group_latent": Dict[str, Tensor(B, G_mod)],
+            "modality_latent": Dict[str, Tensor(B, G_mod)],
             "pred"        : Dict[int, Tensor(B, K_t)],
         }
 
     where:
         - h_cls is the pooled representation of the CLS token,
-        - group_latent contains one latent per modality,
+        - modality_latent contains one latent per modality,
         - pred maps each output signal_id → its prediction vector.
 
     Downstream loss functions (MSE, masked MSE, etc.) operate directly on `pred`.
@@ -143,7 +143,7 @@ class MultiModalTransformer(nn.Module):
         # self.verbose = verbose
 
         # ------------------------------------------------------------------
-        # 1) Token encoder + trunk
+        # 1) Token encoder + backbone
         # ------------------------------------------------------------------
         self.tokens = TokenEncoder(
             d_model=d_model,
@@ -151,7 +151,7 @@ class MultiModalTransformer(nn.Module):
             max_positions=max_positions,
             debug_checks=debug_tokens,
         )
-        self.trunk = Trunk(
+        self.backbone = Backbone(
             d_model=d_model,
             n_heads=n_heads,
             dim_ff=dim_ff,
@@ -159,42 +159,42 @@ class MultiModalTransformer(nn.Module):
             dropout=dropout,
             activation=backbone_activation,
         )
-        self.trunk_out_dim = d_model
+        self.backbone_out_dim = d_model
 
         # ------------------------------------------------------------------
-        # 2) Output specs and modality groups
+        # 2) Output specs and modalities
         # ------------------------------------------------------------------
         output_specs = [s for s in signal_specs.specs if s.role == "output"]
         if not output_specs:
             raise ValueError("SignalSpecRegistry contains no outputs (role='output').")
         self.output_specs = output_specs
 
-        self.output2group: Dict[int, str] = {}
-        groups = sorted(set(s.modality for s in output_specs))
+        self.output2modality: Dict[int, str] = {}
+        modalities = sorted(set(s.modality for s in output_specs))
         for spec in output_specs:
-            self.output2group[spec.signal_id] = spec.modality
+            self.output2modality[spec.signal_id] = spec.modality
 
         # Per-modality head configuration (from model.modality_heads)
         per_mod_hidden: Dict[str, int] = {}
         per_mod_dim: Dict[str, int] = {}
-        for g in groups:
-            cfg = modality_heads_cfg.get(g)
+        for mod in modalities:
+            cfg = modality_heads_cfg.get(mod)
             if cfg is None:
                 raise KeyError(
-                    f"No modality head configuration provided for modality={g!r}"
+                    f"No modality head configuration provided for modality={mod!r}"
                 )
-            per_mod_hidden[g] = int(cfg.get("hidden", 0) or 0)
-            per_mod_dim[g] = int(cfg.get("out_dim", d_model) or d_model)
+            per_mod_hidden[mod] = int(cfg.get("hidden", 0) or 0)
+            per_mod_dim[mod] = int(cfg.get("out_dim", d_model) or d_model)
 
-        self.group_heads = nn.ModuleDict(
+        self.modality_heads = nn.ModuleDict(
             {
-                g: ModalityHead(
-                    in_dim=int(self.trunk_out_dim),
-                    out_dim=per_mod_dim[g],
-                    hidden=per_mod_hidden[g],
+                mod: ModalityHead(
+                    in_dim=int(self.backbone_out_dim),
+                    out_dim=per_mod_dim[mod],
+                    hidden=per_mod_hidden[mod],
                     layers=2,
                 )
-                for g in groups
+                for mod in modalities
             }
         )
 
@@ -207,12 +207,12 @@ class MultiModalTransformer(nn.Module):
             for k, v in output_adapters_cfg.get("hidden_overrides", {}).items()
         }
 
-        self.target_adapters = nn.ModuleDict()
+        self.output_adapters = nn.ModuleDict()
         self.output_dims: Dict[int, int] = {}
 
         for spec in output_specs:
             g = spec.modality
-            G_mod = int(self.group_heads[g].out_dim)
+            G_mod = int(self.modality_heads[g].out_dim)
 
             # Target dimension: stored in SignalSpec.embedding_dim
             K_t = getattr(spec, "embedding_dim", None)
@@ -225,37 +225,37 @@ class MultiModalTransformer(nn.Module):
 
             hidden = hidden_overrides.get(spec.name, hidden_default)
 
-            self.target_adapters[str(spec.signal_id)] = OutputAdapter(
+            self.output_adapters[str(spec.signal_id)] = OutputAdapter(
                 in_dim=G_mod,
                 out_dim=K_t,
                 hidden=hidden,
             )
             self.output_dims[spec.signal_id] = K_t
 
-        self._print_init_summary(groups, per_mod_hidden, per_mod_dim)
+        self._print_init_summary(modalities, per_mod_hidden, per_mod_dim)
 
     # ------------------------------------------------------------------
     def _print_init_summary(
         self,
-        groups: List[str],
+        modalities: List[str],
         per_mod_hidden: Dict[str, int],
         per_mod_dim: Dict[str, int],
     ) -> None:
         logger.info("MultiModalTransformer initialised:")
-        logger.info(f"  Trunk: d_model={self.trunk_out_dim}")
+        logger.info(f"  backbone: d_model={self.backbone_out_dim}")
 
-        logger.info("  Group heads:")
-        for g in groups:
+        logger.info("  modality heads:")
+        for mod in modalities:
             logger.info(
-                f"    - {g}: hidden={per_mod_hidden[g]}, out_dim={per_mod_dim[g]}"
+                f"    - {mod}: hidden={per_mod_hidden[mod]}, out_dim={per_mod_dim[mod]}"
             )
 
         logger.info("  Output adapters:")
         for spec in self.output_specs:
             sid = spec.signal_id
-            g = self.output2group[sid]
+            mod = self.output2modality[sid]
             logger.info(
-                f"    - {spec.name} (id={sid}, group={g}): dim={self.output_dims[sid]}"
+                f"    - {spec.name} (id={sid}, modality={mod}): dim={self.output_dims[sid]}"
             )
 
     # ------------------------------------------------------------------
@@ -279,78 +279,78 @@ class MultiModalTransformer(nn.Module):
                 attn_keep = attn_keep.index_select(dim=1, index=idx)
             src_key_padding_mask = None  # avoid problematic MPS code path
 
-        # 2) Transformer trunk
-        h = self.trunk(tokens, src_key_padding_mask=src_key_padding_mask)
+        # 2) Transformer backbone
+        h = self.backbone(tokens, src_key_padding_mask=src_key_padding_mask)
 
         # 3) CLS
         h_cls = h[:, 0, :]  # (B, d_model)
 
-        # 4) Per-modality group heads
-        group_latent: Dict[str, torch.Tensor] = {
-            g: self.group_heads[g](h_cls) for g in self.group_heads.keys()
+        # 4) Per-modality heads
+        modality_latent: Dict[str, torch.Tensor] = {
+            g: self.modality_heads[g](h_cls) for g in self.modality_heads.keys()
         }
 
         # 5) Per-output adapters
         preds: Dict[int, torch.Tensor] = {}
         for spec in self.output_specs:
             sid = spec.signal_id
-            g = self.output2group[sid]
-            adapter = self.target_adapters[str(sid)]
-            preds[sid] = adapter(group_latent[g])
+            g = self.output2modality[sid]
+            adapter = self.output_adapters[str(sid)]
+            preds[sid] = adapter(modality_latent[g])
 
         return {
             "h_cls": h_cls,
-            "group_latent": group_latent,
+            "modality_latent": modality_latent,
             "pred": preds,
         }
 
     # ------------------------------------------------------------------
-    # Checkpoint I/O — three explicit parts: trunk, group_heads, target_adapters
+    # Checkpoint I/O — three explicit parts: backbone, modality_heads, output_adapters
     # ------------------------------------------------------------------
-    def get_trunk_state_dict(self) -> dict:
-        return self.trunk.state_dict()
+    def get_backbone_state_dict(self) -> dict:
+        return self.backbone.state_dict()
 
-    def load_trunk_state_dict(self, state: dict, strict: bool = True):
-        missing, unexpected = self.trunk.load_state_dict(state, strict=strict)
+    def load_backbone_state_dict(self, state: dict, strict: bool = True):
+        missing, unexpected = self.backbone.load_state_dict(state, strict=strict)
         return missing, unexpected
 
-    def get_group_heads_state_dict(self) -> dict:
-        return self.group_heads.state_dict()
+    def get_modality_heads_state_dict(self) -> dict:
+        return self.modality_heads.state_dict()
 
-    def load_group_heads_state_dict(self, state: dict, strict: bool = True):
-        missing, unexpected = self.group_heads.load_state_dict(state, strict=strict)
+    def load_modality_heads_state_dict(self, state: dict, strict: bool = True):
+        missing, unexpected = self.modality_heads.load_state_dict(state, strict=strict)
         return missing, unexpected
 
-    def get_target_adapters_state_dict(self) -> dict:
-        return self.target_adapters.state_dict()
+    def get_output_adapters_state_dict(self) -> dict:
+        return self.output_adapters.state_dict()
 
-    def load_target_adapters_state_dict(self, state: dict, strict: bool = True):
-        missing, unexpected = self.target_adapters.load_state_dict(state, strict=strict)
+    def load_output_adapters_state_dict(self, state: dict, strict: bool = True):
+        missing, unexpected = self.output_adapters.load_state_dict(state, strict=strict)
         return missing, unexpected
 
     # ------------------------------------------------------------------
     # Freezing helpers — explicit and independent
     # ------------------------------------------------------------------
-    def freeze_trunk(self) -> None:
-        for p in self.trunk.parameters():
+    def freeze_backbone(self) -> None:
+        for p in self.backbone.parameters():
             p.requires_grad = False
 
-    def unfreeze_trunk(self) -> None:
-        for p in self.trunk.parameters():
+    def unfreeze_backbone(self) -> None:
+        for p in self.backbone.parameters():
             p.requires_grad = True
 
-    def freeze_group_heads(self) -> None:
-        for p in self.group_heads.parameters():
+    def freeze_modality_heads(self) -> None:
+        for p in self.modality_heads.parameters():
             p.requires_grad = False
 
-    def unfreeze_group_heads(self) -> None:
-        for p in self.group_heads.parameters():
+    def unfreeze_modality_heads(self) -> None:
+        for p in self.modality_heads.parameters():
             p.requires_grad = True
 
-    def freeze_target_adapters(self) -> None:
-        for p in self.target_adapters.parameters():
+    def freeze_output_adapters(self) -> None:
+        for p in self.output_adapters.parameters():
             p.requires_grad = False
 
-    def unfreeze_target_adapters(self) -> None:
-        for p in self.target_adapters.parameters():
+    def unfreeze_output_adapters(self) -> None:
+        for p in self.output_adapters.parameters():
             p.requires_grad = True
