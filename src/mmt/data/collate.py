@@ -76,28 +76,57 @@ class MMTCollate:
         self.drop_outputs_overrides = cfg_collate.get("p_drop_outputs_overrides", {})
 
     # ------------------------------------------------------------------ #
-    # ------------------------------------------------------------------ #
     def __call__(self, batch: List[Any]) -> Dict[str, Any]:
         """
-        Collate a batch.
+        Collate a batch of MMT windows into padded model-ready arrays.
 
-        The baseline TaskModelTransformWrapper returns, for each dataset
-        index, an *iterable of windows* (one per window in that shot).
+        Accepted input formats
+        ----------------------
+        This collate supports two equivalent forms for each batch element:
 
-        DataLoader therefore passes a batch shaped like:
+          1) A single tokenized window dict:
+                {
+                    "shot_id": ...,
+                    "window_index": ...,
+                    "emb_chunks": [...],
+                    "pos": np.ndarray(L,),
+                    "id": np.ndarray(L,),
+                    "mod": np.ndarray(L,),
+                    "role": np.ndarray(L,),
+                    "signal_name": np.ndarray(L,),
+                    "outputs_emb": {...},
+                    "outputs_shapes": {...},
+                    "outputs_names": {...},
+                    ...
+                }
 
-            batch = [windows_for_shot_0, windows_for_shot_1, ...]
+          2) An iterable (e.g. generator/list) of such window dicts for a shot.
 
-        where each element is a list or generator of window dicts.
+        This matches:
+          - streaming datasets (TaskModelTransformWrapper → generator per shot)
+          - cached token datasets (TokenizedWindowDataset → one window per item)
 
-        Here we first flatten this into a single list of window dicts:
+        Output format
+        -------------
+        Returns a dictionary with:
+          - "emb"            : List[List[np.ndarray]]  (ragged embeddings before projection)
+          - "pos"            : (B, L_max)
+          - "id"             : (B, L_max)
+          - "mod"            : (B, L_max)
+          - "role"           : (B, L_max)
+          - "signal_name"    : List[List[str]]
+          - "padding_mask"   : (B, L_max)
+          - "input_mask"     : (B, L_max)
+          - "actuator_mask"  : (B, L_max)
+          - "outputs_emb"    : {signal_id: List[np.ndarray]}
+          - "outputs_mask"   : {signal_id: (B,)}
 
-            flat_windows = [win_0, win_1, ..., win_N]
-
-        and then apply padding + dropout logic on those windows.
+        If keep_output_native=True:
+          - "output_native"  : {signal_id: np.ndarray of shape (B, *orig_shape)}
         """
+
         # --------------------------------------------------------------- #
-        # 0. Flatten shot-level sequences into a list of windows
+        # 0. Flatten batch into a list of window dicts
         # --------------------------------------------------------------- #
         flat_windows: List[Dict[str, Any]] = []
 
@@ -105,27 +134,27 @@ class MMTCollate:
             if item is None:
                 continue
 
-            # If it's already a dict, treat as a single window
+            # Case 1: already a single window dict
             if isinstance(item, dict):
                 flat_windows.append(item)
                 continue
 
-            # Otherwise assume it's an iterable of windows (list/generator)
+            # Case 2: iterable of window dicts (e.g. generator per shot)
             try:
                 for w in item:
                     if w is None:
                         continue
                     if not isinstance(w, dict):
                         raise TypeError(
-                            "MMTCollate expected inner elements to be window dicts, "
+                            "MMTCollate expected window dicts inside iterables, "
                             f"got {type(w)}"
                         )
                     flat_windows.append(w)
             except TypeError:
                 raise TypeError(
-                    "MMTCollate expected each batch element to be an iterable "
-                    "of window dicts (as returned by TaskModelTransformWrapper), "
-                    f"got {type(item)}"
+                    "MMTCollate expected each batch element to be either a window dict "
+                    "or an iterable of window dicts. "
+                    f"Got {type(item)} instead."
                 )
 
         B = len(flat_windows)
@@ -133,18 +162,18 @@ class MMTCollate:
             raise ValueError("MMTCollate received an empty flattened batch.")
 
         # --------------------------------------------------------------- #
-        # 1. Extract all fields per window
+        # 1. Extract per-window token arrays + output metadata
         # --------------------------------------------------------------- #
-        emb_lists: List[List[np.ndarray]] = []
-        pos_lists: List[np.ndarray] = []
-        id_lists: List[np.ndarray] = []
-        mod_lists: List[np.ndarray] = []
-        role_lists: List[np.ndarray] = []
-        name_lists: List[np.ndarray] = []
+        emb_lists = []
+        pos_lists = []
+        id_lists = []
+        mod_lists = []
+        role_lists = []
+        name_lists = []
 
-        tgt_dicts: List[Dict[int, np.ndarray]] = []
-        tgt_shapes_dicts: List[Dict[int, Any]] = []
-        tgt_names_dicts: List[Dict[int, str]] = []
+        tgt_dicts = []
+        tgt_shapes_dicts = []
+        tgt_names_dicts = []
 
         all_target_ids = set()
         id_to_output_name: Dict[int, str] = {}
@@ -174,7 +203,7 @@ class MMTCollate:
                     )
 
         # --------------------------------------------------------------- #
-        # 2. Determine batch lengths and pad to L_max
+        # 2. Determine max token length + allocate padded arrays
         # --------------------------------------------------------------- #
         lengths = [len(e) for e in emb_lists]
         L_max = max(lengths)
@@ -183,7 +212,6 @@ class MMTCollate:
         id_batch = np.zeros((B, L_max), dtype=np.int32)
         mod_batch = np.zeros((B, L_max), dtype=np.int16)
         role_batch = np.zeros((B, L_max), dtype=np.int8)
-
         padding_mask = np.zeros((B, L_max), dtype=np.int8)
 
         input_mask = np.ones((B, L_max), dtype=np.int8)
@@ -193,7 +221,7 @@ class MMTCollate:
         name_batch: List[List[str]] = [[""] * L_max for _ in range(B)]
 
         # --------------------------------------------------------------- #
-        # 3. Insert tokens into padded batch
+        # 3. Fill padded arrays
         # --------------------------------------------------------------- #
         for i in range(B):
             Li = lengths[i]
@@ -210,7 +238,7 @@ class MMTCollate:
             padding_mask[i, :Li] = 1
 
         # --------------------------------------------------------------- #
-        # 4. Apply input dropout (per-token)
+        # 4. Input dropout (per-token)
         # --------------------------------------------------------------- #
         p_drop_in = self.cfg.get("p_drop_inputs", 0.0)
 
@@ -224,7 +252,7 @@ class MMTCollate:
                         emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
 
         # --------------------------------------------------------------- #
-        # 5. Apply actuator dropout (per-token)
+        # 5. Actuator dropout (per-token)
         # --------------------------------------------------------------- #
         p_drop_act = self.cfg.get("p_drop_actuators", 0.0)
 
@@ -238,7 +266,7 @@ class MMTCollate:
                         emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
 
         # --------------------------------------------------------------- #
-        # 6. Chunk dropout (per pos group)
+        # 6. Chunk dropout (per-pos group)
         # --------------------------------------------------------------- #
         p_drop_inputs_chunks = self.cfg.get("p_drop_inputs_chunks", 0.0)
         p_drop_act_chunks = self.cfg.get("p_drop_actuators_chunks", 0.0)
@@ -248,26 +276,28 @@ class MMTCollate:
             unique_pos = set(pos_batch[i, :Li])
 
             for pval in unique_pos:
-                idx = np.where(pos_batch[i, :Li] == pval)[0]
-                if len(idx) == 0:
+                idxs = np.where(pos_batch[i, :Li] == pval)[0]
+                if len(idxs) == 0:
                     continue
 
-                if any(role_batch[i, t] == ROLE_CONTEXT for t in idx):
+                # input chunks
+                if any(role_batch[i, t] == ROLE_CONTEXT for t in idxs):
                     if random.random() < p_drop_inputs_chunks:
-                        for t in idx:
+                        for t in idxs:
                             if role_batch[i, t] == ROLE_CONTEXT:
                                 input_mask[i, t] = 0
                                 emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
 
-                if any(role_batch[i, t] == ROLE_ACTUATOR for t in idx):
+                # actuator chunks
+                if any(role_batch[i, t] == ROLE_ACTUATOR for t in idxs):
                     if random.random() < p_drop_act_chunks:
-                        for t in idx:
+                        for t in idxs:
                             if role_batch[i, t] == ROLE_ACTUATOR:
                                 actuator_mask[i, t] = 0
                                 emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
 
         # --------------------------------------------------------------- #
-        # 7. Apply output dropout (per output name)
+        # 7. Output embeddings + dropout
         # --------------------------------------------------------------- #
         p_drop_outputs = self.cfg.get("p_drop_outputs", 0.0)
 
@@ -275,37 +305,34 @@ class MMTCollate:
         outputs_mask_batch: Dict[int, np.ndarray] = {}
 
         for sig_id in sorted(all_target_ids):
-            sig_embs = []
-            sig_mask = np.ones((B,), dtype=np.int8)
+            out_name = id_to_output_name[sig_id]
 
-            out_name = id_to_output_name.get(sig_id, str(sig_id))
+            emb_list: List[np.ndarray] = []
+            mask = np.ones((B,), dtype=np.int8)
 
             for i in range(B):
                 emb = tgt_dicts[i].get(sig_id, None)
-
                 if emb is None:
-                    sig_mask[i] = 0
+                    mask[i] = 0
                     emb = np.zeros((1,), dtype=np.float32)
+                emb_list.append(emb)
 
-                sig_embs.append(emb)
-
-            outputs_emb_batch[sig_id] = sig_embs
-
+            # per-output dropout
             for i in range(B):
                 p = self.drop_outputs_overrides.get(out_name, p_drop_outputs)
                 if random.random() < p:
-                    sig_mask[i] = 0
+                    mask[i] = 0
 
-            outputs_mask_batch[sig_id] = sig_mask
+            outputs_emb_batch[sig_id] = emb_list
+            outputs_mask_batch[sig_id] = mask
 
         # --------------------------------------------------------------- #
-        # 8. Optionally collate native outputs (Y_native) for evaluation
+        # 8. Optional: native outputs (Y_native)
         # --------------------------------------------------------------- #
         output_native_batch: Dict[int, np.ndarray] = {}
         if self.keep_output_native:
-            # For each target signal, gather per-window native outputs.
             for sig_id in sorted(all_target_ids):
-                out_name = id_to_output_name.get(sig_id, str(sig_id))
+                out_name = id_to_output_name[sig_id]
                 per_sig_vals: List[np.ndarray] = []
 
                 for i in range(B):
@@ -317,30 +344,24 @@ class MMTCollate:
                     if isinstance(out_info, dict):
                         val = out_info.get("values", None)
                     elif out_info is not None:
-                        # Allow shorthand "name: values"
                         val = out_info
 
                     if val is None:
-                        # If the native value is missing (e.g. dropped by DropNa),
-                        # create a zero array with the correct shape so that
-                        # downstream code can use outputs_mask to ignore it.
+                        # Use shapes dict to reconstruct shape
                         shape = None
                         shapes_dict = tgt_shapes_dicts[i]
-                        if shapes_dict and sig_id in shapes_dict:
-                            shape = tuple(shapes_dict[sig_id])
+                        if sig_id in shapes_dict:
+                            shape = shapes_dict[sig_id]
                         else:
-                            # Fall back to any other window that has this signal.
                             for sd in tgt_shapes_dicts:
                                 if sig_id in sd:
-                                    shape = tuple(sd[sig_id])
+                                    shape = sd[sig_id]
                                     break
-
                         if shape is None:
                             raise ValueError(
                                 f"Missing shape for output signal_id={sig_id} "
-                                f"(needed to build output_native_batch)"
+                                f"while assembling output_native."
                             )
-
                         arr = np.zeros(shape, dtype=np.float32)
                     else:
                         arr = np.asarray(val, dtype=np.float32)
@@ -349,6 +370,9 @@ class MMTCollate:
 
                 output_native_batch[sig_id] = np.stack(per_sig_vals, axis=0)
 
+        # --------------------------------------------------------------- #
+        # 9. Assemble final batch dict
+        # --------------------------------------------------------------- #
         batch_out = {
             "emb": emb_batch,
             "pos": pos_batch,

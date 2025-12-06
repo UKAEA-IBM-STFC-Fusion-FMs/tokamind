@@ -28,10 +28,15 @@ collate:
   p_drop_inputs_chunks: 0.08
   p_drop_actuators_chunks: 0.0
 
+data:
+  cache_tokens: true
+  num_workers_cache: 8
+  keep_output_native: false
+
+loader:
+  batch_size: 24
+  num_workers: 4
+  shuffle: true
+  drop_last: false
 
 training:
-  loader:
-    batch_size: 24
-    num_workers: 4
-    shuffle: true
-    drop_last: false

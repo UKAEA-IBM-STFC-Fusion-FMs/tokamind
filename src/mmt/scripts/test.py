@@ -31,10 +31,11 @@ from mmt.data.transforms.drop_na import DropNaChunksTransform
 from mmt.data.transforms.trim_chunks import TrimChunksTransform
 from mmt.data.transforms.embed_chunks import EmbedChunksTransform
 from mmt.data.transforms.build_tokens import BuildTokensTransform
+from mmt.data.cache_tokens import materialize_tokenized_split_to_ram
 from mmt.data.collate import MMTCollate
 
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def parse_args_finetune() -> argparse.Namespace:
@@ -66,7 +67,10 @@ def main() -> None:
     cfg_chunks = cfg_mmt.preprocessing["chunk"]
     cfg_trim = cfg_mmt.preprocessing["trim_chunks"]
     cfg_drop_nan = cfg_mmt.preprocessing["drop_na"]
-    cfg_loader = cfg_mmt.training["loader"]
+    cfg_data = cfg_mmt.data
+    cache_tokens = cfg_data.get("cache_tokens", False)
+    num_workers_cache = cfg_data.get("num_workers_cache", 0)
+    keep_output_native = cfg_data.get("keep_output_native", False)
 
     # Baseline: config_task con override (subset_of_shots, local)
     cfg_task = build_baseline_task_config(cfg_mmt)
@@ -115,7 +119,7 @@ def main() -> None:
             EmbedChunksTransform(
                 signal_specs=signal_specs,
                 codecs=codecs,
-                keep_output_native=False,  # TODO: set true for eval
+                keep_output_native=keep_output_native,
             ),
             BuildTokensTransform(
                 chunk_length_sec=cfg_chunks["chunk_length"],
@@ -132,22 +136,49 @@ def main() -> None:
         dict_metadata,
         cfg_task,
         model_specific_transform=model_specific_transform,
-        verbose=True,
+        verbose=False,
     )
 
+    # Optionally materialize streaming datasets to RAM as tokenized windows
+    # we cache only train and val: in evaluation cache_tokens is always false
+    datasets_for_loader = {}
+
+    if cache_tokens:
+        # cache only train / val
+        for split, ds_stream in datasets_mmt.items():
+            if ds_stream is None:
+                datasets_for_loader[split] = None
+                continue
+
+            if split in ("train", "val"):  # cache only train and val
+                print("ciao")
+                import time
+
+                t0 = time.perf_counter()
+                ds_cached = materialize_tokenized_split_to_ram(
+                    streaming_dataset=ds_stream,
+                    num_workers_cache=num_workers_cache,
+                )
+                t1 = time.perf_counter()
+                print(f"Caching took {t1 - t0:.3f} seconds")
+                datasets_for_loader[split] = ds_cached
+            else:
+                datasets_for_loader[split] = ds_stream
+    else:
+        datasets_for_loader = datasets_mmt
+
     # Dataloaders
-    cfg_collate = {
-        **cfg_mmt.collate,
-        "keep_output_native": False,
-    }  # TODO: set true for eval
-    collate_fn = MMTCollate(cfg_collate)
+    collate_fn = MMTCollate(
+        {**cfg_mmt.collate, "keep_output_native": keep_output_native}
+    )
+
     dataloaders_mmt = initialize_dataloaders(
-        datasets_mmt,
+        datasets_for_loader,
         collate_fn,
-        batch_size=cfg_loader["batch_size"],
-        num_workers=cfg_loader["num_workers"],
-        shuffle=cfg_loader["shuffle"],
-        drop_last=cfg_loader["drop_last"],
+        batch_size=cfg_mmt.loader["batch_size"],
+        num_workers=cfg_mmt.loader["num_workers"],
+        shuffle=cfg_mmt.loader["shuffle"],
+        drop_last=cfg_mmt.loader["drop_last"],
         seed=cfg_mmt.seed,
     )
 
@@ -160,13 +191,25 @@ def main() -> None:
         else:
             print(f"  {split}: {len(ds)} shots")
 
-    print("\n[Debug] Inspect first few windows of first train shot:")
-    ds_train = datasets_mmt["train"]
-    gen = ds_train[3]  # generator over windows for shot 0
+    print("\n[Debug] Inspect first few windows:")
+    ds_train = datasets_for_loader["train"]
 
-    for i, win in enumerate(gen):
-        if i >= 100:
-            break
+    if cache_tokens:
+        # TokenizedWindowDataset: each item is a window dict
+        for i in range(min(4, len(ds_train))):
+            win = ds_train[i]
+            print(
+                f"  window {i}: shot_id={win.get('shot_id')}, window_index={win.get('window_index')}"
+            )
+    else:
+        # Streaming: ds_train[i] is a generator of windows for shot i
+        gen = ds_train[3]
+        for i, win in enumerate(gen):
+            print(
+                f"  shot 3, window {i}: shot_id={win.get('shot_id')}, window_index={win.get('window_index')}"
+            )
+            if i >= 4:
+                break
 
     # ------------------------------------------------------------------
     # Debug: inspect one batch from the MMT train dataloader
