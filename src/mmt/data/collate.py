@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Dict, List
 import numpy as np
 import random
+import torch
 
 
 # Token roles (same as in BuildTokensTransform)
@@ -21,25 +22,47 @@ class MMTCollate:
       • Builds masks for padding and dropped tokens
       • Preserves ragged embeddings (per-token projection happens in the model)
 
-    Input:
-      List[window_dict] where each window was produced by BuildTokensTransform.
+    Input
+    -----
+    List[window_dict] where each window was produced by BuildTokensTransform.
 
-    Output:
-      A batch dictionary with:
-        "emb"            : list[list[np.ndarray]]   # ragged before projection
-        "pos"            : (B, L)
-        "id"             : (B, L)
-        "mod"            : (B, L)
-        "role"           : (B, L)
-        "signal_name"    : (B, L) list of strings
-        "padding_mask"   : (B, L)
-        "input_mask"     : (B, L)
-        "actuator_mask"  : (B, L)
-        "outputs_emb"    : dict[signal_id -> list[np.ndarray]]
-        "outputs_mask"   : dict[signal_id -> (B,)]
+    Output
+    ------
+    A batch dictionary with:
+
+      Token-level inputs
+      ------------------
+      "emb"            : List[List[torch.Tensor]]
+                         Ragged embeddings before projection:
+                           emb[b][t] is a 1D tensor (D_i,)
+                         Padded positions (t >= length_b) are left as None.
+
+      "pos"            : LongTensor (B, L)
+      "id"             : LongTensor (B, L)
+      "mod"            : LongTensor (B, L)
+      "role"           : LongTensor (B, L)
+      "signal_name"    : List[List[str]]
+
+      "padding_mask"   : BoolTensor (B, L)
+                         True where there is a *real* token (not padding),
+                         i.e. where original length > t.
+      "input_mask"     : BoolTensor (B, L)
+                         True where the input token is kept (not dropped).
+      "actuator_mask"  : BoolTensor (B, L)
+                         True where the actuator token is kept (not dropped).
+
+      Outputs
+      -------
+      "outputs_emb"    : Dict[int, List[torch.Tensor]]
+                         For each output signal_id:
+                           list length = B
+                           each element is a 1D tensor with encoded output.
+      "outputs_mask"   : Dict[int, BoolTensor] with shape (B,)
+                         Per-output presence/dropout mask.
 
       If cfg_collate["keep_output_native"] == True, also:
-        "output_native"  : dict[signal_id -> np.ndarray of shape (B, *orig_shape)]
+      "output_native"  : Dict[int, torch.Tensor]
+                         Each tensor has shape (B, *orig_output_shape).
     """
 
     # ------------------------------------------------------------------ #
@@ -78,7 +101,7 @@ class MMTCollate:
     # ------------------------------------------------------------------ #
     def __call__(self, batch: List[Any]) -> Dict[str, Any]:
         """
-        Collate a batch of MMT windows into padded model-ready arrays.
+        Collate a batch of MMT windows into padded model-ready tensors.
 
         Accepted input formats
         ----------------------
@@ -102,27 +125,10 @@ class MMTCollate:
 
           2) An iterable (e.g. generator/list) of such window dicts for a shot.
 
-        This matches:
-          - streaming datasets (TaskModelTransformWrapper → generator per shot)
-          - cached token datasets (TokenizedWindowDataset → one window per item)
-
         Output format
         -------------
-        Returns a dictionary with:
-          - "emb"            : List[List[np.ndarray]]  (ragged embeddings before projection)
-          - "pos"            : (B, L_max)
-          - "id"             : (B, L_max)
-          - "mod"            : (B, L_max)
-          - "role"           : (B, L_max)
-          - "signal_name"    : List[List[str]]
-          - "padding_mask"   : (B, L_max)
-          - "input_mask"     : (B, L_max)
-          - "actuator_mask"  : (B, L_max)
-          - "outputs_emb"    : {signal_id: List[np.ndarray]}
-          - "outputs_mask"   : {signal_id: (B,)}
-
-        If keep_output_native=True:
-          - "output_native"  : {signal_id: np.ndarray of shape (B, *orig_shape)}
+        Returns a dictionary with torch tensors as described in the class
+        docstring.
         """
 
         # --------------------------------------------------------------- #
@@ -203,7 +209,7 @@ class MMTCollate:
                     )
 
         # --------------------------------------------------------------- #
-        # 2. Determine max token length + allocate padded arrays
+        # 2. Determine max token length + allocate padded arrays (NumPy)
         # --------------------------------------------------------------- #
         lengths = [len(e) for e in emb_lists]
         L_max = max(lengths)
@@ -297,12 +303,12 @@ class MMTCollate:
                                 emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
 
         # --------------------------------------------------------------- #
-        # 7. Output embeddings + dropout
+        # 7. Output embeddings + dropout (still NumPy here)
         # --------------------------------------------------------------- #
         p_drop_outputs = self.cfg.get("p_drop_outputs", 0.0)
 
         outputs_emb_batch: Dict[int, List[np.ndarray]] = {}
-        outputs_mask_batch: Dict[int, np.ndarray] = {}
+        outputs_mask_batch_np: Dict[int, np.ndarray] = {}
 
         for sig_id in sorted(all_target_ids):
             out_name = id_to_output_name[sig_id]
@@ -324,12 +330,12 @@ class MMTCollate:
                     mask[i] = 0
 
             outputs_emb_batch[sig_id] = emb_list
-            outputs_mask_batch[sig_id] = mask
+            outputs_mask_batch_np[sig_id] = mask
 
         # --------------------------------------------------------------- #
-        # 8. Optional: native outputs (Y_native)
+        # 8. Optional: native outputs (Y_native) as NumPy
         # --------------------------------------------------------------- #
-        output_native_batch: Dict[int, np.ndarray] = {}
+        output_native_batch_np: Dict[int, np.ndarray] = {}
         if self.keep_output_native:
             for sig_id in sorted(all_target_ids):
                 out_name = id_to_output_name[sig_id]
@@ -368,26 +374,63 @@ class MMTCollate:
 
                     per_sig_vals.append(arr)
 
-                output_native_batch[sig_id] = np.stack(per_sig_vals, axis=0)
+                output_native_batch_np[sig_id] = np.stack(per_sig_vals, axis=0)
 
         # --------------------------------------------------------------- #
-        # 9. Assemble final batch dict
+        # 9. Convert everything to torch.Tensor
         # --------------------------------------------------------------- #
-        batch_out = {
-            "emb": emb_batch,
-            "pos": pos_batch,
-            "id": id_batch,
-            "mod": mod_batch,
-            "role": role_batch,
-            "signal_name": name_batch,
-            "padding_mask": padding_mask,
-            "input_mask": input_mask,
-            "actuator_mask": actuator_mask,
-            "outputs_emb": outputs_emb_batch,
-            "outputs_mask": outputs_mask_batch,
+        # Token-level metadata
+        pos_t = torch.from_numpy(pos_batch).long()
+        id_t = torch.from_numpy(id_batch).long()
+        mod_t = torch.from_numpy(mod_batch.astype(np.int64))
+        role_t = torch.from_numpy(role_batch.astype(np.int64))
+
+        padding_mask_t = torch.from_numpy(padding_mask.astype(bool))
+        input_mask_t = torch.from_numpy(input_mask.astype(bool))
+        actuator_mask_t = torch.from_numpy(actuator_mask.astype(bool))
+
+        # Ragged embeddings
+        emb_t: List[List[torch.Tensor]] = [[None] * L_max for _ in range(B)]
+        for i in range(B):
+            for t in range(L_max):
+                arr = emb_batch[i][t]
+                if arr is not None:
+                    emb_t[i][t] = torch.from_numpy(arr)
+
+        # Outputs: embeddings + masks
+        outputs_emb_t: Dict[int, List[torch.Tensor]] = {}
+        outputs_mask_t: Dict[int, torch.Tensor] = {}
+
+        for sig_id, emb_list in outputs_emb_batch.items():
+            outputs_emb_t[sig_id] = [torch.from_numpy(e) for e in emb_list]
+            outputs_mask_t[sig_id] = torch.from_numpy(
+                outputs_mask_batch_np[sig_id].astype(bool)
+            )
+
+        # Outputs: native (optional)
+        output_native_t: Dict[int, torch.Tensor] = {}
+        if self.keep_output_native:
+            for sig_id, arr in output_native_batch_np.items():
+                output_native_t[sig_id] = torch.from_numpy(arr)
+
+        # --------------------------------------------------------------- #
+        # 10. Assemble final batch dict (torch)
+        # --------------------------------------------------------------- #
+        batch_out: Dict[str, Any] = {
+            "emb": emb_t,
+            "pos": pos_t,
+            "id": id_t,
+            "mod": mod_t,
+            "role": role_t,
+            "signal_name": name_batch,  # still List[List[str]]
+            "padding_mask": padding_mask_t,
+            "input_mask": input_mask_t,
+            "actuator_mask": actuator_mask_t,
+            "outputs_emb": outputs_emb_t,
+            "outputs_mask": outputs_mask_t,
         }
 
         if self.keep_output_native:
-            batch_out["output_native"] = output_native_batch
+            batch_out["output_native"] = output_native_t
 
         return batch_out

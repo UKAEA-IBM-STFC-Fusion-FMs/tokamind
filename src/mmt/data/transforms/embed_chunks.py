@@ -5,7 +5,7 @@ import logging
 
 import numpy as np
 
-from mmt.data.embeddings.signal_spec import SignalSpecRegistry
+from mmt.data.signal_spec import SignalSpecRegistry
 
 logger = logging.getLogger("mmt.Embedding")
 

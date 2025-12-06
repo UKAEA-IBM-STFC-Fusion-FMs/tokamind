@@ -9,7 +9,7 @@ seed: 54
 
 data:
   local: false         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: 1000   # None / null → uses all shots;
+  subset_of_shots: 10   # None / null → uses all shots;
 
 preprocessing:
 

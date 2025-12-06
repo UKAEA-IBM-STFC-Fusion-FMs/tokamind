@@ -20,11 +20,11 @@ from mmt.utils.config_loader import load_experiment_config
 from mmt.utils.seed import set_seed
 from mmt.utils.logger import setup_logging
 
-from mmt.data.embeddings.signal_spec import (
+from mmt.data.signal_spec import (
     build_signal_role_modality_map,
     build_signal_specs,
-    build_codecs,
 )
+from mmt.data.embeddings.codec_utils import build_codecs
 
 from mmt.data.transforms.chunk_windows import ChunkWindowsTransform
 from mmt.data.transforms.drop_na import DropNaChunksTransform
@@ -95,7 +95,12 @@ def main() -> None:
 
     # Build signals_by_role from baseline config + metadata and signal specs
     signals_role_modality_map = build_signal_role_modality_map(cfg_task, dict_metadata)
-    signal_specs = build_signal_specs(cfg_mmt.embeddings, signals_role_modality_map)
+    signal_specs = build_signal_specs(
+        embeddings_cfg=cfg_mmt.embeddings,
+        signals_by_role=signals_role_modality_map,
+        dict_metadata=dict_metadata,
+        chunk_length_sec=cfg_chunks["chunk_length"],
+    )
     codecs = build_codecs(signal_specs)
 
     # Model-specific transform (per ora: identity chain)
@@ -151,7 +156,6 @@ def main() -> None:
                 continue
 
             if split in ("train", "val"):  # cache only train and val
-                print("ciao")
                 import time
 
                 t0 = time.perf_counter()

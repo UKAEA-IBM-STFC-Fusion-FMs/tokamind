@@ -1,12 +1,12 @@
+# src/mmt/data/signal_spec.py
 from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 
-from mmt.data.embeddings.dct3d_codec import DCT3DCodec
-from mmt.data.embeddings.identity_codec import IdentityCodec
-
 import logging
+
+from mmt.data.embeddings.codec_utils import compute_embedding_dim_for_encoder
 
 logger = logging.getLogger("mmt.SignalSpec")
 
@@ -25,22 +25,29 @@ class SignalSpec:
     ----------
     name : str
         Canonical signal name, e.g. "pf_active-solenoid_current".
-        This should match whatever the baseline / transforms use as key.
+        This should match the keys used in the baseline / datasets.
+
     role : str
         One of {"input", "actuator", "output"}.
+
     modality : str
         One of {"timeseries", "profile", "video"}.
-        This describes the *shape convention* of the raw signal:
-          - timeseries: (T,)
-          - profile:    (C, T)
-          - video:      (H, W, T)
+
     encoder_name : str
-        Name of the encoder / codec to use, e.g. "dct3d".
+        Name of the encoder / codec to use, e.g. "dct3d", "identity".
+
     encoder_kwargs : Dict[str, Any]
-        Encoder-specific parameters, e.g. {"keep_h": 1, "keep_w": 1, "keep_t": 10}.
+        Encoder-specific parameters, e.g. {"keep_h": 1, "keep_w": 1, "keep_t": 10}
+        for DCT3D.
+
     signal_id : int
-        Stable integer ID for this signal. Used for signal-ID embeddings etc.
-        The assignment is done by `build_signal_specs`.
+        Stable integer ID for this signal. Used for signal-ID embeddings and
+        codec lookup. The assignment is done in `build_signal_specs`.
+
+    embedding_dim : int
+        Dimension of the encoded representation for a single chunk of this
+        signal. If `codec.encode(chunk)` returns a 1D array of shape (D,),
+        then `embedding_dim == D`.
     """
 
     name: str
@@ -49,6 +56,7 @@ class SignalSpec:
     encoder_name: str
     encoder_kwargs: Dict[str, Any]
     signal_id: int
+    embedding_dim: int
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +130,8 @@ class SignalSpecRegistry:
 def build_signal_specs(
     embeddings_cfg: Mapping[str, Any],
     signals_by_role: Mapping[str, Mapping[str, str]],
+    dict_metadata: Mapping[str, Mapping[str, Any]],
+    chunk_length_sec: float,
 ) -> SignalSpecRegistry:
     """
     Build a SignalSpecRegistry from the embeddings config and known signals.
@@ -159,8 +169,6 @@ def build_signal_specs(
           - <role> is one of {"input", "actuator", "output"},
           - <modality> is one of {"timeseries", "profile", "video"}.
 
-        The "..." parts can be omitted for roles/modalities you don't use.
-
     signals_by_role : Mapping[str, Mapping[str, str]]
         A mapping describing which signals exist and their modality, e.g.:
 
@@ -180,7 +188,25 @@ def build_signal_specs(
               },
             }
 
-        The modalities here must match those used in ``embeddings_cfg["defaults"]``.
+    dict_metadata : Mapping[str, Mapping[str, Any]]
+        Metadata dict as returned by initialize_datasets_and_metadata_for_task, e.g.:
+
+            {
+              "pf_active-solenoid_current": {
+                  "dt": 0.00025,
+                  "values_shape": (1,),
+              },
+              ...
+            }
+
+        We use:
+          - `dt`           : sampling period (seconds),
+          - `values_shape` : spatial shape (excluding time) of each sample.
+
+    chunk_length_sec : float
+        Chunk length in seconds used by the chunking transform. Together with
+        `dt` and `values_shape`, this allows each encoder to compute the
+        dimension of its encoded output for a single chunk.
 
     Returns
     -------
@@ -199,12 +225,20 @@ def build_signal_specs(
         for name in sorted(role_signals.keys()):
             modality = role_signals[name]
 
+            meta = dict_metadata.get(name)
+            if meta is None:
+                raise KeyError(f"Signal {name!r} not found in dict_metadata")
+
+            values_shape = tuple(meta.get("values_shape", ()))
+            dt = float(meta.get("dt"))
+
             # 1) Get default encoder settings for this (role, modality)
             role_defaults = defaults.get(role, {})
             modality_defaults = role_defaults.get(modality, None)
             if modality_defaults is None:
                 raise KeyError(
-                    f"No default embedding settings for role={role!r}, modality={modality!r}"
+                    f"No default embedding settings for role={role!r}, "
+                    f"modality={modality!r}"
                 )
 
             encoder_name = modality_defaults.get("encoder_name", None)
@@ -212,7 +246,8 @@ def build_signal_specs(
 
             if encoder_name is None:
                 raise KeyError(
-                    f"Missing 'encoder_name' in defaults for role={role!r}, modality={modality!r}"
+                    f"Missing 'encoder_name' in defaults for role={role!r}, "
+                    f"modality={modality!r}"
                 )
 
             # 2) Apply per-signal overrides, if present
@@ -222,8 +257,16 @@ def build_signal_specs(
                 if "encoder_name" in sig_override:
                     encoder_name = sig_override["encoder_name"]
                 if "encoder_kwargs" in sig_override:
-                    # override completely; if you want "update", change this logic
                     encoder_kwargs = dict(sig_override["encoder_kwargs"] or {})
+
+            # 3) Compute embedding_dim via encoder-specific helper
+            embedding_dim = compute_embedding_dim_for_encoder(
+                encoder_name=encoder_name,
+                encoder_kwargs=encoder_kwargs,
+                values_shape=values_shape,
+                dt=dt,
+                chunk_length_sec=chunk_length_sec,
+            )
 
             spec = SignalSpec(
                 name=name,
@@ -232,67 +275,26 @@ def build_signal_specs(
                 encoder_name=encoder_name,
                 encoder_kwargs=encoder_kwargs,
                 signal_id=next_id,
+                embedding_dim=int(embedding_dim),
             )
             specs.append(spec)
             next_id += 1
 
     registry = SignalSpecRegistry(specs)
 
-    # ----------------------------------------------------------------------
-    # Logging summary (tidy, structured)
-    # ----------------------------------------------------------------------
+    # Logging summary
     logger.info("Built SignalSpecRegistry with %d signals", registry.num_signals)
-
     for spec in registry.specs:
-        # Try to compute embedding dimension (if DCT3D):
-        enc = spec.encoder_kwargs
-        if {"keep_h", "keep_w", "keep_t"} <= enc.keys():
-            dim = enc["keep_h"] * enc["keep_w"] * enc["keep_t"]
-        else:
-            dim = "unknown"
-
         logger.info(
             "  • %-30s | role=%-8s | modality=%-10s | encoder=%s | dim=%s",
             spec.name,
             spec.role,
             spec.modality,
             spec.encoder_name,
-            dim,
+            spec.embedding_dim,
         )
 
     return registry
-
-
-def build_codecs(signal_specs: SignalSpecRegistry) -> Dict[int, Any]:
-    """
-    Build one encoder codec instance per signal.
-    This keeps the mapping from *semantic* signal specs
-    (role, modality, encoder name/kwargs) to concrete encoder objects
-    in a single place, so the rest of the pipeline can just look up
-    `signal_id -> codec` without re-instantiating encoders.
-
-    Parameters
-    ----------
-    signal_specs : SignalSpecRegistry
-        Registry describing all signals (roles, modalities, encoders).
-
-    Returns
-    -------
-    codecs : dict
-        Mapping ``signal_id -> codec`` where each codec exposes
-        at least an ``encode(x: np.ndarray) -> np.ndarray(D,)`` method.
-    """
-    codecs: Dict[int, Any] = {}
-    for spec in signal_specs.specs:
-        if spec.encoder_name == "dct3d":
-            codecs[spec.signal_id] = DCT3DCodec(**spec.encoder_kwargs)
-        elif spec.encoder_name == "identity":
-            codecs[spec.signal_id] = IdentityCodec()
-        else:
-            raise ValueError(
-                f"Unknown encoder_name={spec.encoder_name!r} for signal {spec.name!r}"
-            )
-    return codecs
 
 
 # ---------------------------------------------------------------------------
@@ -313,16 +315,6 @@ def infer_modality(values_shape: Tuple[int, ...]) -> str:
         (C,)    -> profile
     - video / map: 2D spatial grid
         (H, W)  -> video
-
-    Parameters
-    ----------
-    values_shape : tuple of int
-        Shape of the values excluding time, as given by dict_metadata.
-
-    Returns
-    -------
-    modality : str
-        One of {"timeseries", "profile", "video"}.
     """
     if len(values_shape) == 0:
         return "timeseries"
@@ -351,16 +343,7 @@ def build_signal_role_modality_map(
         "actuator_name", "output_name", each being a list of [source, signal].
 
     dict_metadata : Mapping[str, Mapping[str, Any]]
-        Metadata dict as returned by initialize_datasets_and_metadata_for_task,
-        e.g.:
-
-            {
-              "pf_active-solenoid_current": {
-                  "dt": 0.00025,
-                  "values_shape": (1,),
-              },
-              ...
-            }
+        Metadata dict as returned by initialize_datasets_and_metadata_for_task.
 
     Returns
     -------
@@ -379,8 +362,6 @@ def build_signal_role_modality_map(
                 ...
               },
             }
-
-        where modality is one of {"timeseries", "profile", "video"}.
     """
     ss_cfg = cfg_task.get("sources_and_signals", {})
     signals_by_role: Dict[str, Dict[str, str]] = {}
