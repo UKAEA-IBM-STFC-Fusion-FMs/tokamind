@@ -165,6 +165,7 @@ def main() -> None:
         output_adapters_cfg=cfg_output_adapters,
         debug_tokens=False,
     )
+    model.to(device)
 
     # Datasets per il modello (TaskModelTransformWrapper)
     datasets_mmt = initialize_model_datasets(
