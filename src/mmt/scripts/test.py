@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import torch
 import torch.multiprocessing as mp
 import argparse
 
@@ -34,6 +35,8 @@ from mmt.data.transforms.build_tokens import BuildTokensTransform
 from mmt.data.cache_tokens import materialize_tokenized_split_to_ram
 from mmt.data.collate import MMTCollate
 
+from mmt.models.mmt import MultiModalTransformer
+
 
 DEBUG_MODE = False
 
@@ -59,6 +62,14 @@ def parse_args_finetune() -> argparse.Namespace:
 
 
 def main() -> None:
+    device = torch.device(
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
+
     mp.set_start_method("spawn", force=True)
 
     # MMT config (phase + experiment_base + embeddings + baseline path)
@@ -71,6 +82,11 @@ def main() -> None:
     cache_tokens = cfg_data.get("cache_tokens", False)
     num_workers_cache = cfg_data.get("num_workers_cache", 0)
     keep_output_native = cfg_data.get("keep_output_native", False)
+    cfg_model = cfg_mmt.model
+    cfg_backbone = cfg_model["backbone"]
+    cfg_modality_heads = cfg_model["modality_heads"]
+    cfg_output_adapters = cfg_model["output_adapters"]
+    max_positions = cfg_trim["max_chunks"]
 
     # Baseline: config_task con override (subset_of_shots, local)
     cfg_task = build_baseline_task_config(cfg_mmt)
@@ -86,7 +102,7 @@ def main() -> None:
         console=True,
     )
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
-    logger.info(f"task = {cfg_mmt.task} | phase = {cfg_mmt.phase}")
+    logger.info(f"task = {cfg_mmt.task} | phase = {cfg_mmt.phase} | device = {device}")
 
     # Baseline: datasets + metadata
     datasets_train_val_test, dict_metadata = initialize_datasets_and_metadata_for_task(
@@ -133,6 +149,21 @@ def main() -> None:
                 signal_specs=signal_specs,
             ),
         ]
+    )
+
+    # init model
+    model = MultiModalTransformer(
+        signal_specs=signal_specs,
+        d_model=cfg_backbone["d_model"],
+        n_layers=cfg_backbone["n_layers"],
+        n_heads=cfg_backbone["n_heads"],
+        dim_ff=cfg_backbone["dim_ff"],
+        dropout=cfg_backbone["dropout"],
+        backbone_activation=cfg_backbone["activation"],
+        max_positions=max_positions,
+        modality_heads_cfg=cfg_modality_heads,
+        output_adapters_cfg=cfg_output_adapters,
+        debug_tokens=False,
     )
 
     # Datasets per il modello (TaskModelTransformWrapper)

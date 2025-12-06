@@ -35,6 +35,7 @@ model:
     n_heads: 2
     dim_ff: 256
     dropout: 0.1
+    activation: "relu"
 
   modality_heads:
     timeseries:
@@ -47,7 +48,7 @@ model:
       hidden: 192
       out_dim: 128
 
-  adapters:
+  output_adapters:
     hidden_default: 0
     hidden_overrides:
       equilibrium-psi: 32
