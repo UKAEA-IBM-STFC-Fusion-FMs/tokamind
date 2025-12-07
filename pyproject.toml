@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }  # or whatever you choose later
 authors = [
-  { name = "Tobia Boschi" }
+  { name = "XXX" }
 ]
 
 #[project.urls]

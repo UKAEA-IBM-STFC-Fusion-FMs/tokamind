@@ -1,30 +1,16 @@
-# mmt/configs/task2_1/finetune_default.yaml
-#
-# Fine-tuning config for task 2-1.
-# This file should only contain parameters that are *phase-specific*.
-# Everything else (task definition, model shape, embedding strategy)
-# comes from:
-#   - experiment_base.yaml
-#   - embeddings_*.yaml
-
-# PLACEHOLDER
-
-experiment_base: "mmt/configs/task_2-1/experiment_base.yaml"
-embedding_config: "mmt/configs/task_2-1/embeddings_default.yaml"
-phase: "finetune"
+experiment_base: mmt/configs/task_2-1/experiment_base.yaml
+embedding_config: mmt/configs/task_2-1/embeddings_default.yaml
+phase: finetune
+run_id: null
 
 collate:
-  # INPUTS DROPOUT
   p_drop_inputs: 0.08
   p_drop_inputs_overrides:
     pf_active-solenoid_current: 0.1
-  # OUTPUTS DROPOUT
-  p_drop_outputs: 0.
+  p_drop_outputs: 0.0
   p_drop_outputs_overrides: {}
-  # ACTUATORS DROPOUT
-  p_drop_actuators: 0.
+  p_drop_actuators: 0.0
   p_drop_actuators_overrides: {}
-  # CHUNK DROPOUT (coarse time-based masking)
   p_drop_inputs_chunks: 0.08
   p_drop_actuators_chunks: 0.0
 
@@ -39,4 +25,84 @@ loader:
   shuffle: true
   drop_last: false
 
+# How to initialise the model's weights for this run.
+#
+# - If run_dir is null    → train from scratch.
+# - If run_dir is a path  → init from that previous run using overlap loading.
+#
+#   *Overlap loading* means we only copy parameters whose keys AND shapes
+#   match between the checkpoint and the current model; everything else
+#   keeps its current initialisation. This allows you to:
+#   - add/remove outputs,
+#   - add/remove modalities,
+#   - change shapes in some submodules
+#   between pretrain and finetune.
+#
+# load_parts controls which large blocks we reuse:
+#   backbone:        token encoder + transformer trunk
+#   modality_heads:  modality-level heads G_mod
+#   output_adapters: per-output adapters ψ
+model_init:
+  model_dir: null          # e.g. "runs/pretrain_task_2-1/some_run/model"
+  load_parts:
+    backbone: true
+    modality_heads: true
+    output_adapters: false
+
 training:
+  # If true and checkpoints/latest exists in *this* run_dir, we strictly
+  # resume that run: model weights + optimizer + scheduler + scaler + RNG +
+  # epoch counters. This is different from model_init.run_dir, which is a
+  # warm-start from some *other* run.
+  resume: false
+
+  epochs: 50              # used only if stages is empty
+  grad_accum_steps: 2
+  early_stop_patience: 5  # early stopping on validation loss
+
+  loss:
+    output_weights: {}    # or specify output and weight, e.g.: equilibrium-psi: 1.0
+
+  optimizer:
+    use_adamw: true
+    lr:
+      backbone: 5e-4          # token encoder + transformer
+      modality_heads: 2e-3
+      output_adapters: 2e-3
+    wd:
+      backbone: 0.05
+      modality_heads: 0.05
+      output_adapters: 0.05
+
+  scheduler:
+    warmup_steps_fraction: 0.02
+
+  # Optional staged fine-tuning plan.
+  # If this list is empty, we just run a single stage using the top-level
+  # epochs / grad_accum_steps and optimizer.lr/wd.
+  stages:
+    - name: ft_warm
+      epochs: 5
+      freeze_backbone: true
+      freeze_modality_heads: false
+      freeze_output_adapters: false
+      lr_backbone: 5e-4
+      lr_modality_heads: 2e-3
+      lr_output_adapters: 2e-3
+      wd_backbone: 0.05
+      wd_modality_heads: 0.05
+      wd_output_adapters: 0.05
+      grad_accum_steps: 2
+
+    - name: ft_main
+      epochs: 10
+      freeze_backbone: false
+      freeze_modality_heads: false
+      freeze_output_adapters: false
+      lr_backbone: 5e-5
+      lr_modality_heads: 1e-3
+      lr_output_adapters: 1e-3
+      wd_backbone: 0.05
+      wd_modality_heads: 0.05
+      wd_output_adapters: 0.05
+      grad_accum_steps: 2

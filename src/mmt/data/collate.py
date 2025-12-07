@@ -53,16 +53,29 @@ class MMTCollate:
 
       Outputs
       -------
-      "outputs_emb"    : Dict[int, List[torch.Tensor]]
-                         For each output signal_id:
-                           list length = B
-                           each element is a 1D tensor with encoded output.
-      "outputs_mask"   : Dict[int, BoolTensor] with shape (B,)
-                         Per-output presence/dropout mask.
+      "outputs_emb"          : Dict[int, List[torch.Tensor]]
+                               For each output signal_id:
+                                 list length = B
+                                 each element is a 1D tensor with encoded output.
+      "outputs_mask"         : Dict[int, BoolTensor] with shape (B,)
+                               Per-output presence/dropout mask.
+      "outputs_native_sizes" : Dict[int, int]
+                               For each output signal_id, the native size N,
+                               i.e. the product of the original output shape
+                               dimensions (H*W*T or similar). This is used to
+                               rescale coeff-space MSE to native-space MSE.
 
       If cfg_collate["keep_output_native"] == True, also:
-      "output_native"  : Dict[int, torch.Tensor]
-                         Each tensor has shape (B, *orig_output_shape).
+      "output_native"        : Dict[int, torch.Tensor]
+                               Each tensor has shape (B, *orig_output_shape).
+
+    Notes
+    -----
+    - Native shapes per window are provided by BuildTokensTransform via
+      "outputs_shapes". Here we use them to:
+        • reconstruct output_native (if requested), and
+        • compute a single scalar N per output (outputs_native_sizes), which
+          downstream losses can use to normalise the loss in native space.
     """
 
     # ------------------------------------------------------------------ #
@@ -75,7 +88,7 @@ class MMTCollate:
           p_drop_inputs: 0.08
           p_drop_inputs_overrides: {}          # keyed by signal_name
 
-          # output DROPOUT
+          # OUTPUT DROPOUT
           p_drop_outputs: 0.0
           p_drop_outputs_overrides: {}         # keyed by output signal_name
 
@@ -177,9 +190,9 @@ class MMTCollate:
         role_lists = []
         name_lists = []
 
-        tgt_dicts = []
-        tgt_shapes_dicts = []
-        tgt_names_dicts = []
+        out_dicts = []
+        out_shapes_dicts = []
+        out_names_dicts = []
 
         all_target_ids = set()
         id_to_output_name: Dict[int, str] = {}
@@ -192,10 +205,10 @@ class MMTCollate:
             role_lists.append(w["role"])
             name_lists.append(w["signal_name"])
 
-            tgt_dicts.append(w["outputs_emb"])
-            tgt_shapes_dicts.append(w["outputs_shapes"])
+            out_dicts.append(w["outputs_emb"])
+            out_shapes_dicts.append(w["outputs_shapes"])
             outputs_names = w.get("outputs_names", {})
-            tgt_names_dicts.append(outputs_names)
+            out_names_dicts.append(outputs_names)
 
             all_target_ids.update(w["outputs_emb"].keys())
 
@@ -317,7 +330,7 @@ class MMTCollate:
             mask = np.ones((B,), dtype=np.int8)
 
             for i in range(B):
-                emb = tgt_dicts[i].get(sig_id, None)
+                emb = out_dicts[i].get(sig_id, None)
                 if emb is None:
                     mask[i] = 0
                     emb = np.zeros((1,), dtype=np.float32)
@@ -333,7 +346,27 @@ class MMTCollate:
             outputs_mask_batch_np[sig_id] = mask
 
         # --------------------------------------------------------------- #
-        # 8. Optional: native outputs (Y_native) as NumPy
+        # 8. Native sizes per output (product of original shape dims)
+        # --------------------------------------------------------------- #
+        # We use the shapes collected from BuildTokensTransform to compute
+        # the native size N = H*W*T (or the product of any provided dims).
+        # This is used later to normalise MSE in coeff-space to native MSE.
+        outputs_native_sizes: Dict[int, int] = {}
+
+        for shapes_dict in out_shapes_dicts:
+            for sig_id, shape in shapes_dict.items():
+                if sig_id in outputs_native_sizes:
+                    continue
+                # shape might be a tuple/list/np.ndarray of ints
+                dims = tuple(int(d) for d in shape)
+                N = 1
+                for d in dims:
+                    # guard against weird zeros
+                    N *= max(1, d)
+                outputs_native_sizes[sig_id] = int(N)
+
+        # --------------------------------------------------------------- #
+        # 9. Optional: native outputs (Y_native) as NumPy
         # --------------------------------------------------------------- #
         output_native_batch_np: Dict[int, np.ndarray] = {}
         if self.keep_output_native:
@@ -355,11 +388,11 @@ class MMTCollate:
                     if val is None:
                         # Use shapes dict to reconstruct shape
                         shape = None
-                        shapes_dict = tgt_shapes_dicts[i]
+                        shapes_dict = out_shapes_dicts[i]
                         if sig_id in shapes_dict:
                             shape = shapes_dict[sig_id]
                         else:
-                            for sd in tgt_shapes_dicts:
+                            for sd in out_shapes_dicts:
                                 if sig_id in sd:
                                     shape = sd[sig_id]
                                     break
@@ -377,7 +410,7 @@ class MMTCollate:
                 output_native_batch_np[sig_id] = np.stack(per_sig_vals, axis=0)
 
         # --------------------------------------------------------------- #
-        # 9. Convert everything to torch.Tensor
+        # 10. Convert everything to torch.Tensor
         # --------------------------------------------------------------- #
         # Token-level metadata
         pos_t = torch.from_numpy(pos_batch).long()
@@ -414,7 +447,7 @@ class MMTCollate:
                 output_native_t[sig_id] = torch.from_numpy(arr)
 
         # --------------------------------------------------------------- #
-        # 10. Assemble final batch dict (torch)
+        # 11. Assemble final batch dict (torch)
         # --------------------------------------------------------------- #
         batch_out: Dict[str, Any] = {
             "emb": emb_t,
@@ -428,6 +461,8 @@ class MMTCollate:
             "actuator_mask": actuator_mask_t,
             "outputs_emb": outputs_emb_t,
             "outputs_mask": outputs_mask_t,
+            # NEW: native sizes for each output (for loss normalisation)
+            "outputs_native_sizes": outputs_native_sizes,
         }
 
         if self.keep_output_native:

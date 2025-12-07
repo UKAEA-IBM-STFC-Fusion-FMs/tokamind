@@ -10,6 +10,11 @@ experiment_base: "mmt/configs/task_2-1/experiment_base.yaml"
 embedding_config: "mmt/configs/task_2-1/embeddings_default.yaml"
 phase: "eval"
 
+# Required: which trained run to evaluate
+init:
+  model_dir: "runs/task_2-1/finetune/2025-12-07_10-42-03_seed-1234"
+
+
 data:
   keep_output_native: true
 
@@ -18,3 +23,4 @@ loader:
   num_workers: 4
   shuffle: true
   drop_last: false
+

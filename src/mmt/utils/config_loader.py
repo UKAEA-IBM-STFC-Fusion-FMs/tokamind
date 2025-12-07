@@ -195,12 +195,13 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     # --- Compute run paths ---
     repo_root = get_repo_root()
     runs_root = repo_root / "runs"
+    run_id = merged.get("run_dir", None)
 
-    task = merged.get("task", "unknown_task")
-    phase = merged.get("phase", "unknown_phase")
-
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-    run_id = f"{task}__{phase}__{timestamp}"
+    if run_id is None:
+        task = merged.get("task", "unknown_task")
+        phase = merged.get("phase", "unknown_phase")
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        run_id = f"{task}__{phase}__{timestamp}"
 
     run_dir = runs_root / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
