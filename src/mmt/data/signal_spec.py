@@ -234,7 +234,7 @@ def build_signal_specs(
 
             # 1) Get default encoder settings for this (role, modality)
             role_defaults = defaults.get(role, {})
-            modality_defaults = role_defaults.get(modality, None)
+            modality_defaults = role_defaults.get(modality)
             if modality_defaults is None:
                 raise KeyError(
                     f"No default embedding settings for role={role!r}, "
@@ -252,12 +252,13 @@ def build_signal_specs(
 
             # 2) Apply per-signal overrides, if present
             role_overrides = overrides.get(role, {})
-            sig_override = role_overrides.get(name, None)
-            if sig_override is not None:
-                if "encoder_name" in sig_override:
-                    encoder_name = sig_override["encoder_name"]
-                if "encoder_kwargs" in sig_override:
-                    encoder_kwargs = dict(sig_override["encoder_kwargs"] or {})
+            sig_override = role_overrides.get(name)
+
+            if isinstance(sig_override, dict):
+                encoder_name = sig_override.get("encoder_name", encoder_name)
+                encoder_kwargs = dict(
+                    sig_override.get("encoder_kwargs", encoder_kwargs) or {}
+                )
 
             # 3) Compute embedding_dim via encoder-specific helper
             embedding_dim = compute_embedding_dim_for_encoder(
@@ -382,8 +383,8 @@ def build_signal_role_modality_map(
             if meta is None:
                 raise KeyError(f"Signal {name!r} not found in dict_metadata")
 
-            vshape = tuple(meta.get("values_shape", ()))
-            modality = infer_modality(vshape)
+            val_shape = tuple(meta.get("values_shape", ()))
+            modality = infer_modality(val_shape)
             role_map[name] = modality
 
         signals_by_role[role] = role_map

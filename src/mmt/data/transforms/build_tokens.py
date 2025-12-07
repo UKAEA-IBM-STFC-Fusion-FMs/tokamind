@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import logging
 
 import numpy as np
@@ -176,7 +176,7 @@ class BuildTokensTransform:
 
     # ------------------------------------------------------------------ main API
 
-    def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, window: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Transform a single window after EmbedChunksTransform.
         Produce final per-token metadata for the collate and model.

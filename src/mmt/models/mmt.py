@@ -332,7 +332,7 @@ class MultiModalTransformer(nn.Module):
             if bool((~keep_cols).any()):
                 idx = keep_cols.nonzero(as_tuple=False).squeeze(1)
                 tokens = tokens.index_select(dim=1, index=idx)
-                attn_keep = attn_keep.index_select(dim=1, index=idx)
+                _attn_keep = attn_keep.index_select(dim=1, index=idx)
             src_key_padding_mask = None  # avoid problematic MPS code path
 
         # 2) Transformer backbone

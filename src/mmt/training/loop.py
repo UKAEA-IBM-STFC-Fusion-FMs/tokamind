@@ -7,6 +7,7 @@ from typing import Any, Dict, Mapping, Optional, Tuple, Hashable
 
 import torch
 from torch import Tensor
+from torch.optim.lr_scheduler import LRScheduler
 
 from mmt.models.mmt import MultiModalTransformer
 
@@ -54,8 +55,8 @@ def _move_batch_to_device(
         # DataLoader already yields CPU tensors; nothing to do
         return batch
 
-    def _to(t: Tensor) -> Tensor:
-        return t.to(device, non_blocking=True)
+    def _to(tens: Tensor) -> Tensor:
+        return tens.to(device, non_blocking=True)
 
     # Core token tensors
     for key in (
@@ -180,7 +181,7 @@ def _run_one_epoch(
     model: MultiModalTransformer,
     loader,
     optimizer: Optional[torch.optim.Optimizer],
-    scheduler: Optional[torch.optim.lr_scheduler._LRScheduler],
+    scheduler: Optional[LRScheduler],
     scaler: Optional[torch.cuda.amp.GradScaler],
     *,
     device: torch.device,
@@ -628,7 +629,7 @@ def train_finetune(
             )
 
             # Early stopping check (across all stages)
-            if patience > 0 and bad_epochs >= patience:
+            if 0 < patience <= bad_epochs:
                 logger.info(
                     "[early_stop] Patience exhausted after %d bad epochs. "
                     "Stopping training.",

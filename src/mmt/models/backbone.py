@@ -3,6 +3,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
+from typing import Optional
+
 
 class Backbone(nn.Module):
     """
@@ -34,6 +36,6 @@ class Backbone(nn.Module):
     def forward(
         self,
         x: torch.Tensor,
-        src_key_padding_mask: torch.Tensor | None = None,
+        src_key_padding_mask: Optional[torch.Tensor] = None,
     ) -> torch.Tensor:
         return self.encoder(x, src_key_padding_mask=src_key_padding_mask)

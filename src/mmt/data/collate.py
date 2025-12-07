@@ -223,7 +223,9 @@ class MMTCollate:
         input_mask = np.ones((B, L_max), dtype=np.int8)
         actuator_mask = np.ones((B, L_max), dtype=np.int8)
 
-        emb_batch: List[List[np.ndarray]] = [[None] * L_max for _ in range(B)]
+        emb_batch: List[List[np.ndarray]] = [
+            [np.empty((0,), dtype=np.float32) for _ in range(L_max)] for _ in range(B)
+        ]
         name_batch: List[List[str]] = [[""] * L_max for _ in range(B)]
 
         # --------------------------------------------------------------- #
@@ -408,7 +410,9 @@ class MMTCollate:
         actuator_mask_t = torch.from_numpy(actuator_mask.astype(bool))
 
         # Ragged embeddings
-        emb_t: List[List[torch.Tensor]] = [[None] * L_max for _ in range(B)]
+        emb_t: List[List[torch.Tensor]] = [
+            [torch.empty(0) for _ in range(L_max)] for _ in range(B)
+        ]
         for i in range(B):
             for t in range(L_max):
                 arr = emb_batch[i][t]

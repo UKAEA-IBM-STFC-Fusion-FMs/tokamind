@@ -234,13 +234,13 @@ class SelectValidWindowsTransform:
         def _process_role_chunks(role: str, chunks) -> None:
             for ch in chunks:
                 sigs = ch.get("signals") or {}
-                for name, val in list(sigs.items()):
-                    mask, new_val = self._mask_if_bad(val)
-                    if mask:
-                        sigs[name] = None
+                for sig_name, val in list(sigs.items()):
+                    should_mask, cleaned_val = self._mask_if_bad(val)
+                    if should_mask:
+                        sigs[sig_name] = None
                     else:
-                        sigs[name] = new_val
-                        valid_chunks_by_sig[role][name] += 1
+                        sigs[sig_name] = cleaned_val
+                        valid_chunks_by_sig[role][sig_name] += 1
 
         _process_role_chunks("input", input_chunks)
         _process_role_chunks("actuator", act_chunks)
@@ -251,18 +251,18 @@ class SelectValidWindowsTransform:
         def _mask_signals_with_too_few_chunks(role: str, chunks) -> None:
             if not chunks:
                 return
-            all_names = set()
+            all_sig_names = set()
             for ch in chunks:
                 sigs = ch.get("signals") or {}
-                all_names.update(sigs.keys())
+                all_sig_names.update(sigs.keys())
 
-            for name in all_names:
-                n_chunks = valid_chunks_by_sig[role].get(name, 0)
+            for sig_name in all_sig_names:
+                n_chunks = valid_chunks_by_sig[role].get(sig_name, 0)
                 if n_chunks < self.min_valid_chunks:
                     for ch in chunks:
                         sigs = ch.get("signals") or {}
-                        if name in sigs:
-                            sigs[name] = None
+                        if sig_name in sigs:
+                            sigs[sig_name] = None
 
         _mask_signals_with_too_few_chunks("input", input_chunks)
         _mask_signals_with_too_few_chunks("actuator", act_chunks)
@@ -275,9 +275,9 @@ class SelectValidWindowsTransform:
         def _collect_valid_signals(role: str, chunks) -> None:
             for ch in chunks:
                 sigs = ch.get("signals") or {}
-                for name, val in sigs.items():
+                for sig_name, val in sigs.items():
                     if val is not None:
-                        valid_x_signals.add((role, name))
+                        valid_x_signals.add((role, sig_name))
 
         _collect_valid_signals("input", input_chunks)
         _collect_valid_signals("actuator", act_chunks)

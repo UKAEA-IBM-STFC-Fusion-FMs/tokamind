@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 import torch
 import torch.nn as nn
@@ -112,7 +112,7 @@ class TokenEncoder(nn.Module):
                     f"Signal id {sid} was first seen with in_dim={self._in_dim_by_sid[key]}, "
                     f"but now has in_dim={in_dim}."
                 )
-        return self._proj_by_sid[key]
+        return cast(nn.Linear, self._proj_by_sid[key])
 
     # ------------------------------------------------------------------
     def forward(self, batch: Dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:

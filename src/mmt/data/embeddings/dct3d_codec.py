@@ -1,4 +1,48 @@
-# src/mmt/data/embeddings/dct3d_codec.py
+"""
+DCT3D Codec
+-----------
+
+This module implements a lightweight 3D Discrete Cosine Transform (DCT)
+codec used for compressing and reconstructing multi-dimensional
+time-dependent signals.
+
+The codec provides:
+    • A 3D orthonormal DCT transform (type-II) applied along (H, W, T)
+    • Optional coefficient truncation via (keep_h, keep_w, keep_t)
+    • Flattened coefficient vectors for storage or model input
+    • Exact inverse transform with zero-padding of truncated coefficients
+    • Automatic handling of 1D / 2D / 3D signals by reshaping to (H, W, T)
+
+Design goals
+------------
+    • **Orthonormal transform** (energy-preserving)
+      Ensures that MSE in coefficient space matches MSE in native space.
+
+    • **Fixed-size latent representation**
+      Truncation to (keep_h, keep_w, keep_t) produces a stable,
+      task-controlled embedding dimension.
+
+    • **Non-destructive decode**
+      Missing coefficients are padded with zeros before IDCT, providing
+      a consistent reconstruction even when inputs have different native
+      shapes.
+
+    • **Shape-robust interface**
+      Inputs of shape (T), (H, T), or (H, W, T) are all supported and
+      internally normalized to a 3D view.
+
+Usage
+-----
+    codec = DCT3DCodec(keep_h=8, keep_w=8, keep_t=16)
+    z = codec.encode(x)                 # x: np.ndarray
+    x_hat = codec.decode(z, x.shape)
+
+The module also includes a small demo/test suite (isolated inside
+private functions) that can be executed directly:
+
+    $ python dct3d_codec.py
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -215,94 +259,89 @@ class DCT3DCodec:
         return x_hat.astype(self.dtype, copy=False)
 
 
-if __name__ == "__main__":
-    """
-    simple test of the codec
-    """
+# =====================================================================
+# Demo / tests
+# =====================================================================
 
-    np.random.seed(0)
 
-    def roundtrip(codec: DCT3DCodec, x: np.ndarray, desc: str) -> None:
-        print(f"\n[TEST] {desc}  shape={x.shape}  keep={codec.keep_shape}")
-        z = codec.encode(x)
-        print(f"  encoded shape: {z.shape} (D={z.size})")
-        x_hat = codec.decode(z, original_shape=x.shape)
-        print(f"  decoded shape: {x_hat.shape}")
+def _demo_roundtrip(codec: DCT3DCodec, x: np.ndarray, desc: str) -> None:
+    """Single encode/decode test."""
+    print(f"\n[TEST] {desc}  shape={x.shape}  keep={codec.keep_shape}")
+    z = codec.encode(x)
+    print(f"  encoded: D={z.size}, shape={z.shape}")
+    x_hat = codec.decode(z, original_shape=x.shape)
+    print(f"  decoded: shape={x_hat.shape}")
 
-        diff = x_hat - x
-        max_err = float(np.max(np.abs(diff)))
-        mse = float(np.mean(diff**2))
-        rel_energy = float(np.linalg.norm(x_hat) / (np.linalg.norm(x) + 1e-12))
+    diff = x_hat - x
+    print(f"  max |x-x_hat| = {np.max(np.abs(diff)):.3e}")
+    print(f"  MSE           = {np.mean(diff**2):.3e}")
 
-        print(f"  max |x - x_hat| = {max_err:.3e}")
-        print(f"  MSE              = {mse:.3e}")
-        print(f"  ||x_hat|| / ||x||= {rel_energy:.3f}")
 
-    # -------------------------------------------------------------
-    # 1) Timeseries: smooth sine wave (low frequency)
-    # -------------------------------------------------------------
+def _demo_timeseries():
     T = 128
     t = np.linspace(0, 2 * np.pi, T, endpoint=False)
-    x_sine = np.sin(2 * t).astype(np.float32)  # smooth, low-freq
+    x_sine = np.sin(2 * t).astype(np.float32)
 
     for keep_t in [4, 8, 16, 32, 64]:
-        codec = DCT3DCodec(keep_h=1, keep_w=1, keep_t=keep_t)
-        roundtrip(codec, x_sine, f"timeseries (low-freq sine), keep_t={keep_t}")
+        codec = DCT3DCodec(1, 1, keep_t)
+        _demo_roundtrip(codec, x_sine, f"Timeseries sine, keep_t={keep_t}")
 
-    # -------------------------------------------------------------
-    # 2) Timeseries: sine + noise (higher freq content)
-    # -------------------------------------------------------------
+
+def _demo_timeseries_noisy():
+    T = 128
+    t = np.linspace(0, 2 * np.pi, T, endpoint=False)
     noise = 0.3 * np.random.randn(T).astype(np.float32)
-    x_noisy = (np.sin(2 * t) + noise).astype(np.float32)
+    x = (np.sin(2 * t) + noise).astype(np.float32)
 
     for keep_t in [4, 8, 16, 32, 64]:
-        codec = DCT3DCodec(keep_h=1, keep_w=1, keep_t=keep_t)
-        roundtrip(codec, x_noisy, f"timeseries (sine + noise), keep_t={keep_t}")
+        codec = DCT3DCodec(1, 1, keep_t)
+        _demo_roundtrip(codec, x, f"Timeseries noisy, keep_t={keep_t}")
 
-    # -------------------------------------------------------------
-    # 3) Profile: multi-channel sinusoids (C, T)
-    # -------------------------------------------------------------
+
+def _demo_profile():
     C = 5
-    T_prof = 128
-    t_prof = np.linspace(0, 2 * np.pi, T_prof, endpoint=False)
-
-    # each channel has a difference frequencies
-    x_profile = []
-    for c in range(C):
-        freq = 1 + c  # 1x, 2x, 3x, ...
-        phase = 0.3 * c
-        x_c = np.sin(freq * t_prof + phase)
-        x_profile.append(x_c)
-    x_profile = np.stack(x_profile, axis=0).astype(np.float32)  # (C, T)
+    T = 128
+    t = np.linspace(0, 2 * np.pi, T, endpoint=False)
+    x = np.stack([np.sin((1 + c) * t + 0.3 * c) for c in range(C)], axis=0).astype(
+        np.float32
+    )
 
     for keep_t in [4, 8, 16, 32, 64]:
-        codec = DCT3DCodec(keep_h=C, keep_w=1, keep_t=keep_t)
-        roundtrip(codec, x_profile, f"profile (C={C}, T) multi-sine, keep_t={keep_t}")
+        codec = DCT3DCodec(C, 1, keep_t)
+        _demo_roundtrip(codec, x, f"Profile (C={C}), keep_t={keep_t}")
 
-    # -------------------------------------------------------------
-    # 4) "Video": Gaussian blob moving slowly in time (H, W, T)
-    # -------------------------------------------------------------
-    H, W, T_vid = 16, 16, 32
-    y = np.linspace(-1, 1, H)
-    x = np.linspace(-1, 1, W)
-    Y, X = np.meshgrid(y, x, indexing="ij")
 
-    def gaussian(cx, cy, sigma=0.3):
-        return np.exp(-((X - cx) ** 2 + (Y - cy) ** 2) / (2 * sigma**2))
+def _demo_video():
+    H, W, T = 16, 16, 32
+    yv = np.linspace(-1, 1, H)
+    xv = np.linspace(-1, 1, W)
+    Y, X = np.meshgrid(yv, xv, indexing="ij")
+
+    def gaussian(mux, muy, sigma=0.3):
+        return np.exp(-((X - mux) ** 2 + (Y - muy) ** 2) / (2 * sigma**2))
 
     frames = []
-    for k in range(T_vid):
-        # blob moves slowly along x
-        cx = -0.5 + k * (1.0 / (T_vid - 1))
+    for k in range(T):
+        cx = -0.5 + k * (1.0 / (T - 1))
         cy = 0.0
-        frame = gaussian(cx, cy)
-        frames.append(frame)
-    x_video = np.stack(frames, axis=-1).astype(np.float32)  # (H, W, T)
+        frames.append(gaussian(cx, cy))
+    x_video = np.stack(frames, axis=-1).astype(np.float32)
 
-    for keep_h, keep_w, keep_t in [(4, 4, 4), (8, 8, 8), (16, 16, 8), (16, 16, 16)]:
-        codec = DCT3DCodec(keep_h=keep_h, keep_w=keep_w, keep_t=keep_t)
-        roundtrip(
-            codec,
-            x_video,
-            f"video Gaussian blob, keep=(h={keep_h},w={keep_w},t={keep_t})",
-        )
+    configs = [(4, 4, 4), (8, 8, 8), (16, 16, 8), (16, 16, 16)]
+
+    for keep_h, keep_w, keep_t in configs:
+        codec = DCT3DCodec(keep_h, keep_w, keep_t)
+        label = f"Video Gaussian, keep(h={keep_h}, w={keep_w}, t={keep_t})"
+        _demo_roundtrip(codec, x_video, label)
+
+
+def _run_all_demos():
+    np.random.seed(0)
+    _demo_timeseries()
+    _demo_timeseries_noisy()
+    _demo_profile()
+    _demo_video()
+
+
+if __name__ == "__main__":
+    _run_all_demos()

@@ -1,8 +1,6 @@
-# mmt/data/cache_tokens.py
-
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, Iterable, List, Optional, Sequence
 from torch.utils.data import DataLoader, Dataset
 import psutil
 import os
@@ -82,9 +80,9 @@ def _cache_collate_identity(batch):
 
 
 # ----------------------------------------------------------------------------- #
-# Helper dataset wrapper for multiprocessing caching
+# Wrapper for multiprocessing caching
 # ----------------------------------------------------------------------------- #
-class FlattenedStreamingDataset:
+class FlattenedStreamingDataset(Dataset):
     """
     Wraps a TaskModelTransformWrapper so that __getitem__ returns a *list*
     of window dicts instead of a generator.
@@ -98,10 +96,10 @@ class FlattenedStreamingDataset:
     def __init__(self, ds):
         self.ds = ds
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.ds)
 
-    def __getitem__(self, idx):
+    def __getitem__(self, idx: int) -> List[Dict[str, Any]]:
         item = self.ds[idx]
         if item is None:
             return []
@@ -118,7 +116,7 @@ class FlattenedStreamingDataset:
 # Main caching helper
 # ----------------------------------------------------------------------------- #
 def materialize_tokenized_split_to_ram(
-    streaming_dataset,
+    streaming_dataset: Sequence[Any],
     max_windows: Optional[int] = None,
     num_workers_cache: int = 0,
 ):
@@ -151,10 +149,9 @@ def materialize_tokenized_split_to_ram(
 
     Parameters
     ----------
-    streaming_dataset : Dataset
-        A TaskModelTransformWrapper or similar streaming dataset whose
-        __getitem__ returns either a dict (single window) or a generator/list
-        of window dicts.
+    streaming_dataset :
+        Any dataset-like object that supports __len__ and __getitem__,
+        e.g. a TaskModelTransformWrapper or a torch.utils.data.Dataset.
 
     max_windows : int or None
         Optional cap on collected windows. Useful for debugging smaller subsets.

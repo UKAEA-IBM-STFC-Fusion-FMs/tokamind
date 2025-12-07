@@ -6,7 +6,7 @@ import datetime
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, cast
 from importlib.resources import files
 
 from .paths import get_repo_root
@@ -111,8 +111,11 @@ def _resolve_baseline_config(baseline_config_str: str) -> Path:
     pkg_name = parts[0]  # baseline package
     rel_inside_pkg = Path(*parts[1:])  # internal path in that package
 
+    # Two-step cast to satisfy type checker due to bad stubs
     pkg_root = files(pkg_name)
-    return (pkg_root / rel_inside_pkg).resolve()
+    pkg_root_path = cast(Path, cast(object, pkg_root))
+
+    return (Path(pkg_root_path) / rel_inside_pkg).resolve()
 
 
 # ---------------------------------------------------------------------------

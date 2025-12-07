@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 import logging
 
 logger = logging.getLogger("mmt.TrimChunks")
@@ -130,7 +130,12 @@ class TrimChunksTransform:
 
         kept: List[Dict[str, Any]] = []
         for ch in chunks:
-            t_start = ch.get("chunk_start_time", None)
+            if "chunk_start_time" not in ch:
+                raise ValueError(
+                    "Chunk missing 'chunk_start_time'. Something is wrong upstream."
+                )
+
+            t_start = ch["chunk_start_time"]
             pos = self._compute_pos(t_out_end, t_start)
 
             # Keep only valid "past" chunks up to max_chunks steps back
@@ -140,15 +145,16 @@ class TrimChunksTransform:
         return kept
 
     # ------------------------------------------------------------------ #
-    def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
+    def __call__(self, window: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """
         Apply trimming to a single window.
         """
         if window is None:
             return None
 
-        t_cut = window.get("t_cut", None)
-        if t_cut is None:
+        try:
+            t_cut = window["t_cut"]
+        except KeyError:
             raise ValueError("TrimChunksTransform: window missing 't_cut'")
 
         # compute t_out_end ONCE

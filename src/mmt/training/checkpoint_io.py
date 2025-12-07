@@ -98,6 +98,8 @@ The model is expected to expose:
 from __future__ import annotations
 
 import json
+from json import JSONDecodeError
+
 import os
 import random
 import tempfile
@@ -179,20 +181,35 @@ def _capture_rng_state() -> Dict[str, Any]:
 
 
 def _restore_rng_state(state: Dict[str, Any]) -> None:
-    """Restore RNG states if present (best-effort, silently skips on errors)."""
+    """
+    Restore RNG states if present (best-effort).
+    Errors during restore are ignored, but only expected ones.
+    """
     if not isinstance(state, dict):
         return
+
     try:
         if "py" in state:
             random.setstate(state["py"])
+    except (TypeError, ValueError):
+        pass
+
+    try:
         if "np" in state:
             np.random.set_state(state["np"])
+    except (TypeError, ValueError):
+        pass
+
+    try:
         if "torch_cpu" in state:
             torch.set_rng_state(state["torch_cpu"])
+    except (RuntimeError, TypeError, ValueError):
+        pass
+
+    try:
         if "torch_cuda" in state and torch.cuda.is_available():
             torch.cuda.set_rng_state_all(state["torch_cuda"])
-    except Exception:
-        # best-effort: we don't want RNG restore to kill resume
+    except (RuntimeError, TypeError, ValueError):
         pass
 
 
@@ -586,7 +603,7 @@ def resume_from_latest(
         try:
             with open(meta_path, "r") as f:
                 meta = json.load(f)
-        except Exception:
+        except (OSError, JSONDecodeError):
             meta = {}
 
     start_epoch = int(meta.get("epoch", 0)) + 1
@@ -629,7 +646,7 @@ def load_best_weights(
         try:
             with open(meta_path, "r") as f:
                 meta = json.load(f)
-        except Exception:
+        except (OSError, JSONDecodeError):
             meta = {}
 
     epoch_best = int(meta.get("epoch_best", -1))

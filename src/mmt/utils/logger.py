@@ -41,7 +41,7 @@ def setup_logging(
 
     Parameters
     ----------
-    output_dir :
+    run_dir :
         Directory where the log file should be created. The directory will be
         created if it does not exist.
     logger_name :
