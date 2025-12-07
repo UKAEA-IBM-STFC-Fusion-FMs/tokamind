@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from typing import Dict, Optional, Set, Hashable
+from typing import Dict, Optional, Set, Hashable, Mapping
 
 import torch
 import torch.nn as nn
@@ -241,7 +241,7 @@ def _backbone_lr_scale(optimizer: torch.optim.Optimizer) -> float:
 def toggle_param_groups(
     optimizer: torch.optim.Optimizer,
     active_outputs: Set[Hashable],
-    output_to_modality: Dict[Hashable, str],
+    output_to_modality: Mapping[Hashable, str],
 ) -> None:
     """
     Automatically enable / disable LR + weight decay for modality_heads and
