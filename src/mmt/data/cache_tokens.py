@@ -129,7 +129,7 @@ def materialize_tokenized_split_to_ram(
     This function executes the full model-specific transform chain once per window:
 
         ChunkWindowsTransform
-        → DropNaChunksTransform
+        → SelectValidWindows
         → TrimChunksTransform
         → EmbedChunksTransform
         → BuildTokensTransform

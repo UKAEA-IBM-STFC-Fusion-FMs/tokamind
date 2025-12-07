@@ -20,10 +20,11 @@ preprocessing:
   trim_chunks:
      max_chunks: 50     # maximum number of chunks in the history
 
-  drop_na:
+  valid_windows:
     min_valid_inputs_actuators: 1
     min_valid_chunks: 1
     min_valid_outputs: 1
+    # accept_na: false   # (advanced; currently we always use strict Na policy)
 
   cache:
     enabled: true

@@ -18,7 +18,7 @@ For each task (e.g. `task_2-1`) we use three logical layers:
      - link to the **baseline FAIRMAST task config** (`baseline_config`), i.e. the YAML file from the separate baseline repository that defines the raw task (inputs, outputs, windowing, etc.)
      - global settings (`global.seed`)
      - data options (`data.local`, `data.subset_of_shots`)
-     - preprocessing settings (`preprocessing.drop_nan`, `preprocessing.chunking`, `preprocessing.cache`)
+     - preprocessing settings (`preprocessing.valid_windows`, `preprocessing.chunking`, `preprocessing.cache`)
      - high-level model shape (`model.backbone`, `model.modality_heads`, `model.adapters`)
 
 

@@ -19,166 +19,166 @@ logger = logging.getLogger("mmt.Model")
 
 class MultiModalTransformer(nn.Module):
     """
-    MultiModalTransformer: foundation + task model for the open-source MMT pipeline.
+     MultiModalTransformer: foundation + task model for the open-source MMT pipeline.
 
-    This module implements the final stage of the MMT architecture: a lightweight,
-    fully modular transformer that consumes *tokenized embeddings* produced by the
-    MMT preprocessing pipeline:
+     This module implements the final stage of the MMT architecture: a lightweight,
+     fully modular transformer that consumes *tokenized embeddings* produced by the
+     MMT preprocessing pipeline:
 
-        Chunk → DropNa → TrimChunks → EmbedChunks → BuildTokens → MMTCollate
+         Chunk → SelectValidWindows → TrimChunks → EmbedChunks → BuildTokens → MMTCollate
 
-    and generates predictions for all output signals of a task.
+     and generates predictions for all output signals of a task.
 
-    The model is intentionally simple, explicit, and easy to reason about. It is
-    composed of four cleanly separated blocks:
+     The model is intentionally simple, explicit, and easy to reason about. It is
+     composed of four cleanly separated blocks:
 
-        TokenEncoder  →  Transformer backbone  →  Modality heads  →  Output adapters
+         TokenEncoder  →  Transformer backbone  →  Modality heads  →  Output adapters
 
 
+     -------------------------------------------------------------------------------
+     1. TokenEncoder
+     -------------------------------------------------------------------------------
+     The TokenEncoder receives batched per-token embeddings and metadata produced by
+     `MMTCollate`. For each token it:
+
+       • selects the correct projection layer for its signal_id and maps the
+         chunk-level embedding from `D_enc(signal)` → `d_model`,
+       • adds positional, signal-ID and role embeddings,
+       • prepends a learned CLS token (`pos = 0`, `role = OUTPUT`).
+
+     Output:
+         tokens : (B, L+1, d_model)
+         attn_keep : (B, L+1)  — True where the token is real (including CLS)
+
+     No raw chunks or raw signals enter the model; all preprocessing happens outside.
+
+
+     -------------------------------------------------------------------------------
+     2. Transformer backbone
+     -------------------------------------------------------------------------------
+     A standard PyTorch `nn.TransformerEncoder` (`batch_first=True`) processes the
+     sequence of tokens and produces a contextualised representation for each token.
+
+     Masking:
+         • On CPU/CUDA, we use `src_key_padding_mask = ~attn_keep`.
+         • On MPS (Apple Silicon), padding-only columns are pruned and the mask is
+           dropped to avoid unsupported nested-tensor code paths.
+
+     Output:
+         h : (B, L+1, d_model)
+
+
+     -------------------------------------------------------------------------------
+     3. Modality heads
+     -------------------------------------------------------------------------------
+     Each modality (e.g. `"timeseries"`, `"profile"`, `"video"`) receives its own
+     small MLP that maps the CLS token to a modality-specific latent vector
+     `G_mod`:
+
+         modality_latent[mod] = head_mod(h_cls)     # (B, G_mod)
+
+     This corresponds to the shared “modality subspace” in the original MMT:
+     inputs of the same modality share statistical structure.
+
+
+     -------------------------------------------------------------------------------
+     4. Output adapters
+     -------------------------------------------------------------------------------
+     Every output signal (role="output") receives:
+
+       • an output dimension `K_t = SignalSpec.embedding_dim`,
+       • an OutputAdapter: a small linear or MLP mapping `G_mod → K_t`.
+
+         pred[sid] = adapter_sid(modality_latent[modality_of_sid])
+
+     This cleanly separates:
+         • modality-level representation learning (shared),
+         • per-signal heads (task-specific).
+
+
+     -------------------------------------------------------------------------------
+     Input format (from MMTCollate)
     -------------------------------------------------------------------------------
-    1. TokenEncoder
-    -------------------------------------------------------------------------------
-    The TokenEncoder receives batched per-token embeddings and metadata produced by
-    `MMTCollate`. For each token it:
+     The forward pass expects a batch dictionary containing at least:
 
-      • selects the correct projection layer for its signal_id and maps the
-        chunk-level embedding from `D_enc(signal)` → `d_model`,
-      • adds positional, signal-ID and role embeddings,
-      • prepends a learned CLS token (`pos = 0`, `role = OUTPUT`).
+         batch["emb"]           : ragged List[List[Tensor]] per-token embeddings
+         batch["pos"]           : LongTensor (B, L)
+         batch["id"]            : LongTensor (B, L)  — physical signal IDs
+         batch["role"]          : LongTensor (B, L)
+         batch["padding_mask"]  : BoolTensor (B, L)
 
-    Output:
-        tokens : (B, L+1, d_model)
-        attn_keep : (B, L+1)  — True where the token is real (including CLS)
-
-    No raw chunks or raw signals enter the model; all preprocessing happens outside.
+     All fields are produced by BuildTokensTransform + MMTCollate.
+     No raw arrays, no dicts of chunks, and no signal names are used here.
 
 
-    -------------------------------------------------------------------------------
-    2. Transformer backbone
-    -------------------------------------------------------------------------------
-    A standard PyTorch `nn.TransformerEncoder` (`batch_first=True`) processes the
-    sequence of tokens and produces a contextualised representation for each token.
+     -------------------------------------------------------------------------------
+     Model initialization parameters
+     -------------------------------------------------------------------------------
 
-    Masking:
-        • On CPU/CUDA, we use `src_key_padding_mask = ~attn_keep`.
-        • On MPS (Apple Silicon), padding-only columns are pruned and the mask is
-          dropped to avoid unsupported nested-tensor code paths.
+     Parameters
+     ----------
+     signal_specs : SignalSpecRegistry
+         Registry with one spec per signal (name, role, modality, encoder, embedding_dim).
+         Determines which signals are inputs/outputs and the required output dimensions.
 
-    Output:
-        h : (B, L+1, d_model)
+     d_model : int
+         Transformer model dimension (size of token embeddings after projection).
 
+     n_layers : int
+         Number of TransformerEncoder layers in the backbone.
 
-    -------------------------------------------------------------------------------
-    3. Modality heads
-    -------------------------------------------------------------------------------
-    Each modality (e.g. `"timeseries"`, `"profile"`, `"video"`) receives its own
-    small MLP that maps the CLS token to a modality-specific latent vector
-    `G_mod`:
+     n_heads : int
+         Number of attention heads per layer.
 
-        modality_latent[mod] = head_mod(h_cls)     # (B, G_mod)
+     dim_ff : int
+         Feed-forward dimension inside Transformer layers.
 
-    This corresponds to the shared “modality subspace” in the original MMT:
-    inputs of the same modality share statistical structure.
+     dropout : float
+         Dropout probability inside the backbone.
 
+     max_positions : int
+         Maximum number of temporal positions for positional embeddings.
+         Usually equal to preprocessing.trim_chunks.max_chunks.
 
-    -------------------------------------------------------------------------------
-    4. Output adapters
-    -------------------------------------------------------------------------------
-    Every output signal (role="output") receives:
+     modality_heads_cfg : dict
+         Configuration of modality heads. Example:
+             {
+               "timeseries": {"hidden": 128, "out_dim": 128},
+               "profile":    {"hidden": 128, "out_dim": 128},
+               "video":      {"hidden": 192, "out_dim": 128},
+             }
 
-      • an output dimension `K_t = SignalSpec.embedding_dim`,
-      • an OutputAdapter: a small linear or MLP mapping `G_mod → K_t`.
+     output_adapters_cfg : dict
+         Configuration of output adapters. Example:
+             {
+               "hidden_default": 0,
+               "hidden_overrides": {"equilibrium-psi": 32}
+             }
 
-        pred[sid] = adapter_sid(modality_latent[modality_of_sid])
+     backbone_activation : str
+         Activation function for the Transformer backbone ("relu", "gelu", …).
 
-    This cleanly separates:
-        • modality-level representation learning (shared),
-        • per-signal heads (task-specific).
-
-
-    -------------------------------------------------------------------------------
-    Input format (from MMTCollate)
-   -------------------------------------------------------------------------------
-    The forward pass expects a batch dictionary containing at least:
-
-        batch["emb"]           : ragged List[List[Tensor]] per-token embeddings
-        batch["pos"]           : LongTensor (B, L)
-        batch["id"]            : LongTensor (B, L)  — physical signal IDs
-        batch["role"]          : LongTensor (B, L)
-        batch["padding_mask"]  : BoolTensor (B, L)
-
-    All fields are produced by BuildTokensTransform + MMTCollate.
-    No raw arrays, no dicts of chunks, and no signal names are used here.
+     debug_tokens : bool
+         Enable extra consistency checks in the TokenEncoder.
 
 
-    -------------------------------------------------------------------------------
-    Model initialization parameters
-    -------------------------------------------------------------------------------
+     -------------------------------------------------------------------------------
+     Forward() return structure
+     -------------------------------------------------------------------------------
+     The forward method returns:
 
-    Parameters
-    ----------
-    signal_specs : SignalSpecRegistry
-        Registry with one spec per signal (name, role, modality, encoder, embedding_dim).
-        Determines which signals are inputs/outputs and the required output dimensions.
+         {
+             "h_cls"          : Tensor (B, d_model),
+             "modality_latent": Dict[str, Tensor(B, G_mod)],
+             "pred"           : Dict[int, Tensor(B, K_t)],
+         }
 
-    d_model : int
-        Transformer model dimension (size of token embeddings after projection).
+     • `h_cls` is the pooled representation (CLS token).
+     • `modality_latent` contains one latent vector per modality.
+     • `pred` maps each output signal_id → its prediction vector (dimension K_t).
 
-    n_layers : int
-        Number of TransformerEncoder layers in the backbone.
-
-    n_heads : int
-        Number of attention heads per layer.
-
-    dim_ff : int
-        Feed-forward dimension inside Transformer layers.
-
-    dropout : float
-        Dropout probability inside the backbone.
-
-    max_positions : int
-        Maximum number of temporal positions for positional embeddings.
-        Usually equal to preprocessing.trim_chunks.max_chunks.
-
-    modality_heads_cfg : dict
-        Configuration of modality heads. Example:
-            {
-              "timeseries": {"hidden": 128, "out_dim": 128},
-              "profile":    {"hidden": 128, "out_dim": 128},
-              "video":      {"hidden": 192, "out_dim": 128},
-            }
-
-    output_adapters_cfg : dict
-        Configuration of output adapters. Example:
-            {
-              "hidden_default": 0,
-              "hidden_overrides": {"equilibrium-psi": 32}
-            }
-
-    backbone_activation : str
-        Activation function for the Transformer backbone ("relu", "gelu", …).
-
-    debug_tokens : bool
-        Enable extra consistency checks in the TokenEncoder.
-
-
-    -------------------------------------------------------------------------------
-    Forward() return structure
-    -------------------------------------------------------------------------------
-    The forward method returns:
-
-        {
-            "h_cls"          : Tensor (B, d_model),
-            "modality_latent": Dict[str, Tensor(B, G_mod)],
-            "pred"           : Dict[int, Tensor(B, K_t)],
-        }
-
-    • `h_cls` is the pooled representation (CLS token).
-    • `modality_latent` contains one latent vector per modality.
-    • `pred` maps each output signal_id → its prediction vector (dimension K_t).
-
-    Downstream training code computes losses directly from `pred`
-    (MSE, masked MSE, task-specific losses, etc.).
+     Downstream training code computes losses directly from `pred`
+     (MSE, masked MSE, task-specific losses, etc.).
     """
 
     def __init__(

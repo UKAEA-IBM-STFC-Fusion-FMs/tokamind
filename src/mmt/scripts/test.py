@@ -28,7 +28,7 @@ from mmt.data.signal_spec import (
 from mmt.data.embeddings.codec_utils import build_codecs
 
 from mmt.data.transforms.chunk_windows import ChunkWindowsTransform
-from mmt.data.transforms.drop_na import DropNaChunksTransform
+from mmt.data.transforms.select_valid_windows import SelectValidWindowsTransform
 from mmt.data.transforms.trim_chunks import TrimChunksTransform
 from mmt.data.transforms.embed_chunks import EmbedChunksTransform
 from mmt.data.transforms.build_tokens import BuildTokensTransform
@@ -77,7 +77,7 @@ def main() -> None:
     cfg_mmt = load_experiment_config(args.phase_config)
     cfg_chunks = cfg_mmt.preprocessing["chunk"]
     cfg_trim = cfg_mmt.preprocessing["trim_chunks"]
-    cfg_drop_nan = cfg_mmt.preprocessing["drop_na"]
+    cfg_valid_win = cfg_mmt.preprocessing["valid_windows"]
     cfg_data = cfg_mmt.data
     cache_tokens = cfg_data.get("cache_tokens", False)
     num_workers_cache = cfg_data.get("num_workers_cache", 0)
@@ -126,10 +126,10 @@ def main() -> None:
                 chunk_length_sec=cfg_chunks["chunk_length"],
                 stride_sec=cfg_chunks["stride"],
             ),
-            DropNaChunksTransform(
-                min_valid_inputs_actuators=cfg_drop_nan["min_valid_inputs_actuators"],
-                min_valid_chunks=cfg_drop_nan["min_valid_chunks"],
-                min_valid_outputs=cfg_drop_nan["min_valid_outputs"],
+            SelectValidWindowsTransform(
+                min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
+                min_valid_chunks=cfg_valid_win["min_valid_chunks"],
+                min_valid_outputs=cfg_valid_win["min_valid_outputs"],
             ),
             TrimChunksTransform(
                 chunk_length_sec=cfg_chunks["chunk_length"],

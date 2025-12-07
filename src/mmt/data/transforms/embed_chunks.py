@@ -14,7 +14,7 @@ class EmbedChunksTransform:
     """
     Attach per-chunk and per-window embeddings to a window, with caching.
 
-    This transform runs **after** ChunkingTransform and DropNaChunksTransform,
+    This transform runs **after** ChunkingTransform and SelectValidWindows,
     as part of the TaskModelTransformWrapper model_transform chain.
 
     It:
@@ -46,7 +46,7 @@ class EmbedChunksTransform:
 
     Expected input (per window)
     ---------------------------
-    Same window dict as returned by DropNaChunksTransform, i.e. with:
+    Same window dict as returned by SelectValidWindows, i.e. with:
 
         window["chunks"]["input"]    = [chunk_dict, ...]
         window["chunks"]["actuator"] = [chunk_dict, ...]

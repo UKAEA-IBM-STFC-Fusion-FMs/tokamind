@@ -6,19 +6,19 @@ import logging
 
 import numpy as np
 
-logger = logging.getLogger("mmt.DropNa")
+logger = logging.getLogger("mmt.SelectValidWindows")
 
 
-class DropNaChunksTransform:
+class SelectValidWindowsTransform:
     """
-    Drop or mask a single window based on NaNs / non-finite values at *chunk* level.
+    Select (or drop) a single window based on validity criteria at *chunk* level.
 
     This transform is designed to run **after** ChunkingTransform, as part of the
     model_transform chain inside TaskModelTransformWrapper. It operates on a
     **single window dict** and returns either:
 
-      - the window (with some signals masked), or
-      - None, if the window should be dropped.
+      - the window (with some signals masked to None), or
+      - None, if the window should be dropped entirely.
 
     Expected input (after ChunkingTransform)
     ----------------------------------------
@@ -53,51 +53,98 @@ class DropNaChunksTransform:
 
     Behaviour (per window)
     ----------------------
-    1. For all chunks under "input" and "actuator":
-       - For each signal:
-         * values is None or empty      → treated as missing.
-         * any NaN / ±inf present       → the signal is masked in that chunk
-                                         (signals[var_name] = None).
-         * all finite, non-empty array  → kept and counted as a "valid chunk"
-                                         for that (role, signal_name).
+    The goal is to **select valid windows** based on how many usable inputs /
+    actuators / outputs they contain, while masking bad signals.
+
+    1. Chunk-level masking for inputs/actuators
+       ----------------------------------------
+       For all chunks under "input" and "actuator":
+         • values is None or empty      → treated as missing.
+         • if accept_na == False:
+               any NaN / ±inf present  → the signal is masked in that chunk
+                                        (signals[var_name] = None).
+           accept_na == True:
+               - all non-finite        → masked (treated as missing);
+               - mixed finite/nonfinite→ kept as-is (including NaNs).
+         • all finite, non-empty array → kept and counted as a "valid chunk"
+                                        for that (role, signal_name).
 
        This produces, for each role ("input"/"actuator") and signal_name,
        a count of valid chunks: valid_chunks_by_sig[role][signal_name].
 
-    2. Per-signal chunk threshold:
-       - For each role in {"input", "actuator"} and each signal_name:
-         * if number of valid chunks < min_valid_chunks:
-             → the signal is considered invalid for the entire window:
-               signals[var_name] = None in *all* chunks of that role.
+    2. Per-signal chunk threshold
+       --------------------------
+       For each role in {"input", "actuator"} and each signal_name:
+         • if number of valid chunks < min_valid_chunks:
+               → the signal is considered invalid for the entire window:
+                 signals[var_name] = None in *all* chunks of that role.
 
        After this step, a signal counts as "present" on the X-side only if it
        has at least `min_valid_chunks` valid chunks.
 
-    3. Window-level counts for inputs + actuators:
-       - Count how many (role, signal_name) pairs still have at least one
-         non-None value across all chunks. This is:
+    3. Window-level counts for inputs + actuators
+       ------------------------------------------
+       Count how many (role, signal_name) pairs still have at least one
+       non-None value across all chunks. This is:
 
-            n_inputs_actuators
+           n_inputs_actuators
 
-    4. Outputs (not chunked):
-       - For each output variable:
-         * values is None / empty / all NaN/inf → treated as missing
+       This number must be >= min_valid_inputs_actuators for the window to
+       be considered valid.
+
+    4. Outputs (not chunked)
+       ---------------------
+       For each output variable:
+         • values is None / empty / all NaN/inf → treated as missing
            (entry["values"] = None).
-         * any NaN / ±inf → entire signal masked (entry["values"] = None).
-         * all finite    → kept and counted as a valid output.
+         • if accept_na == False:
+               any NaN / ±inf  → entire signal masked (entry["values"] = None).
+           accept_na == True:
+               - all non-finite → masked as missing;
+               - mixed          → kept as-is (including NaNs).
+         • all finite          → kept and counted as a valid output.
 
        This gives:
 
-            n_outputs_valid
+           n_outputs_valid
 
-    5. Drop / keep decision:
-       - If:
+    5. Drop / keep decision
+       --------------------
+       If either:
            n_inputs_actuators < min_valid_inputs_actuators
            OR
            n_outputs_valid    < min_valid_outputs
-         → the window is DROPPED (return None).
-       - Otherwise, the window is kept and returned, with some signals masked
-         to None at chunk or output level.
+
+       then the window is **dropped** (the transform returns None).
+       Otherwise, the window is kept and returned (with some signals possibly
+       masked to None at chunk or output level).
+
+    Parameters
+    ----------
+    min_valid_inputs_actuators:
+        Minimum number of distinct (role, signal_name) pairs across "input"
+        and "actuator" that must remain valid after chunk-level masking and
+        min_valid_chunks enforcement.
+
+    min_valid_chunks:
+        Minimum number of valid chunks per (role, signal_name). Signals that
+        do not reach this threshold are masked to None in all chunks.
+
+    min_valid_outputs:
+        Minimum number of valid output signals (after masking) required for
+        the window to be kept.
+
+    accept_na:
+        Controls how mixed finite / non-finite arrays are treated.
+
+        - If False (default):
+            Any NaN or ±inf in a signal causes the entire signal to be masked
+            (treated as missing) for that chunk or output.
+
+        - If True:
+            Only signals that are entirely non-finite (all NaN/inf) are masked.
+            Mixed finite/non-finite arrays are kept as-is and may contain NaNs.
+            Use this only if downstream encoders / models can cope with NaNs.
     """
 
     def __init__(
@@ -105,16 +152,18 @@ class DropNaChunksTransform:
         min_valid_inputs_actuators: int = 1,
         min_valid_chunks: int = 1,
         min_valid_outputs: int = 1,
+        accept_na: bool = False,
     ) -> None:
         self.min_valid_inputs_actuators = int(min_valid_inputs_actuators)
         self.min_valid_chunks = int(min_valid_chunks)
         self.min_valid_outputs = int(min_valid_outputs)
+        self.accept_na = bool(accept_na)
 
     # ------------------------------------------------------------------ helpers
-    @staticmethod
-    def _mask_if_bad(values: Any) -> Tuple[bool, Any]:
+    def _mask_if_bad(self, values: Any) -> Tuple[bool, Any]:
         """
-        Decide whether a signal should be masked based on its values.
+        Decide whether a signal should be masked based on its values and
+        the `accept_na` policy.
 
         Returns
         -------
@@ -131,13 +180,17 @@ class DropNaChunksTransform:
 
         finite = np.isfinite(arr)
 
-        # Entirely NaN/inf → treat as missing
+        # Entirely NaN/inf → always treat as missing
         if not finite.any():
             return True, None
 
-        # Mixed finite / non-finite: simple policy for now: mask whole signal
+        # Mixed finite / non-finite:
         if not finite.all():
-            return True, None
+            if not self.accept_na:
+                # strict mode: any NaN/inf invalidates the whole signal
+                return True, None
+            # relaxed mode: keep as-is (NaNs remain in the array)
+            return False, arr
 
         # All finite and non-empty: keep as-is
         return False, arr
@@ -145,13 +198,19 @@ class DropNaChunksTransform:
     # ------------------------------------------------------------------ main API
     def __call__(self, window: Dict[str, Any] | None) -> Dict[str, Any] | None:
         """
-        Apply chunk-level NaN masking and window dropping to a single window.
+        Apply chunk-level masking and window selection to a single window.
 
         Parameters
         ----------
         window : Dict[str, Any] | None
             Window dict as produced by ChunkingTransform. If None is passed,
             returns None directly (for compatibility with composed transforms).
+
+        Returns
+        -------
+        window or None
+            The possibly-masked window dict, or None if the window does not
+            meet the validity criteria and should be dropped.
         """
         if window is None:
             return None
@@ -259,7 +318,7 @@ class DropNaChunksTransform:
             keep = False
 
         logger.debug(
-            "[DropNaChunks] window %s (shot %s): "
+            "[SelectValidWindows] window %s (shot %s): "
             "valid_inputs_actuators=%d, valid_outputs=%d → %s",
             w_idx,
             shot_id,

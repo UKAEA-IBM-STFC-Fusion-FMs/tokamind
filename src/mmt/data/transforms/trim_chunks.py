@@ -14,7 +14,7 @@ class TrimChunksTransform:
     This is used BEFORE embedding, to avoid computing embeddings for
     chunks that will be discarded anyway.
 
-    Expected input (after DropNaChunksTransform)
+    Expected input (after SelectValidWindows)
     --------------------------------------------
         window = {
             "t_cut": float,
