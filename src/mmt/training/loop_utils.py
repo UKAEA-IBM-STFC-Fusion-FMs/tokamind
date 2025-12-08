@@ -30,6 +30,8 @@ from .amp_utils import amp_ctx_for_model
 from .losses import compute_loss_pred_space
 from .scheduler import toggle_param_groups
 
+import time
+
 logger = logging.getLogger("mmt.Training")
 
 # Max gradient norm for clipping (matches original loop.py behaviour)
@@ -269,7 +271,9 @@ def run_one_epoch(
     n_batches = 0
 
     for batch_idx, batch in enumerate(loader):
+        t0 = time.time()
         batch = move_batch_to_device(batch, device)
+        t1 = time.time()
         outputs_mask = batch["outputs_mask"]
 
         # Per-batch automatic LR enabling/disabling
@@ -297,13 +301,15 @@ def run_one_epoch(
                 loss_for_backprop = loss_t / float(grad_accum_steps)
             else:
                 loss_for_backprop = loss_t
-
+        t2 = time.time()
         # Backward pass
         if train:
             if scaler is not None and scaler.is_enabled():
                 scaler.scale(loss_for_backprop).backward()
             else:
                 loss_for_backprop.backward()
+
+            t3 = time.time()
 
             # Accumulation step triggers optimizer step
             if (batch_idx + 1) % grad_accum_steps == 0:
@@ -323,8 +329,18 @@ def run_one_epoch(
 
                 global_step += 1
 
+            t4 = time.time()
+
         running_loss += float(loss_t.detach().cpu())
         n_batches += 1
+
+        logger.info(
+            f"[TIMING] batch {batch_idx}: "
+            f"move={t1 - t0:.4f}s  "
+            f"forward={t2 - t1:.4f}s  "
+            f"backward={t3 - t2:.4f}s  "
+            f"opt={t4 - t3:.4f}s"
+        )
 
     avg_loss = running_loss / max(1, n_batches)
 

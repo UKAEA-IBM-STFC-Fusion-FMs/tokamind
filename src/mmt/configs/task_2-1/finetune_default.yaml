@@ -19,8 +19,15 @@ data:
   num_workers_cache: 8
   keep_output_native: false
 
+preprocessing:
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    window_stride_sec: 0.005
+
 loader:
-  batch_size: 1024
+  batch_size: 1
   num_workers: 4
   shuffle: true
   drop_last: false

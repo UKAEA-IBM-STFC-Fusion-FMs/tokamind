@@ -39,7 +39,7 @@ from mmt.models.mmt import MultiModalTransformer
 
 from mmt.training.loop import train_finetune
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 
 def parse_args_finetune() -> argparse.Namespace:
@@ -131,6 +131,7 @@ def main() -> None:
                 min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_valid_win["min_valid_chunks"],
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],
+                window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(
                 chunk_length_sec=cfg_chunks["chunk_length"],
@@ -196,7 +197,7 @@ def main() -> None:
         dict_metadata,
         cfg_task,
         model_specific_transform=model_specific_transform,
-        verbose=False,
+        verbose=True,
     )
 
     # Optionally materialize streaming datasets to RAM as tokenized windows

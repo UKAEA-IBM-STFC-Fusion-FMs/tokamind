@@ -440,6 +440,13 @@ class MMTCollate:
         # --------------------------------------------------------------- #
         # 10. Assemble final batch dict (torch)
         # --------------------------------------------------------------- #
+        # At this point, pos is a tensor of shape (B, L)
+        B = pos_t.shape[0]
+        L = pos_t.shape[1]
+
+        # Debug: how many windows/tokens per batch?
+        print("[COLLATE DEBUG] windows_in_batch=%d, seq_len=%d", B, L)
+
         batch_out: Dict[str, Any] = {
             "emb": emb_t,
             "pos": pos_t,

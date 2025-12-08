@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any, Dict, Tuple, Hashable
 from collections import defaultdict
 import logging
 
@@ -11,22 +11,26 @@ logger = logging.getLogger("mmt.SelectValidWindows")
 
 class SelectValidWindowsTransform:
     """
-    Select (or drop) a single window based on validity criteria at *chunk* level.
+    Select (or drop) a single window based on validity criteria at *chunk* level,
+    with an optional additional stride in time between *kept* windows.
 
-    This transform is designed to run **after** ChunkingTransform, as part of the
-    model_transform chain inside TaskModelTransformWrapper. It operates on a
-    **single window dict** and returns either:
+    This transform is designed to run **after** ChunkWindowsTransform, as part
+    of the model_transform chain inside TaskModelTransformWrapper. It operates
+    on a **single window dict** and returns either:
 
       - the window (with some signals masked to None), or
       - None, if the window should be dropped entirely.
 
-    Expected input (after ChunkingTransform)
-    ----------------------------------------
+    Expected input (after ChunkWindowsTransform)
+    --------------------------------------------
     A window dict with at least:
 
         {
             "shot_id": ...,
             "window_index": ...,
+            "t_cut": float,       # window cut time (seconds, relative)
+            "input_length": float,
+            "stride": float,      # stride used by TaskModelTransformWrapper (informative)
             "chunks": {
                 "input":    [chunk_dict, ...],
                 "actuator": [chunk_dict, ...],
@@ -53,8 +57,47 @@ class SelectValidWindowsTransform:
 
     Behaviour (per window)
     ----------------------
-    The goal is to **select valid windows** based on how many usable inputs /
-    actuators / outputs they contain, while masking bad signals.
+    The goal is to:
+
+      1. Optionally subsample windows in time at *window* level (via
+         `window_stride_sec`), dropping windows that are too close in t_cut
+         to the last kept window for the same shot.
+
+      2. Apply chunk-level masking and signal validity checks, and decide
+         whether the window is worth keeping based on:
+
+         • number of valid input/actuator signals
+         • number of valid output signals
+
+    The steps are:
+
+    0. Optional window-level subsampling (window_stride_sec)
+       -----------------------------------------------------
+       If `window_stride_sec` is not None, the transform enforces a minimum
+       time separation between *kept* windows within each shot:
+
+         • Windows are assumed to be processed in (shot_id, window_index)
+           order, with strictly increasing t_cut within a shot.
+
+         • For each shot_id, the transform keeps track of the last kept
+           t_cut and window_index.
+
+         • For a new window:
+
+             - If this looks like a new pass / epoch over the same shot
+               (window_index <= last_window_index), the state for that
+               shot_id is reset.
+
+             - Otherwise, if (t_cut - last_kept_t_cut) < window_stride_sec,
+               the window is **dropped early** (returns None immediately).
+
+             - If kept, the last_kept_t_cut and last_window_index are
+               updated for that shot.
+
+       This is used to aggressively reduce the number of windows per shot
+       for training, without modifying the baseline TaskModelTransformWrapper
+       or the underlying task definition. For evaluation, set
+       `window_stride_sec = None` so that *all* windows are kept.
 
     1. Chunk-level masking for inputs/actuators
        ----------------------------------------
@@ -145,6 +188,18 @@ class SelectValidWindowsTransform:
             Only signals that are entirely non-finite (all NaN/inf) are masked.
             Mixed finite/non-finite arrays are kept as-is and may contain NaNs.
             Use this only if downstream encoders / models can cope with NaNs.
+
+    window_stride_sec:
+        Optional minimum time separation, in seconds, between *kept* windows
+        for the same shot. If None (default), no additional subsampling is
+        performed and every window that passes the validity checks is kept.
+
+        If set to a positive float, windows are processed in temporal order
+        (t_cut increasing) and only windows whose `t_cut` is at least
+        `window_stride_sec` after the last *kept* window for that `shot_id`
+        are retained. This is typically used in training configs to reduce
+        the number of windows per shot, while evaluation configs can set
+        window_stride_sec = null to keep all windows.
     """
 
     def __init__(
@@ -153,11 +208,19 @@ class SelectValidWindowsTransform:
         min_valid_chunks: int = 1,
         min_valid_outputs: int = 1,
         accept_na: bool = False,
+        window_stride_sec: float | None = None,
     ) -> None:
         self.min_valid_inputs_actuators = int(min_valid_inputs_actuators)
         self.min_valid_chunks = int(min_valid_chunks)
         self.min_valid_outputs = int(min_valid_outputs)
         self.accept_na = bool(accept_na)
+
+        # Window-level subsampling configuration
+        self.window_stride_sec = (
+            float(window_stride_sec) if window_stride_sec is not None else None
+        )
+        # Per-shot state: shot_key -> (last_t_cut, last_window_index)
+        self._last_kept_by_shot: Dict[Hashable, Tuple[float, int | None]] = {}
 
     # ------------------------------------------------------------------ helpers
     def _mask_if_bad(self, values: Any) -> Tuple[bool, Any]:
@@ -198,25 +261,73 @@ class SelectValidWindowsTransform:
     # ------------------------------------------------------------------ main API
     def __call__(self, window: Dict[str, Any] | None) -> Dict[str, Any] | None:
         """
-        Apply chunk-level masking and window selection to a single window.
+        Apply optional window-level subsampling, then chunk-level masking and
+        window selection to a single window.
 
         Parameters
         ----------
         window : Dict[str, Any] | None
-            Window dict as produced by ChunkingTransform. If None is passed,
-            returns None directly (for compatibility with composed transforms).
+            Window dict as produced by ChunkWindowsTransform. If None is
+            passed, returns None directly (for compatibility with composed
+            transforms).
 
         Returns
         -------
         window or None
             The possibly-masked window dict, or None if the window does not
-            meet the validity criteria and should be dropped.
+            meet the stride and validity criteria and should be dropped.
         """
         if window is None:
             return None
 
         shot_id = window.get("shot_id", None)
         w_idx = window.get("window_index", None)
+        t_cut = window.get("t_cut", None)
+
+        # ------------------------------------------------------------------
+        # 0) Window-level subsampling by t_cut (optional)
+        # ------------------------------------------------------------------
+        if self.window_stride_sec is not None:
+            if t_cut is None:
+                raise KeyError(
+                    "SelectValidWindowsTransform(window_stride_sec=...) "
+                    "requires window['t_cut'] to be present."
+                )
+
+            # Use shot_id as key; if missing, fall back to a global key
+            key: Hashable = shot_id if shot_id is not None else "__global__"
+
+            last = self._last_kept_by_shot.get(key, None)
+            if last is not None:
+                last_t_cut, last_w_idx = last
+
+                # If we detect that window_index has been reset (e.g. new epoch),
+                # reset the state for this shot so that the first window of the
+                # new pass is eligible again.
+                if (w_idx is not None) and (last_w_idx is not None):
+                    if w_idx <= last_w_idx:
+                        last_t_cut = None
+                        last_w_idx = None
+
+                if (last_t_cut is not None) and (
+                    (t_cut - last_t_cut) < self.window_stride_sec
+                ):
+                    logger.debug(
+                        "[SelectValidWindows] dropping window %s (shot %s) due to "
+                        "window_stride_sec=%.4f (t_cut=%.6f last_t=%.6f)",
+                        w_idx,
+                        shot_id,
+                        self.window_stride_sec,
+                        t_cut,
+                        last_t_cut,
+                    )
+                    return None
+
+            # Keep this window and update state for this shot
+            self._last_kept_by_shot[key] = (
+                float(t_cut),
+                int(w_idx) if w_idx is not None else None,
+            )
 
         chunks_dict = window.get("chunks") or {}
         input_chunks = chunks_dict.get("input") or []

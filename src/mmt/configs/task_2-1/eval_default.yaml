@@ -18,6 +18,15 @@ init:
 data:
   keep_output_native: true
 
+
+preprocessing:
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    window_stride_sec: null
+
+
 loader:
   batch_size: 24
   num_workers: 4

@@ -9,7 +9,7 @@ seed: 54
 
 data:
   local: false         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: 2   # None / null → uses all shots;
+  subset_of_shots: 1   # None / null → uses all shots;
 
 preprocessing:
 
@@ -19,12 +19,6 @@ preprocessing:
 
   trim_chunks:
      max_chunks: 50     # maximum number of chunks in the history
-
-  valid_windows:
-    min_valid_inputs_actuators: 1
-    min_valid_chunks: 1
-    min_valid_outputs: 1
-    # accept_na: false   # (advanced; currently we always use strict Na policy)
 
   cache:
     enabled: true
