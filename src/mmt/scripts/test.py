@@ -37,6 +37,7 @@ from mmt.data.collate import MMTCollate
 
 from mmt.models.mmt import MultiModalTransformer
 
+from mmt.training.loop import train_finetune
 
 DEBUG_MODE = False
 
@@ -167,6 +168,28 @@ def main() -> None:
     )
     model.to(device)
 
+    # ------------------------------------------------------------------
+    # Warm-start / Model Initialization from previous run (if provided)
+    # ------------------------------------------------------------------
+    model_init_cfg = cfg_mmt.get("model_init", None)
+
+    if model_init_cfg is not None:
+        run_init = model_init_cfg.get("run_dir", None)
+        load_parts = model_init_cfg.get("load_parts", None)
+
+        if run_init is not None:
+            from mmt.training.checkpoint_io import load_parts_from_run_dir
+
+            print(f"[WarmStart] Loading parts from previous run_dir: {run_init}")
+
+            load_parts_from_run_dir(
+                model,
+                run_init,
+                load_parts=load_parts,
+                map_location=device,
+                verbose=True,
+            )
+
     # Datasets per il modello (TaskModelTransformWrapper)
     datasets_mmt = initialize_model_datasets(
         datasets_train_val_test,
@@ -190,6 +213,7 @@ def main() -> None:
             if split in ("train", "val"):  # cache only train and val
                 import time
 
+                print(f"\n[Caching] Starting caching {split}")
                 t0 = time.perf_counter()
                 ds_cached = materialize_tokenized_split_to_ram(
                     streaming_dataset=ds_stream,
@@ -217,6 +241,24 @@ def main() -> None:
         drop_last=cfg_mmt.loader["drop_last"],
         seed=cfg_mmt.seed,
     )
+
+    # ------------------------------------------------------------------
+    # Run a short finetuning test (few epochs, config-driven)
+    # ------------------------------------------------------------------
+    training_cfg = cfg_mmt.training  # the new strict training config
+    run_dir = cfg_mmt.paths["run_dir"]
+
+    print("\n[Training] Starting finetuning test run...")
+    history = train_finetune(
+        model=model,
+        train_loader=dataloaders_mmt["train"],
+        val_loader=dataloaders_mmt["val"],
+        run_dir=run_dir,
+        training_cfg=training_cfg,
+    )
+
+    print("\n[Training] Completed. Summary:")
+    print(history)
 
     # small debug printing
     print("\n[Debug] Shots per split (TaskModelTransformWrapper):")

@@ -1,105 +1,107 @@
 """
-Checkpoint I/O utilities for the Multi-Modal Transformer.
+Checkpoint I/O utilities for the Multi-Modal Transformer (MMT).
 
-This module supports three distinct workflows:
+This module implements three clearly separated workflows that correspond
+to three distinct phases of the MMT lifecycle:
 
-1) Strict resume of an existing run
-   --------------------------------
-   Used when `training.resume: true` and a `checkpoints/latest/` directory
-   exists under the current run_dir.
+======================================================================
+1) Strict resume of the *same* run
+----------------------------------------------------------------------
+Triggered when `training.resume: true` and a `checkpoints/latest/`
+directory exists under the current run_dir.
 
-   - Call `resume_from_latest(run_dir, model, optimizer, scheduler, scaler, ...)`
-   - Restores:
-       * model weights (backbone, modality_heads, output_adapters)
-       * optimizer state
-       * scheduler state
-       * GradScaler state (if provided)
-       * RNG state (Python, NumPy, Torch CPU/CUDA)
-       * epoch/global_step/best_val/bad_epochs from meta.json
-   - Intended for continuing the *same* run after an interruption.
+    resume_from_latest(run_dir, model, optimizer, scheduler, scaler)
 
+Restores:
+  • model weights (backbone, modality_heads, output_adapters)
+  • optimizer state
+  • scheduler state
+  • GradScaler state (if provided)
+  • RNG state (Python, NumPy, Torch CPU/CUDA)
+  • epoch, global_step, best_val_so_far, bad_epochs (from meta.json)
+
+This is intended only for *continuing the same run after interruption*.
+Architecture must match exactly (strict load).
+
+======================================================================
 2) Warm-start from a previous run (pretrain → finetune, transfer)
-   ----------------------------------------------------------------
-   Controlled by `model_init.run_dir` and `model_init.load_parts` in the
-   experiment config, and implemented by `load_parts_from_run_dir`.
+----------------------------------------------------------------------
+Controlled by `model_init.run_dir` and `model_init.load_parts`
+in the experiment config, and implemented via:
 
-   Typical config:
+    load_parts_from_run_dir(model, run_dir, load_parts={...})
 
-       model_init:
-         run_dir: "runs/pretrain_task_2-1/some_run"
-         load_parts:
-           backbone: true
-           modality_heads: true
-           output_adapters: false
+Behaviour:
+  • Finds either `checkpoints/best/` or `checkpoints/latest/` in the
+    specified run_dir (prefers best).
+  • For each block where load_parts[block] == True:
+        - loads the corresponding state_dict
+        - intersects with the current model (key AND tensor shape must match)
+        - loads the filtered state_dict with strict=False
 
-   Behaviour:
+This "overlap loading" allows:
+  • adding or removing outputs (adapters)
+  • adding or removing modalities (heads)
+  • changing internal shapes
 
-   - Finds either `checkpoints/best/` or `checkpoints/latest/` in the given
-     run_dir (prefers best if present).
-   - For each block with load_parts[block_name] == True:
-       * loads the corresponding state_dict from the checkpoint
-       * computes the *overlap* with the current model (only keys that exist
-         in the current block AND have the same tensor shape)
-       * loads this filtered state_dict into the current model with strict=False
-     All other parameters keep their current (fresh) initialisation.
+Warm-start does *not* restore optimizer/scheduler/scaler/RNG or counters.
+It always begins a *new* run with fresh optimizer state.
 
-   This *overlap loading* lets you:
-   - add or remove outputs (new adapters start from scratch)
-   - add or remove modalities (new heads start from scratch)
-   - change some internal shapes
-   while still reusing all matching parameters from pretraining.
-
-   NOTE: optimizer/scheduler/scaler/RNG are NOT touched here;
-   warm-start always begins a *new* run with fresh optimizer state.
-
+======================================================================
 3) Loading best weights for evaluation
-   ------------------------------------
-   Used by evaluation scripts to obtain the best snapshot ("best" if present,
-   otherwise "latest"):
+----------------------------------------------------------------------
+Used by evaluation scripts:
 
-       epoch_best, best_val, meta = load_best_weights(run_dir, model)
+    epoch_best, best_val, meta = load_best_weights(run_dir, model)
 
-   - Strictly loads backbone, modality_heads, and output_adapters.
-   - Expects the architecture to match; will raise if shapes/keys differ.
+Loads strictly from:
+    run_dir/checkpoints/best/
+or if missing:
+    run_dir/checkpoints/latest/
 
-File layout per run_dir
------------------------
-We follow a simple, opinionated structure:
+Only loads model weights; used for inference or evaluation pipelines.
 
-    run_dir/
-      checkpoints/
-        latest/
-          backbone.pt
-          modality_heads.pt
-          output_adapters.pt
-          optimizer.pt        (optional)
-          scheduler.pt        (optional)
-          scaler.pt           (optional)
-          rng.pt
-          meta.json
+======================================================================
+Checkpoint directory layout
+----------------------------------------------------------------------
+run_dir/
+  checkpoints/
+    latest/
+      backbone.pt
+      modality_heads.pt
+      output_adapters.pt
+      optimizer.pt        (optional)
+      scheduler.pt        (optional)
+      scaler.pt           (optional)
+      rng.pt
+      meta.json
 
-        best/
-          backbone.pt
-          modality_heads.pt
-          output_adapters.pt
-          meta.json
+    best/
+      backbone.pt
+      modality_heads.pt
+      output_adapters.pt
+      meta.json
 
-The model is expected to expose:
+======================================================================
+Model API requirements
+----------------------------------------------------------------------
+The model must provide:
 
-    - get_backbone_state_dict()
-    - get_modality_heads_state_dict()
-    - get_output_adapters_state_dict()
+  - get_backbone_state_dict()
+  - get_modality_heads_state_dict()
+  - get_output_adapters_state_dict()
 
-    - load_backbone_state_dict(state_dict, strict: bool = True)
-    - load_modality_heads_state_dict(state_dict, strict: bool = True)
-    - load_output_adapters_state_dict(state_dict, strict: bool = True)
+  - load_backbone_state_dict(sd, strict=True/False)
+  - load_modality_heads_state_dict(sd, strict=True/False)
+  - load_output_adapters_state_dict(sd, strict=True/False)
+
+These allow strict resume, warm-start, and evaluation to work safely and
+independently of optimizer/scheduler structures.
 """
 
 from __future__ import annotations
-
 import json
 from json import JSONDecodeError
-
 import os
 import random
 import tempfile
@@ -110,16 +112,17 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-
 # ======================================================================
-# Low-level helpers
+# Low-level atomic save / load helpers
 # ======================================================================
 
 
 def _atomic_save(obj: Any, path: str) -> None:
     """
-    Safely save a PyTorch object (or any pickle-able object) to disk using
-    a temp file then rename, to avoid partial writes on crashes.
+    Atomically save a PyTorch object:
+      - write to temporary file
+      - rename over the final file
+    Prevents corruption if a crash occurs during write.
     """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     final_ext = os.path.splitext(path)[1] or ".pt"
@@ -136,7 +139,7 @@ def _atomic_save(obj: Any, path: str) -> None:
 
 
 def _atomic_json_save(obj: Dict[str, Any], path: str) -> None:
-    """Safely save a small JSON dict atomically."""
+    """Atomically save a JSON dict."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with tempfile.NamedTemporaryFile(
         mode="w",
@@ -150,26 +153,31 @@ def _atomic_json_save(obj: Dict[str, Any], path: str) -> None:
 
 
 def _tload(path: str, map_location: str | torch.device = "cpu") -> Any:
-    """Thin wrapper around torch.load with a default map_location."""
+    """Simple torch.load wrapper with default map_location."""
     return torch.load(path, map_location=map_location)
 
 
 def _torch_load_full(path: str, map_location: str | torch.device = "cpu") -> Any:
     """
-    Load pickled blobs (optimizer/scheduler/scaler/RNG) in a way that works
-    with PyTorch 2.6+ (weights_only=False) but degrades gracefully on older
-    versions where that argument doesn't exist.
+    Load optimizer/scheduler/scaler/RNG blobs in a PyTorch-version-safe way.
+    PyTorch ≥ 2.6 supports weights_only=False.
     """
     try:
-        return torch.load(path, map_location=map_location, weights_only=False)  # type: ignore[arg-type]
+        return torch.load(
+            path, map_location=map_location, weights_only=False
+        )  # PyTorch 2.6+
     except TypeError:
-        # Older PyTorch without weights_only
         return torch.load(path, map_location=map_location)
 
 
+# ======================================================================
+# RNG utilities
+# ======================================================================
+
+
 def _capture_rng_state() -> Dict[str, Any]:
-    """Capture Python, NumPy, and Torch RNG states (incl. CUDA if available)."""
-    state: Dict[str, Any] = {
+    """Capture Python, NumPy, Torch CPU/CUDA RNG states."""
+    state = {
         "py": random.getstate(),
         "np": np.random.get_state(),
         "torch_cpu": torch.get_rng_state(),
@@ -181,56 +189,52 @@ def _capture_rng_state() -> Dict[str, Any]:
 
 
 def _restore_rng_state(state: Dict[str, Any]) -> None:
-    """
-    Restore RNG states if present (best-effort).
-    Errors during restore are ignored, but only expected ones.
-    """
+    """Restore RNG states (best effort)."""
     if not isinstance(state, dict):
         return
 
     try:
         if "py" in state:
             random.setstate(state["py"])
-    except (TypeError, ValueError):
+    except Exception:
         pass
 
     try:
         if "np" in state:
             np.random.set_state(state["np"])
-    except (TypeError, ValueError):
+    except Exception:
         pass
 
     try:
         if "torch_cpu" in state:
             torch.set_rng_state(state["torch_cpu"])
-    except (RuntimeError, TypeError, ValueError):
+    except Exception:
         pass
 
     try:
         if "torch_cuda" in state and torch.cuda.is_available():
             torch.cuda.set_rng_state_all(state["torch_cuda"])
-    except (RuntimeError, TypeError, ValueError):
+    except Exception:
         pass
 
 
 # ======================================================================
-# DRY save/load for the standard model triplet
+# Save/load the "model triplet"
 # ======================================================================
 
 
 def _save_model_triplet(model: nn.Module, subdir: str) -> None:
     """
-    Save backbone / modality_heads / output_adapters state_dicts to subdir.
+    Save backbone, modality_heads, and output_adapters state_dicts.
 
-    The model is expected to implement:
-        - get_backbone_state_dict()
-        - get_modality_heads_state_dict()
-        - get_output_adapters_state_dict()
+    These are always saved separately so the training loop can:
+      - warm-start only selected blocks,
+      - resume strictly,
+      - evaluate safely even if optimizer is absent.
     """
     _atomic_save(model.get_backbone_state_dict(), os.path.join(subdir, "backbone.pt"))
     _atomic_save(
-        model.get_modality_heads_state_dict(),
-        os.path.join(subdir, "modality_heads.pt"),
+        model.get_modality_heads_state_dict(), os.path.join(subdir, "modality_heads.pt")
     )
     _atomic_save(
         model.get_output_adapters_state_dict(),
@@ -248,11 +252,8 @@ def _load_model_triplet(
     strict_adapters: bool = True,
 ) -> None:
     """
-    Strictly load backbone / modality_heads / output_adapters from subdir.
-
-    Used by:
-      - resume_from_latest (model part)
-      - load_best_weights (eval)
+    Strictly load the model triplet.
+    Used for strict resume and strict evaluation ("best" checkpoint).
     """
     b_path = os.path.join(subdir, "backbone.pt")
     h_path = os.path.join(subdir, "modality_heads.pt")
@@ -262,35 +263,36 @@ def _load_model_triplet(
         os.path.exists(b_path) and os.path.exists(h_path) and os.path.exists(a_path)
     ):
         raise FileNotFoundError(
-            f"Checkpoint directory {subdir!r} is missing one of the required "
-            f"files: backbone.pt / modality_heads.pt / output_adapters.pt."
+            f"Checkpoint directory '{subdir}' missing required model files "
+            "(backbone.pt, modality_heads.pt, output_adapters.pt)."
         )
 
-    b_sd = _tload(b_path, map_location=map_location)
-    h_sd = _tload(h_path, map_location=map_location)
-    a_sd = _tload(a_path, map_location=map_location)
+    b_sd = _tload(b_path, map_location)
+    h_sd = _tload(h_path, map_location)
+    a_sd = _tload(a_path, map_location)
 
-    _ = model.load_backbone_state_dict(b_sd, strict=strict_backbone)
-    _ = model.load_modality_heads_state_dict(h_sd, strict=strict_heads)
-    _ = model.load_output_adapters_state_dict(a_sd, strict=strict_adapters)
+    model.load_backbone_state_dict(b_sd, strict=strict_backbone)
+    model.load_modality_heads_state_dict(h_sd, strict=strict_heads)
+    model.load_output_adapters_state_dict(a_sd, strict=strict_adapters)
+
+
+# ======================================================================
+# Overlap-loading for warm-start (pretrain → finetune)
+# ======================================================================
 
 
 def _filter_overlap_state(
-    loaded: Dict[str, Any],
-    current: Dict[str, Any],
+    loaded: Dict[str, Any], current: Dict[str, Any]
 ) -> Dict[str, Any]:
     """
-    Keep only parameters whose keys and shapes match between loaded and current.
-
-    This is the core of "overlap loading" used in warm-start:
-    - It lets us reuse all compatible parameters from a previous run
-      while safely ignoring new or changed parameters in the current model.
+    Keep only keys whose name AND shape match.
+    Makes warm-start safe when output adapters / modalities differ.
     """
-    out: Dict[str, Any] = {}
+    out = {}
     for k, v in loaded.items():
         if k not in current:
             continue
-        if not isinstance(v, torch.Tensor) or not isinstance(current[k], torch.Tensor):
+        if not (isinstance(v, torch.Tensor) and isinstance(current[k], torch.Tensor)):
             continue
         if v.shape != current[k].shape:
             continue
@@ -300,24 +302,17 @@ def _filter_overlap_state(
 
 def _best_or_latest_dir(run_dir: str) -> Optional[str]:
     """
-    Helper: return path to checkpoints/best or checkpoints/latest.
-
-    Prefers 'best' if present, otherwise 'latest'.
-    Returns None if neither exists.
+    Prefer checkpoints/best over checkpoints/latest.
+    Used for evaluation and warm-start.
     """
-    p_best = os.path.join(run_dir, "checkpoints", "best")
-    p_lat = os.path.join(run_dir, "checkpoints", "latest")
+    best = os.path.join(run_dir, "checkpoints", "best")
+    latest = os.path.join(run_dir, "checkpoints", "latest")
 
-    if os.path.isdir(p_best):
-        return p_best
-    if os.path.isdir(p_lat):
-        return p_lat
+    if os.path.isdir(best):
+        return best
+    if os.path.isdir(latest):
+        return latest
     return None
-
-
-# ======================================================================
-# Public API: warm-start (pretrain → finetune)
-# ======================================================================
 
 
 def load_parts_from_run_dir(
@@ -381,59 +376,44 @@ def load_parts_from_run_dir(
         If no 'checkpoints/best' or 'checkpoints/latest' directory is found
         under run_dir, or if required .pt files are missing.
     """
-    ckpt_dir = _best_or_latest_dir(run_dir)
-    if ckpt_dir is None:
+    ckpt = _best_or_latest_dir(run_dir)
+    if ckpt is None:
         raise FileNotFoundError(
-            f"No checkpoints found under {run_dir!r}. "
-            f"Expected 'checkpoints/best' or 'checkpoints/latest'."
+            f"No checkpoints/best or checkpoints/latest found under '{run_dir}'."
         )
 
     if load_parts is None:
-        load_parts = {
-            "backbone": True,
-            "modality_heads": True,
-            "output_adapters": True,
-        }
+        load_parts = {"backbone": True, "modality_heads": True, "output_adapters": True}
 
-    stats: Dict[str, Tuple[int, int]] = {}
+    stats = {}
 
-    def _overlap_load_one_block(
-        block_name: str,
-        get_sd_fn,
-        load_sd_fn,
-        filename: str,
-    ) -> None:
+    def _load(block_name, get_fn, load_fn, filename):
         if not load_parts.get(block_name, False):
             return
-
-        path = os.path.join(ckpt_dir, filename)
+        path = os.path.join(ckpt, filename)
         if not os.path.exists(path):
-            raise FileNotFoundError(
-                f"Expected {filename!r} for block {block_name!r} in {ckpt_dir}, "
-                f"but file does not exist."
-            )
+            raise FileNotFoundError(f"Missing '{filename}' in checkpoint {ckpt}.")
+        loaded = _tload(path, map_location)
+        current = get_fn()
+        overlap = _filter_overlap_state(loaded, current)
+        load_fn(overlap, strict=False)
+        stats[block_name] = (len(overlap), len(current))
 
-        loaded_sd = _tload(path, map_location=map_location)
-        current_sd = get_sd_fn()
-
-        overlap_sd = _filter_overlap_state(loaded_sd, current_sd)
-        load_sd_fn(overlap_sd, strict=False)
-
-        stats[block_name] = (len(overlap_sd), len(current_sd))
-
-    _overlap_load_one_block(
+    _load(
         "backbone",
         model.get_backbone_state_dict,
         model.load_backbone_state_dict,
         "backbone.pt",
     )
-    _overlap_load_one_block(
+
+    _load(
         "modality_heads",
         model.get_modality_heads_state_dict,
         model.load_modality_heads_state_dict,
         "modality_heads.pt",
     )
-    _overlap_load_one_block(
+
+    _load(
         "output_adapters",
         model.get_output_adapters_state_dict,
         model.load_output_adapters_state_dict,
@@ -441,14 +421,15 @@ def load_parts_from_run_dir(
     )
 
     if verbose and stats:
-        msg_parts = []
-        for block, (n_loaded, n_total) in stats.items():
-            msg_parts.append(f"{block}: {n_loaded}/{n_total} params reused")
-        print(f"[WarmStart] Loaded from {ckpt_dir}: " + ", ".join(msg_parts))
+        parts = ", ".join(
+            f"{k}: {n_loaded}/{n_total} matched"
+            for k, (n_loaded, n_total) in stats.items()
+        )
+        print(f"[WarmStart] Loaded from {ckpt}: {parts}")
 
 
 # ======================================================================
-# Public API: best / latest / resume / eval
+# Public API: strict save/load for best / latest checkpoints
 # ======================================================================
 
 
@@ -461,20 +442,19 @@ def save_best(
     extra_meta: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
-    Save the best snapshot for the current run:
-
-        run_dir/checkpoints/best/
-            backbone.pt
-            modality_heads.pt
-            output_adapters.pt
-            meta.json
+    Save a strict best snapshot:
+      run_dir/checkpoints/best/
+        backbone.pt
+        modality_heads.pt
+        output_adapters.pt
+        meta.json
     """
     best_dir = os.path.join(run_dir, "checkpoints", "best")
     os.makedirs(best_dir, exist_ok=True)
 
     _save_model_triplet(model, best_dir)
 
-    meta: Dict[str, Any] = {
+    meta = {
         "epoch_best": int(epoch),
         "best_val": float(best_val),
         "saved_at": time.time(),
@@ -499,39 +479,32 @@ def save_latest(
     extra_meta: Optional[Dict[str, Any]] = None,
 ) -> None:
     """
-    Save a 'latest' resume point for the current run:
-
-        run_dir/checkpoints/latest/
-            backbone.pt
-            modality_heads.pt
-            output_adapters.pt
-            optimizer.pt           (if optimizer is not None)
-            scheduler.pt           (if scheduler is not None)
-            scaler.pt              (if scaler is not None)
-            rng.pt
-            meta.json
+    Save a strict "resume point":
+      run_dir/checkpoints/latest/
+        backbone.pt
+        modality_heads.pt
+        output_adapters.pt
+        optimizer.pt
+        scheduler.pt
+        scaler.pt
+        rng.pt
+        meta.json
     """
-    lat_dir = os.path.join(run_dir, "checkpoints", "latest")
-    os.makedirs(lat_dir, exist_ok=True)
+    lat = os.path.join(run_dir, "checkpoints", "latest")
+    os.makedirs(lat, exist_ok=True)
 
-    # Model weights
-    _save_model_triplet(model, lat_dir)
+    _save_model_triplet(model, lat)
 
-    # Optimizer / scheduler / scaler states
     if optimizer is not None:
-        _atomic_save(optimizer.state_dict(), os.path.join(lat_dir, "optimizer.pt"))
-
+        _atomic_save(optimizer.state_dict(), os.path.join(lat, "optimizer.pt"))
     if scheduler is not None and hasattr(scheduler, "state_dict"):
-        _atomic_save(scheduler.state_dict(), os.path.join(lat_dir, "scheduler.pt"))
-
+        _atomic_save(scheduler.state_dict(), os.path.join(lat, "scheduler.pt"))
     if scaler is not None and hasattr(scaler, "state_dict"):
-        _atomic_save(scaler.state_dict(), os.path.join(lat_dir, "scaler.pt"))
+        _atomic_save(scaler.state_dict(), os.path.join(lat, "scaler.pt"))
 
-    # RNG state
-    _atomic_save(_capture_rng_state(), os.path.join(lat_dir, "rng.pt"))
+    _atomic_save(_capture_rng_state(), os.path.join(lat, "rng.pt"))
 
-    # Meta
-    meta: Dict[str, Any] = {
+    meta = {
         "epoch": int(epoch),
         "global_step": int(global_step),
         "best_val_so_far": float(best_val_so_far),
@@ -541,7 +514,7 @@ def save_latest(
     if extra_meta:
         meta.update(extra_meta)
 
-    _atomic_json_save(meta, os.path.join(lat_dir, "meta.json"))
+    _atomic_json_save(meta, os.path.join(lat, "meta.json"))
 
 
 def resume_from_latest(
@@ -554,51 +527,52 @@ def resume_from_latest(
     map_location: str | torch.device = "cpu",
 ) -> Tuple[int, float, Dict[str, Any]]:
     """
-    Resume training from checkpoints/latest:
+    Strict resume of the *same* run.
 
-      - strictly loads model weights (backbone, modality_heads, output_adapters)
-      - loads optimizer/scheduler/scaler (if provided)
-      - restores RNG
-      - returns (start_epoch, best_val_so_far, meta_dict)
+    The training loop decides whether resume is allowed
+    (training.resume = true).
 
-    Intended for continuing the *same* run after interruption.
+    Restores:
+      - model triplet
+      - optimizer / scheduler / scaler states
+      - RNG state
+      - meta.json (epoch, best_val_so_far, etc.)
     """
-    lat_dir = os.path.join(run_dir, "checkpoints", "latest")
-    if not os.path.isdir(lat_dir):
-        raise FileNotFoundError(f"No 'latest' checkpoint directory at {lat_dir}")
+    lat = os.path.join(run_dir, "checkpoints", "latest")
+    if not os.path.isdir(lat):
+        raise FileNotFoundError(f"No 'latest' checkpoint found at: {lat}")
 
-    # Model weights: strict on resume (if arch changed, fail fast)
+    # Strict model restore
     _load_model_triplet(
         model,
-        lat_dir,
+        lat,
         map_location=map_location,
         strict_backbone=True,
         strict_heads=True,
         strict_adapters=True,
     )
 
-    # Optimizer / Scheduler / Scaler
-    def _maybe_load_state(obj: Any, filename: str) -> None:
+    # Restore optimizer/scheduler
+    def _maybe_load(obj, filename):
         if obj is None:
             return
-        path = os.path.join(lat_dir, filename)
-        if os.path.exists(path) and hasattr(obj, "load_state_dict"):
-            state = _torch_load_full(path, map_location=map_location)
+        path = os.path.join(lat, filename)
+        if os.path.exists(path):
+            state = _torch_load_full(path, map_location)
             obj.load_state_dict(state)
 
-    _maybe_load_state(optimizer, "optimizer.pt")
-    _maybe_load_state(scheduler, "scheduler.pt")
-    _maybe_load_state(scaler, "scaler.pt")
+    _maybe_load(optimizer, "optimizer.pt")
+    _maybe_load(scheduler, "scheduler.pt")
+    _maybe_load(scaler, "scaler.pt")
 
     # RNG
-    rng_path = os.path.join(lat_dir, "rng.pt")
+    rng_path = os.path.join(lat, "rng.pt")
     if os.path.exists(rng_path):
-        rng_state = _torch_load_full(rng_path, map_location=map_location)
-        _restore_rng_state(rng_state)
+        _restore_rng_state(_torch_load_full(rng_path, map_location))
 
     # Meta
-    meta_path = os.path.join(lat_dir, "meta.json")
-    meta: Dict[str, Any] = {}
+    meta_path = os.path.join(lat, "meta.json")
+    meta = {}
     if os.path.exists(meta_path):
         try:
             with open(meta_path, "r") as f:
@@ -607,9 +581,9 @@ def resume_from_latest(
             meta = {}
 
     start_epoch = int(meta.get("epoch", 0)) + 1
-    best_val_so_far = float(meta.get("best_val_so_far", float("inf")))
+    best_val = float(meta.get("best_val_so_far", float("inf")))
 
-    return start_epoch, best_val_so_far, meta
+    return start_epoch, best_val, meta
 
 
 def load_best_weights(
@@ -619,29 +593,26 @@ def load_best_weights(
     map_location: str | torch.device = "cpu",
 ) -> Tuple[int, float, Dict[str, Any]]:
     """
-    Load the best snapshot (or latest if best is missing) for evaluation.
+    Load the best checkpoint for evaluation.
 
-    Returns:
-        (epoch_best, best_val, meta_dict)
-    or (-1, inf, {}) if no checkpoint is found.
-
-    Uses strict loading: assumes the architecture matches the checkpoint.
+    Returns (epoch_best, best_val, meta).
+    If both checkpoints/best and latest exist, best is preferred.
     """
-    best_dir = _best_or_latest_dir(run_dir)
-    if best_dir is None:
+    ckpt = _best_or_latest_dir(run_dir)
+    if ckpt is None:
         return -1, float("inf"), {}
 
     _load_model_triplet(
         model,
-        best_dir,
+        ckpt,
         map_location=map_location,
         strict_backbone=True,
         strict_heads=True,
         strict_adapters=True,
     )
 
-    meta_path = os.path.join(best_dir, "meta.json")
-    meta: Dict[str, Any] = {}
+    meta_path = os.path.join(ckpt, "meta.json")
+    meta = {}
     if os.path.exists(meta_path):
         try:
             with open(meta_path, "r") as f:

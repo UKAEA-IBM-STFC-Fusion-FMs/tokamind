@@ -20,7 +20,7 @@ data:
   keep_output_native: false
 
 loader:
-  batch_size: 24
+  batch_size: 1024
   num_workers: 4
   shuffle: true
   drop_last: false
@@ -50,59 +50,65 @@ model_init:
     output_adapters: false
 
 training:
+  # This is run-level behaviour, not per-stage.
   # If true and checkpoints/latest exists in *this* run_dir, we strictly
   # resume that run: model weights + optimizer + scheduler + scaler + RNG +
   # epoch counters. This is different from model_init.run_dir, which is a
   # warm-start from some *other* run.
   resume: false
 
-  epochs: 50              # used only if stages is empty
-  grad_accum_steps: 2
-  early_stop_patience: 5  # early stopping on validation loss
+  early_stop:
+    patience: 5
+    delta: 0.0
 
   loss:
-    output_weights: {}    # or specify output and weight, e.g.: equilibrium-psi: 1.0
+    output_weights: {}
 
   optimizer:
     use_adamw: true
-    lr:
-      backbone: 5e-4          # token encoder + transformer
-      modality_heads: 2e-3
-      output_adapters: 2e-3
-    wd:
-      backbone: 0.05
-      modality_heads: 0.05
-      output_adapters: 0.05
 
   scheduler:
     warmup_steps_fraction: 0.02
 
-  # Optional staged fine-tuning plan.
-  # If this list is empty, we just run a single stage using the top-level
-  # epochs / grad_accum_steps and optimizer.lr/wd.
   stages:
     - name: ft_warm
       epochs: 5
-      freeze_backbone: true
-      freeze_modality_heads: false
-      freeze_output_adapters: false
-      lr_backbone: 5e-4
-      lr_modality_heads: 2e-3
-      lr_output_adapters: 2e-3
-      wd_backbone: 0.05
-      wd_modality_heads: 0.05
-      wd_output_adapters: 0.05
-      grad_accum_steps: 2
+
+      scheduler:
+        grad_accum_steps: 2
+
+      optimizer:
+        lr:
+          backbone: 5e-4
+          modality_heads: 2e-3
+          output_adapters: 2e-3
+        wd:
+          backbone: 0.05
+          modality_heads: 0.05
+          output_adapters: 0.05
+
+      freeze:
+        backbone: false
+        modality_heads: false
+        output_adapters: false
 
     - name: ft_main
-      epochs: 10
-      freeze_backbone: false
-      freeze_modality_heads: false
-      freeze_output_adapters: false
-      lr_backbone: 5e-5
-      lr_modality_heads: 1e-3
-      lr_output_adapters: 1e-3
-      wd_backbone: 0.05
-      wd_modality_heads: 0.05
-      wd_output_adapters: 0.05
-      grad_accum_steps: 2
+      epochs: 2
+
+      scheduler:
+        grad_accum_steps: 2
+
+      optimizer:
+        lr:
+          backbone: 5e-5
+          modality_heads: 1e-3
+          output_adapters: 1e-3
+        wd:
+          backbone: 0.05
+          modality_heads: 0.05
+          output_adapters: 0.05
+
+      freeze:
+        backbone: true
+        modality_heads: false
+        output_adapters: false

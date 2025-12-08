@@ -53,10 +53,10 @@ class MMTCollate:
 
       Outputs
       -------
-      "outputs_emb"    : Dict[int, List[torch.Tensor]]
+     "outputs_emb"    : Dict[int, torch.Tensor]
                          For each output signal_id:
-                           list length = B
-                           each element is a 1D tensor with encoded output.
+                           tensor shape = (B, D_out)
+
       "outputs_mask"   : Dict[int, BoolTensor] with shape (B,)
                          Per-output presence/dropout mask.
 
@@ -419,12 +419,14 @@ class MMTCollate:
                 if arr is not None:
                     emb_t[i][t] = torch.from_numpy(arr)
 
-        # Outputs: embeddings + masks
-        outputs_emb_t: Dict[int, List[torch.Tensor]] = {}
+        # Outputs: embeddings (now as dense tensors of shape (B, D))
+        outputs_emb_t: Dict[int, torch.Tensor] = {}
         outputs_mask_t: Dict[int, torch.Tensor] = {}
 
         for sig_id, emb_list in outputs_emb_batch.items():
-            outputs_emb_t[sig_id] = [torch.from_numpy(e) for e in emb_list]
+            # emb_list: List[np.ndarray] with shape (D,) each
+            emb_arr = np.stack(emb_list, axis=0)  # (B, D)
+            outputs_emb_t[sig_id] = torch.from_numpy(emb_arr)
             outputs_mask_t[sig_id] = torch.from_numpy(
                 outputs_mask_batch_np[sig_id].astype(bool)
             )
