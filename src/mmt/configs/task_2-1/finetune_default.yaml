@@ -15,7 +15,7 @@ collate:
   p_drop_actuators_chunks: 0.0
 
 data:
-  cache_tokens: true
+  cache_tokens: false
   num_workers_cache: 8
   keep_output_native: false
 
@@ -28,7 +28,7 @@ preprocessing:
 
 loader:
   batch_size: 1000
-  num_workers: 0
+  num_workers: 1
   shuffle: true
   drop_last: false
 

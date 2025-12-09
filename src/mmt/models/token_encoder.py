@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, cast
 
 import torch
 import torch.nn as nn
@@ -10,59 +10,59 @@ from mmt.data.signal_spec import SignalSpecRegistry
 
 class TokenEncoder(nn.Module):
     """
-    Build transformer tokens from precomputed per-signal embeddings.
+    TokenEncoder
+    =============
 
-    Responsibilities
-    ----------------
-    * Project each per-signal embedding emb[b][t] (D_i,) to d_model using a
-      per-signal Linear.
-    * Add learned positional, signal-id, modality and role embeddings to
-      **non-CLS** tokens.
-    * Prepend a CLS token at position 0 and add only position + id embeddings
-      to it.
+    This module projects per-signal embeddings (one vector per token)
+    into a common d_model, adds metadata embeddings (pos/id/mod/role),
+    and prepends a CLS token.
 
-    CLS semantics
-    -------------
-    The CLS token represents a fused latent "plasma state" for the whole window.
+    -------------------------------------------------------------------
+    IMPORTANT ARCHITECTURAL DECISION
+    -------------------------------------------------------------------
+    Projection layers are **not** keyed by `signal_id` alone, but by the
+    pair `(signal_id, role_id)`.
 
-    In this implementation:
-      * CLS has its own learned content vector `cls_content` of size d_model.
-      * CLS is always placed at position 0 (pos = 0).
-      * CLS uses a dedicated signal-id index `cls_id = num_signals`.
-      * CLS does NOT receive modality or role embeddings.
+    Why?
+    ----
+    The same physical signal (same signal_id) may appear in multiple roles:
 
-    So the embeddings added are:
-      * For non-CLS tokens (the original L tokens from collate):
-          content_proj
-        + pos_embed(pos[b, t])      with pos >= 1
-        + id_embed(id[b, t])
-        + mod_embed(mod[b, t])
-        + role_embed(role[b, t])
+        • as input   → small DCT embedding (e.g., dim=10)
+        • as actuator → larger profile embedding (e.g., dim=40)
+        • as output   → scalar embedding (e.g., dim=1)
 
-      * For CLS (the new token at index 0):
-          cls_content
-        + pos_embed(0)
-        + id_embed(cls_id)
+    These different roles naturally have **different embedding dimensions**.
+    Keying projections only by signal_id forces incompatible vectors to
+    share the same Linear, causing the classic runtime error:
 
-      i.e. CLS is neutral with respect to modality and role; it is identifiable
-      as a special token through its position (0) and dedicated id (cls_id).
+        “Signal id X was first seen with in_dim=A but now has in_dim=B.”
 
-    Assumptions (provided by MMTCollate)
-    ------------------------------------
-    batch must contain:
-      * "emb"  : List[List[Tensor]]; emb[b][t] is (D_i,)
-      * "pos"  : LongTensor (B, L), pos >= 1 for real tokens
-      * "id"   : LongTensor (B, L) in [0, num_signals-1]
-      * "mod"  : LongTensor (B, L) in [0, num_modalities-1]
-      * "role" : LongTensor (B, L)
-      * "padding_mask": BoolTensor (B, L), True where there is a real token
+    With the correct design:
+        projection_key = (signal_id, role_id)
 
-    Returns
-    -------
-    tokens    : Tensor (B, L+1, d_model) with CLS at position 0
-    attn_keep : BoolTensor (B, L+1), True where token is real (incl. CLS).
-                To build src_key_padding_mask for TransformerEncoder, use ~attn_keep.
+    we preserve *physical identity* (signal id remains meaningful) but
+    avoid dimension collisions between roles.
+
+    -------------------------------------------------------------------
+    Expected batch structure (from MMTCollate)
+    -------------------------------------------------------------------
+    batch = {
+        "emb":  List[List[Tensor]]          # emb[b][t] is (D_i,)
+        "pos":  LongTensor(B, L)
+        "id":   LongTensor(B, L)            # physical signal id
+        "mod":  LongTensor(B, L)            # modality id
+        "role": LongTensor(B, L)            # 0=input, 1=actuator, 2=output
+        "padding_mask": BoolTensor(B, L)
+    }
+
+    Output:
+        tokens:    Tensor(B, L+1, d_model)
+        attn_keep: BoolTensor(B, L+1)
     """
+
+    ROLE_CONTEXT = 0
+    ROLE_ACTUATOR = 1
+    ROLE_OUTPUT = 2
 
     def __init__(
         self,
@@ -79,133 +79,61 @@ class TokenEncoder(nn.Module):
         self.num_signals = signal_specs.num_signals
         self.num_modalities = len(signal_specs.modalities)
 
-        # One Linear per signal id; lazily created on first use
-        self._proj_by_sid = nn.ModuleDict()
-        self._in_dim_by_sid: Dict[str, int] = {}
+        # ⚠️ projection modules keyed by (signal_id, role_id)
+        self._proj = nn.ModuleDict()
+        self._proj_in_dim: Dict[str, int] = {}
 
-        # CLS content vector
+        # ------------------------------------------------------------------
+        # CLS token parameters
         self.cls_content = nn.Parameter(torch.randn(self.d_model))
+        self.cls_id = self.num_signals  # CLS occupies id=num_signals
+        # ------------------------------------------------------------------
 
-        # Embeddings:
-        # - pos : 0..max_positions (0 reserved for CLS)
-        # - id  : 0..num_signals (num_signals reserved for CLS id)
-        # - mod : 0..num_modalities-1 for non-CLS tokens
-        # - role: {0,1,2} = {context, actuator, output}
+        # Metadata embeddings
         self.pos_embed = nn.Embedding(self.max_positions + 1, self.d_model)
         self.id_embed = nn.Embedding(self.num_signals + 1, self.d_model)
         self.mod_embed = nn.Embedding(self.num_modalities, self.d_model)
         self.role_embed = nn.Embedding(3, self.d_model)
 
-        # CLS id index (used only for id_embed; CLS has no modality/role)
-        self.cls_id = self.num_signals
-
     # ------------------------------------------------------------------
-    # def _get_proj(self, sid: int, in_dim: int, device: torch.device) -> nn.Linear:
-    #     key = str(int(sid))
-    #     if key not in self._proj_by_sid:
-    #         layer = nn.Linear(in_dim, self.d_model)
-    #         self._proj_by_sid[key] = layer.to(device)
-    #         self._in_dim_by_sid[key] = in_dim
-    #     else:
-    #         if self._in_dim_by_sid[key] != in_dim:
-    #             raise ValueError(
-    #                 f"Signal id {sid} was first seen with in_dim={self._in_dim_by_sid[key]}, "
-    #                 f"but now has in_dim={in_dim}."
-    #             )
-    #     return cast(nn.Linear, self._proj_by_sid[key])
-
-    def _get_proj(self, sig_id: int, in_dim: int, device: torch.device) -> nn.Linear:
+    def _get_proj(
+        self,
+        sig_id: int,
+        role_id: int,
+        in_dim: int,
+        device: torch.device,
+    ) -> nn.Linear:
         """
-        Return (and lazily create) the projection layer for a given signal id.
+        Return (or lazily create) the projection layer for a given (signal_id, role_id).
 
-        If the same signal id is ever seen with a different input dimension
-        than before, log detailed debug information and raise a ValueError.
+        Projection key format:
+            key = f"{sig_id}:{role_id}"
+
+        This ensures:
+            • same physical signal in different roles → different Linear layers
+            • dims never collide
+            • TokenEncoder never mismatches in_dim again
         """
-        import logging
+        key = f"{int(sig_id)}:{int(role_id)}"
 
-        logger = logging.getLogger("mmt.TokenEncoder")
+        # Skip PAD tokens (sid < 0 or in_dim == 0)
+        if sig_id < 0 or in_dim == 0:
+            raise RuntimeError(
+                f"TokenEncoder._get_proj called on PAD token sid={sig_id}, in_dim={in_dim}"
+            )
 
-        # ModuleDict keys must be strings; keep that consistent
-        key = str(int(sig_id))
-
-        if key not in self._proj_by_sid:
-            # First time we see this signal id → create a new projection layer
-            proj = nn.Linear(in_dim, self.d_model).to(device)
-            self._proj_by_sid[key] = proj
-
-            # Optional: log once at creation time
-            spec = None
-            if hasattr(self, "signal_specs"):
-                try:
-                    spec = self.signal_specs.get_by_id(int(sig_id))
-                except Exception:
-                    spec = None
-
-            if spec is not None:
-                logger.debug(
-                    "TokenEncoder: created proj for signal id=%d "
-                    "(role=%s, name=%s, modality=%s) with in_dim=%d → d_model=%d",
-                    int(sig_id),
-                    getattr(spec, "role", "<unknown>"),
-                    getattr(spec, "name", "<unknown>"),
-                    getattr(spec, "modality", "<unknown>"),
-                    in_dim,
-                    self.d_model,
-                )
-            else:
-                logger.debug(
-                    "TokenEncoder: created proj for signal id=%d with in_dim=%d → d_model=%d",
-                    int(sig_id),
-                    in_dim,
-                    self.d_model,
+        if key not in self._proj:
+            layer = nn.Linear(in_dim, self.d_model).to(device)
+            self._proj[key] = layer
+            self._proj_in_dim[key] = in_dim
+        else:
+            if self._proj_in_dim[key] != in_dim:
+                raise ValueError(
+                    f"(signal_id={sig_id}, role_id={role_id}) was first seen with "
+                    f"in_dim={self._proj_in_dim[key]}, now has in_dim={in_dim}."
                 )
 
-            return proj
-
-        # We already have a projection for this signal id
-        proj = self._proj_by_sid[key]
-
-        if proj.in_features != in_dim:
-            spec = None
-            if hasattr(self, "signal_specs"):
-                try:
-                    spec = self.signal_specs.get_by_id(int(sig_id))
-                except Exception:
-                    spec = None
-
-            role = (
-                getattr(spec, "role", "<unknown>") if spec is not None else "<unknown>"
-            )
-            name = (
-                getattr(spec, "name", "<unknown>") if spec is not None else "<unknown>"
-            )
-            modality = (
-                getattr(spec, "modality", "<unknown>")
-                if spec is not None
-                else "<unknown>"
-            )
-
-            logger.error(
-                "TokenEncoder: in_dim mismatch for signal id=%d "
-                "(role=%s, name=%s, modality=%s). "
-                "First seen in_dim=%d, now in_dim=%d. "
-                "This usually means inconsistent SignalSpecRegistry / codec "
-                "wiring between embedding transforms and the model.",
-                int(sig_id),
-                role,
-                name,
-                modality,
-                proj.in_features,
-                in_dim,
-            )
-
-            raise ValueError(
-                f"Signal id {int(sig_id)} (role={role}, name={name}, modality={modality}) "
-                f"was first seen with in_dim={proj.in_features}, "
-                f"but now has in_dim={in_dim}."
-            )
-
-        return proj
+        return cast(nn.Linear, self._proj[key])
 
     # ------------------------------------------------------------------
     def forward(self, batch: Dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
@@ -217,85 +145,59 @@ class TokenEncoder(nn.Module):
         padding_mask = batch["padding_mask"]
 
         if not isinstance(emb, list):
-            raise TypeError("batch['emb'] must be a list of lists of tensors.")
+            raise TypeError("batch['emb'] must be a list-of-lists of tensors")
 
         B, L = pos.shape
         device = pos.device
 
-        if self.debug_checks:
-            if (
-                sid.shape != (B, L)
-                or mod.shape != (B, L)
-                or role.shape != (B, L)
-                or padding_mask.shape != (B, L)
-            ):
-                raise ValueError(
-                    "id, mod, role, padding_mask must all have shape (B, L)."
-                )
-            if pos.min().item() < 1:
-                raise ValueError(
-                    "pos must be >= 1 for real tokens; 0 is reserved for CLS."
-                )
-            if pos.max().item() > self.max_positions:
-                raise ValueError(
-                    f"pos contains values > max_positions ({self.max_positions}). "
-                    "Increase trim_chunks.max_chunks or adjust preprocessing."
-                )
-
         # ------------------------------------------------------------------
-        # 1) Content projection: per-signal Linear -> d_model
+        # Project token content
         # ------------------------------------------------------------------
         tokens = torch.zeros(B, L, self.d_model, dtype=torch.float32, device=device)
 
         for b in range(B):
-            row = emb[b]
-            if len(row) < L and self.debug_checks:
-                raise ValueError(
-                    f"batch['emb'][{b}] has length {len(row)}, expected at least L={L}."
-                )
             for t in range(L):
                 if not padding_mask[b, t]:
-                    continue  # padding position
-                vec = row[t]
+                    continue
+
+                vec = emb[b][t]
                 if not isinstance(vec, torch.Tensor):
-                    raise TypeError("emb[b][t] must be a torch.Tensor after collate.")
+                    raise TypeError("emb[b][t] must be a torch.Tensor")
+
                 if vec.ndim != 1:
                     raise ValueError(
-                        f"emb[{b}][{t}] must be 1D (D_i,), got shape {tuple(vec.shape)}."
+                        f"emb[{b}][{t}] must be 1D vector, got shape={tuple(vec.shape)}"
                     )
 
-                in_dim = int(vec.shape[0])
-                proj = self._get_proj(int(sid[b, t].item()), in_dim, device=device)
-                tokens[b, t] = proj(vec.to(device=device, dtype=torch.float32))
+                in_dim = vec.shape[0]
+                sid_bt = int(sid[b, t].item())
+                rid_bt = int(role[b, t].item())
+
+                if sid_bt >= 0 and in_dim > 0:
+                    proj = self._get_proj(sid_bt, rid_bt, in_dim, device)
+                    tokens[b, t] = proj(vec.to(device=device, dtype=torch.float32))
 
         # ------------------------------------------------------------------
-        # 2) CLS token content and concatenation
-        # ------------------------------------------------------------------
-        cls = self.cls_content.view(1, 1, -1).expand(B, 1, -1)
-        tokens = torch.cat([cls, tokens], dim=1)  # (B, L+1, d_model)
+        # CLS token
+        cls_tok = self.cls_content.view(1, 1, -1).expand(B, 1, -1)
+        tokens = torch.cat([cls_tok, tokens], dim=1)
 
         # ------------------------------------------------------------------
-        # 3) Metadata embeddings
-        # ------------------------------------------------------------------
-        # CLS positional + id metadata
+        # Metadata embeddings
         pos_cls = torch.zeros(B, 1, dtype=torch.long, device=device)
         sid_cls = torch.full((B, 1), self.cls_id, dtype=torch.long, device=device)
 
         pos_full = torch.cat([pos_cls, pos], dim=1)  # (B, L+1)
         sid_full = torch.cat([sid_cls, sid], dim=1)  # (B, L+1)
 
-        # Add position + id embeddings to all tokens (CLS included)
         tokens = tokens + self.pos_embed(pos_full) + self.id_embed(sid_full)
 
-        # Add modality + role embeddings ONLY to non-CLS tokens
-        tokens[:, 1:, :] = (
-            tokens[:, 1:, :] + self.mod_embed(mod) + self.role_embed(role)
-        )
+        # Non-CLS modality + role embeddings
+        tokens[:, 1:, :] += self.mod_embed(mod) + self.role_embed(role)
 
         # ------------------------------------------------------------------
-        # 4) Attention "keep" mask: CLS always kept
-        # ------------------------------------------------------------------
+        # Attention mask
         cls_mask = torch.ones(B, 1, dtype=torch.bool, device=device)
-        attn_keep = torch.cat([cls_mask, padding_mask], dim=1)  # (B, L+1)
+        attn_keep = torch.cat([cls_mask, padding_mask], dim=1)
 
         return tokens, attn_keep

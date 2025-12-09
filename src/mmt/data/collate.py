@@ -10,6 +10,12 @@ ROLE_CONTEXT = 0
 ROLE_ACTUATOR = 1
 ROLE_OUTPUT = 2
 
+# Explicit PAD semantics for token-level fields
+PAD_ID = -1  # never a real signal_id
+PAD_ROLE = -1  # no semantic role
+PAD_MOD = -1  # no modality
+PAD_POS = 0  # arbitrary, unused by model for PAD
+
 
 class MMTCollate:
     """
@@ -20,6 +26,8 @@ class MMTCollate:
       • Applies input, actuator, chunk, and output dropout
       • Builds masks for padding and dropped tokens
       • Preserves ragged embeddings (per-token projection happens in the model)
+      • Uses explicit PAD semantics so that PAD tokens are never confused
+        with real signals (sid = -1, role = -1, mod = -1, pos = 0)
 
     Expected input
     --------------
@@ -210,10 +218,12 @@ class MMTCollate:
         lengths = [len(e) for e in emb_lists]
         L_max = max(lengths)
 
-        pos_batch = np.zeros((B, L_max), dtype=np.int32)
-        id_batch = np.zeros((B, L_max), dtype=np.int32)
-        mod_batch = np.zeros((B, L_max), dtype=np.int16)
-        role_batch = np.zeros((B, L_max), dtype=np.int8)
+        # NOTE: we now initialise with explicit PAD values so that padded
+        # tokens are never mistaken for real signals.
+        pos_batch = np.full((B, L_max), PAD_POS, dtype=np.int32)
+        id_batch = np.full((B, L_max), PAD_ID, dtype=np.int32)
+        mod_batch = np.full((B, L_max), PAD_MOD, dtype=np.int16)
+        role_batch = np.full((B, L_max), PAD_ROLE, dtype=np.int8)
         padding_mask = np.zeros((B, L_max), dtype=np.int8)
 
         input_mask = np.ones((B, L_max), dtype=np.int8)
@@ -452,10 +462,5 @@ class MMTCollate:
 
         if self.keep_output_native:
             batch_out["output_native"] = output_native_t
-
-        for w in range(len(batch_out)):
-            print(np.array((batch_out["id"][w])))
-            for i in range(len(batch_out["emb"][w])):
-                print(int(np.array(batch_out["emb"][w][i].shape)))
 
         return batch_out
