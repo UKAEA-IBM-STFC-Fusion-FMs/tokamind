@@ -280,13 +280,20 @@ class SelectValidWindowsTransform:
         if window is None:
             return None
 
-        shot_id = window.get("shot_id", None)
-        w_idx = window.get("window_index", None)
-        t_cut = window.get("t_cut", None)
+        # --- safe extraction of window fields ---------------------------------------
+        shot_id = window.get("shot_id")
+        if shot_id is not None:
+            shot_id = int(shot_id)
 
-        # ------------------------------------------------------------------
-        # 0) Window-level subsampling by t_cut (optional)
-        # ------------------------------------------------------------------
+        w_idx = window.get("window_index")
+        if w_idx is not None:
+            w_idx = int(w_idx)
+
+        t_cut = window.get("t_cut")
+        if t_cut is not None:
+            t_cut = float(t_cut)
+
+        # ---------------------------------------------------------------------------
         if self.window_stride_sec is not None:
             if t_cut is None:
                 raise KeyError(
@@ -294,23 +301,25 @@ class SelectValidWindowsTransform:
                     "requires window['t_cut'] to be present."
                 )
 
-            # Use shot_id as key; if missing, fall back to a global key
             key: Hashable = shot_id if shot_id is not None else "__global__"
 
-            last = self._last_kept_by_shot.get(key, None)
+            last = self._last_kept_by_shot.get(key)
             if last is not None:
                 last_t_cut, last_w_idx = last
 
-                # If we detect that window_index has been reset (e.g. new epoch),
-                # reset the state for this shot so that the first window of the
-                # new pass is eligible again.
-                if (w_idx is not None) and (last_w_idx is not None):
-                    if w_idx <= last_w_idx:
-                        last_t_cut = None
-                        last_w_idx = None
+                # Detect window index reset
+                if (
+                    (w_idx is not None)
+                    and (last_w_idx is not None)
+                    and (w_idx <= last_w_idx)
+                ):
+                    # new epoch → ignore previous t_cut for stride check
+                    last_t_cut = None
 
-                if (last_t_cut is not None) and (
-                    (t_cut - last_t_cut) < self.window_stride_sec
+                # Subsampling
+                if (
+                    last_t_cut is not None
+                    and (t_cut - last_t_cut) < self.window_stride_sec
                 ):
                     logger.debug(
                         "[SelectValidWindows] dropping window %s (shot %s) due to "
@@ -323,10 +332,10 @@ class SelectValidWindowsTransform:
                     )
                     return None
 
-            # Keep this window and update state for this shot
+            # Keep
             self._last_kept_by_shot[key] = (
-                float(t_cut),
-                int(w_idx) if w_idx is not None else None,
+                t_cut,
+                w_idx,
             )
 
         chunks_dict = window.get("chunks") or {}

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 import random
-
 import numpy as np
 import torch
+from typing import Callable
 
 
 def set_seed(seed: int, deterministic: bool = True, warn_only: bool = True):
@@ -13,7 +13,6 @@ def set_seed(seed: int, deterministic: bool = True, warn_only: bool = True):
     Call once at startup, before building datasets/loaders/models.
     """
     os.environ["PYTHONHASHSEED"] = str(seed)
-    # Needed for strict cuBLAS determinism (matmul). Safe if CUDA isn't present.
     os.environ.setdefault("CUBLAS_WORKSPACE_CONFIG", ":4096:8")
 
     random.seed(seed)
@@ -22,12 +21,35 @@ def set_seed(seed: int, deterministic: bool = True, warn_only: bool = True):
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
-    # cuDNN + global deterministic guard
     try:
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = bool(deterministic)
     except Exception as ee:
         print(f"WARNING - torch exception triggered: {ee}")
-        pass
 
-    torch.use_deterministic_algorithms(bool(deterministic), warn_only=bool(warn_only))
+    torch.use_deterministic_algorithms(
+        bool(deterministic),
+        warn_only=bool(warn_only),
+    )
+
+
+def seed_worker(worker_id: int) -> None:
+    """
+    Worker init function for PyTorch DataLoader.
+
+    Derives a per-worker RNG seed from PyTorch's internal worker seed and
+    seeds NumPy and Python's `random` module accordingly.
+    """
+    worker_seed = (torch.initial_seed() + worker_id) % 2**32
+    np.random.seed(worker_seed)
+    random.seed(worker_seed)
+
+
+def make_worker_seed_fn() -> Callable[[int], None]:
+    """
+    Backwards-compatible helper returning the top-level `seed_worker` function.
+
+    This indirection keeps the public API flexible while ensuring the returned
+    callable is picklable (required for DataLoader workers with 'spawn').
+    """
+    return seed_worker

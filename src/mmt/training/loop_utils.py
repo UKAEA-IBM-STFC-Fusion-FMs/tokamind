@@ -331,16 +331,16 @@ def run_one_epoch(
 
             t4 = time.time()
 
+            logger.debug(
+                f"[TIMING] batch {batch_idx}: "
+                f"move={t1 - t0:.4f}s  "
+                f"forward={t2 - t1:.4f}s  "
+                f"backward={t3 - t2:.4f}s  "
+                f"opt={t4 - t3:.4f}s"
+            )
+
         running_loss += float(loss_t.detach().cpu())
         n_batches += 1
-
-        logger.info(
-            f"[TIMING] batch {batch_idx}: "
-            f"move={t1 - t0:.4f}s  "
-            f"forward={t2 - t1:.4f}s  "
-            f"backward={t3 - t2:.4f}s  "
-            f"opt={t4 - t3:.4f}s"
-        )
 
     avg_loss = running_loss / max(1, n_batches)
 

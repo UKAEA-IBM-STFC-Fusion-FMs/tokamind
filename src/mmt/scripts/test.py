@@ -1,22 +1,18 @@
 from __future__ import annotations
 
+import argparse
 import torch
 import torch.multiprocessing as mp
-import argparse
 
-from scripts.pipelines.utils.utils import (
-    ComposeTransforms,
-    initialize_model_datasets,
-    initialize_dataloaders,
-)
+from typing import Any
+
+import time
+
 from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
 )
 
-from mmt.data.baseline_bridge import (
-    build_baseline_task_config,
-)
-
+from mmt.data.baseline_bridge import build_baseline_task_config
 from mmt.utils.config_loader import load_experiment_config
 from mmt.utils.seed import set_seed
 from mmt.utils.logger import setup_logging
@@ -32,11 +28,14 @@ from mmt.data.transforms.select_valid_windows import SelectValidWindowsTransform
 from mmt.data.transforms.trim_chunks import TrimChunksTransform
 from mmt.data.transforms.embed_chunks import EmbedChunksTransform
 from mmt.data.transforms.build_tokens import BuildTokensTransform
-from mmt.data.cache_tokens import materialize_tokenized_split_to_ram
+from mmt.data.transforms.compose import ComposeTransforms
+
+from mmt.data.datasets.window_streamed_dataset import WindowStreamedDataset
+from mmt.data.datasets.window_cached_dataset import WindowCachedDataset
+
+from mmt.utils.mmt_init_data import initialize_mmt_dataloaders, initialize_mmt_datasets
 from mmt.data.collate import MMTCollate
-
 from mmt.models.mmt import MultiModalTransformer
-
 from mmt.training.loop import train_finetune
 
 DEBUG_MODE = True
@@ -50,8 +49,10 @@ def parse_args_finetune() -> argparse.Namespace:
         "--phase_config",
         type=str,
         default="mmt/configs/task_2-1/finetune_default.yaml",
-        help="Path to the phase YAML config file "
-        "(e.g. mmt/configs/task_2-1/finetune_default.yaml)",
+        help=(
+            "Path to the phase YAML config file "
+            "(e.g. mmt/configs/task_2-1/finetune_default.yaml)"
+        ),
     )
     args, _ = parser.parse_known_args()
     return args
@@ -63,6 +64,9 @@ def parse_args_finetune() -> argparse.Namespace:
 
 
 def main() -> None:
+    # ------------------------------------------------------------------
+    # Device / multiprocessing
+    # ------------------------------------------------------------------
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
@@ -71,31 +75,44 @@ def main() -> None:
         else "cpu"
     )
 
+    # Needed for DataLoader(num_workers>0) on some platforms
     mp.set_start_method("spawn", force=True)
 
-    # MMT config (phase + experiment_base + embeddings + baseline path)
+    # ------------------------------------------------------------------
+    # Load MMT config (phase + experiment_base + embeddings + baseline)
+    # ------------------------------------------------------------------
     args = parse_args_finetune()
     cfg_mmt = load_experiment_config(args.phase_config)
-    cfg_chunks = cfg_mmt.preprocessing["chunk"]
-    cfg_trim = cfg_mmt.preprocessing["trim_chunks"]
-    cfg_valid_win = cfg_mmt.preprocessing["valid_windows"]
+
+    # Small sub-configs for readability
+    cfg_prep = cfg_mmt.preprocessing
+    cfg_chunks = cfg_prep["chunk"]
+    cfg_trim = cfg_prep["trim_chunks"]
+    cfg_valid_win = cfg_prep["valid_windows"]
+
     cfg_data = cfg_mmt.data
+    cfg_model = cfg_mmt.model
+    cfg_loader = cfg_mmt.loader
+    cfg_collate = cfg_mmt.collate
+    cfg_training = cfg_mmt.training
+
     cache_tokens = cfg_data.get("cache_tokens", False)
     num_workers_cache = cfg_data.get("num_workers_cache", 0)
     keep_output_native = cfg_data.get("keep_output_native", False)
-    cfg_model = cfg_mmt.model
+
     cfg_backbone = cfg_model["backbone"]
     cfg_modality_heads = cfg_model["modality_heads"]
     cfg_output_adapters = cfg_model["output_adapters"]
     max_positions = cfg_trim["max_chunks"]
 
-    # Baseline: config_task con override (subset_of_shots, local)
+    # Baseline task config (with overrides such as subset_of_shots)
     cfg_task = build_baseline_task_config(cfg_mmt)
 
-    # setting the seed
+    # ------------------------------------------------------------------
+    # Seed + logging
+    # ------------------------------------------------------------------
     set_seed(cfg_mmt.seed, deterministic=True, warn_only=True)
 
-    # setting the logger
     logger = setup_logging(
         cfg_mmt.paths["run_dir"],
         logger_name="mmt",
@@ -105,7 +122,9 @@ def main() -> None:
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
     logger.info(f"task = {cfg_mmt.task} | phase = {cfg_mmt.phase} | device = {device}")
 
-    # Baseline: datasets + metadata
+    # ------------------------------------------------------------------
+    # Baseline datasets + metadata
+    # ------------------------------------------------------------------
     datasets_train_val_test, dict_metadata = initialize_datasets_and_metadata_for_task(
         cfg_task
     )
@@ -120,7 +139,9 @@ def main() -> None:
     )
     codecs = build_codecs(signal_specs)
 
-    # Model-specific transform (per ora: identity chain)
+    # ------------------------------------------------------------------
+    # Model-specific transform chain (shot -> windows)
+    # ------------------------------------------------------------------
     model_specific_transform = ComposeTransforms(
         [
             ChunkWindowsTransform(
@@ -153,7 +174,9 @@ def main() -> None:
         ]
     )
 
-    # init model
+    # ------------------------------------------------------------------
+    # Model
+    # ------------------------------------------------------------------
     model = MultiModalTransformer(
         signal_specs=signal_specs,
         d_model=cfg_backbone["d_model"],
@@ -170,10 +193,9 @@ def main() -> None:
     model.to(device)
 
     # ------------------------------------------------------------------
-    # Warm-start / Model Initialization from previous run (if provided)
+    # Optional warm-start from previous run
     # ------------------------------------------------------------------
     model_init_cfg = cfg_mmt.get("model_init", None)
-
     if model_init_cfg is not None:
         run_init = model_init_cfg.get("run_dir", None)
         load_parts = model_init_cfg.get("load_parts", None)
@@ -181,8 +203,7 @@ def main() -> None:
         if run_init is not None:
             from mmt.training.checkpoint_io import load_parts_from_run_dir
 
-            print(f"[WarmStart] Loading parts from previous run_dir: {run_init}")
-
+            logger.info("[WarmStart] Loading parts from previous run_dir: %s", run_init)
             load_parts_from_run_dir(
                 model,
                 run_init,
@@ -191,8 +212,10 @@ def main() -> None:
                 verbose=True,
             )
 
-    # Datasets per il modello (TaskModelTransformWrapper)
-    datasets_mmt = initialize_model_datasets(
+    # ------------------------------------------------------------------
+    # Model-level datasets (TaskModelTransformWrapper, shot-based)
+    # ------------------------------------------------------------------
+    datasets_mmt = initialize_mmt_datasets(
         datasets_train_val_test,
         dict_metadata,
         cfg_task,
@@ -200,111 +223,116 @@ def main() -> None:
         verbose=True,
     )
 
-    # Optionally materialize streaming datasets to RAM as tokenized windows
-    # we cache only train and val: in evaluation cache_tokens is always false
+    # ------------------------------------------------------------------
+    # Optionally materialise streaming datasets to RAM (window-level)
+    # ------------------------------------------------------------------
     datasets_for_loader = {}
 
-    if cache_tokens:
-        # cache only train / val
-        for split, ds_stream in datasets_mmt.items():
-            if ds_stream is None:
-                datasets_for_loader[split] = None
-                continue
+    datasets_for_loader: dict[str, Any] = {}
 
-            if split in ("train", "val"):  # cache only train and val
-                import time
+    for split, ds_stream in datasets_mmt.items():
+        if ds_stream is None:
+            datasets_for_loader[split] = None
+            continue
 
-                print(f"\n[Caching] Starting caching {split}")
-                t0 = time.perf_counter()
-                ds_cached = materialize_tokenized_split_to_ram(
-                    streaming_dataset=ds_stream,
-                    num_workers_cache=num_workers_cache,
-                )
-                t1 = time.perf_counter()
-                print(f"Caching took {t1 - t0:.3f} seconds")
-                datasets_for_loader[split] = ds_cached
-            else:
-                datasets_for_loader[split] = ds_stream
-    else:
-        datasets_for_loader = datasets_mmt
+        # Decide whether this split should be cached
+        use_cache_for_split = cache_tokens and split in ("train", "val")
 
-    # Dataloaders
-    collate_fn = MMTCollate(
-        {**cfg_mmt.collate, "keep_output_native": keep_output_native}
-    )
+        if use_cache_for_split:
+            logger.info("[Caching] Starting caching split=%s", split)
+            t0 = time.perf_counter()
+            ds = WindowCachedDataset.from_streaming(
+                ds_stream,
+                num_workers_cache=num_workers_cache,
+            )
+            t1 = time.perf_counter()
+            logger.info("[Caching] Finished caching %s in %.3f seconds", split, t1 - t0)
+        else:
+            # Window-level streaming dataset (also used for test / non-cached splits)
+            ds = WindowStreamedDataset(
+                ds_stream,
+                shuffle_shots=cfg_loader["shuffle"],
+                seed=cfg_mmt.seed,
+            )
 
-    dataloaders_mmt = initialize_dataloaders(
+        datasets_for_loader[split] = ds
+
+    # ------------------------------------------------------------------
+    # Dataloaders (always window-level batches)
+    # ------------------------------------------------------------------
+    collate_fn = MMTCollate({**cfg_collate, "keep_output_native": keep_output_native})
+
+    dataloaders_mmt = initialize_mmt_dataloaders(
         datasets_for_loader,
         collate_fn,
-        batch_size=cfg_mmt.loader["batch_size"],
-        num_workers=cfg_mmt.loader["num_workers"],
-        shuffle=cfg_mmt.loader["shuffle"],
-        drop_last=cfg_mmt.loader["drop_last"],
+        batch_size=cfg_loader["batch_size"],
+        num_workers=cfg_loader["num_workers"],
+        shuffle=cfg_loader["shuffle"],
+        drop_last=cfg_loader["drop_last"],
         seed=cfg_mmt.seed,
     )
 
     # ------------------------------------------------------------------
     # Run a short finetuning test (few epochs, config-driven)
     # ------------------------------------------------------------------
-    training_cfg = cfg_mmt.training  # the new strict training config
     run_dir = cfg_mmt.paths["run_dir"]
 
-    print("\n[Training] Starting finetuning test run...")
+    logger.info("[Training] Starting finetuning test run...")
     history = train_finetune(
         model=model,
         train_loader=dataloaders_mmt["train"],
         val_loader=dataloaders_mmt["val"],
         run_dir=run_dir,
-        training_cfg=training_cfg,
+        training_cfg=cfg_training,
     )
 
-    print("\n[Training] Completed. Summary:")
-    print(history)
+    logger.info("[Training] Completed. Summary:")
+    logger.info("%s", history)
 
-    # small debug printing
-    print("\n[Debug] Shots per split (TaskModelTransformWrapper):")
-    for split in ("train", "val", "test"):
-        ds = datasets_mmt.get(split)
-        if ds is None:
-            print(f"  {split}: None")
-        else:
-            print(f"  {split}: {len(ds)} shots")
-
-    print("\n[Debug] Inspect first few windows:")
-    ds_train = datasets_for_loader["train"]
-
-    if cache_tokens:
-        # TokenizedWindowDataset: each item is a window dict
-        for i in range(min(4, len(ds_train))):
-            win = ds_train[i]
-            print(
-                f"  window {i}: shot_id={win.get('shot_id')}, window_index={win.get('window_index')}"
-            )
-    else:
-        # Streaming: ds_train[i] is a generator of windows for shot i
-        gen = ds_train[3]
-        for i, win in enumerate(gen):
-            print(
-                f"  shot 3, window {i}: shot_id={win.get('shot_id')}, window_index={win.get('window_index')}"
-            )
-            if i >= 4:
-                break
-
-    # ------------------------------------------------------------------
-    # Debug: inspect one batch from the MMT train dataloader
-    # ------------------------------------------------------------------
-    train_loader = dataloaders_mmt["train"]
-
-    print("\n[Debug] Fetching one batch from MMT train dataloader...")
-    batch = next(iter(train_loader))
-
-    print("[Debug] Batch keys and shapes:")
-    for key, value in batch.items():
-        if hasattr(value, "shape"):
-            dtype = getattr(value, "dtype", None)
-            print(f"  {key}: shape={tuple(value.shape)}, dtype={dtype}")
-        else:
-            print(f"  {key}: type={type(value)} -> {value}")
+    # # small debug printing
+    # print("\n[Debug] Shots per split (TaskModelTransformWrapper):")
+    # for split in ("train", "val", "test"):
+    #     ds = datasets_mmt.get(split)
+    #     if ds is None:
+    #         print(f"  {split}: None")
+    #     else:
+    #         print(f"  {split}: {len(ds)} shots")
+    #
+    # print("\n[Debug] Inspect first few windows:")
+    # ds_train = datasets_for_loader["train"]
+    #
+    # if cache_tokens:
+    #     # TokenizedWindowDataset: each item is a window dict
+    #     for i in range(min(4, len(ds_train))):
+    #         win = ds_train[i]
+    #         print(
+    #             f"  window {i}: shot_id={win.get('shot_id')}, window_index={win.get('window_index')}"
+    #         )
+    # else:
+    #     # Streaming: ds_train[i] is a generator of windows for shot i
+    #     gen = ds_train[3]
+    #     for i, win in enumerate(gen):
+    #         print(
+    #             f"  shot 3, window {i}: shot_id={win.get('shot_id')}, window_index={win.get('window_index')}"
+    #         )
+    #         if i >= 4:
+    #             break
+    #
+    # # ------------------------------------------------------------------
+    # # Debug: inspect one batch from the MMT train dataloader
+    # # ------------------------------------------------------------------
+    # train_loader = dataloaders_mmt["train"]
+    #
+    # print("\n[Debug] Fetching one batch from MMT train dataloader...")
+    # batch = next(iter(train_loader))
+    #
+    # print("[Debug] Batch keys and shapes:")
+    # for key, value in batch.items():
+    #     if hasattr(value, "shape"):
+    #         dtype = getattr(value, "dtype", None)
+    #         print(f"  {key}: shape={tuple(value.shape)}, dtype={dtype}")
+    #     else:
+    #         print(f"  {key}: type={type(value)} -> {value}")
 
     # # If masks are present, print some basic stats to see dropout/masking
     # for mask_name in ("padding_mask", "input_mask", "actuator_mask", "output_mask"):

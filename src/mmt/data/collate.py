@@ -5,7 +5,6 @@ import numpy as np
 import random
 import torch
 
-
 # Token roles (same as in BuildTokensTransform)
 ROLE_CONTEXT = 0
 ROLE_ACTUATOR = 1
@@ -14,74 +13,105 @@ ROLE_OUTPUT = 2
 
 class MMTCollate:
     """
-    Universal collate function for both pretraining and finetuning.
+    Collate function for window-level MMT batches (pretraining + finetuning).
 
     This collate:
-      • Pads variable-length sequences
+      • Pads variable-length token sequences
       • Applies input, actuator, chunk, and output dropout
       • Builds masks for padding and dropped tokens
       • Preserves ragged embeddings (per-token projection happens in the model)
 
-    Input
-    -----
-    List[window_dict] where each window was produced by BuildTokensTransform.
+    Expected input
+    --------------
+    `batch` is a `List[window_dict]`, where **each element corresponds to a
+    single model window**, as produced by `BuildTokensTransform` and coming
+    from either:
 
-    Output
-    ------
-    A batch dictionary with:
+      - `WindowStreamedDataset` (streaming path), or
+      - `WindowCachedDataset` (RAM-cached path).
 
-      Token-level inputs
-      ------------------
-      "emb"            : List[List[torch.Tensor]]
-                         Ragged embeddings before projection:
-                           emb[b][t] is a 1D tensor (D_i,)
-                         Padded positions (t >= length_b) are left as None.
+    Each `window_dict` should minimally contain:
 
-      "pos"            : LongTensor (B, L)
-      "id"             : LongTensor (B, L)
-      "mod"            : LongTensor (B, L)
-      "role"           : LongTensor (B, L)
-      "signal_name"    : List[List[str]]
+    .. code-block:: python
 
-      "padding_mask"   : BoolTensor (B, L)
-                         True where there is a *real* token (not padding),
-                         i.e. where original length > t.
-      "input_mask"     : BoolTensor (B, L)
-                         True where the input token is kept (not dropped).
-      "actuator_mask"  : BoolTensor (B, L)
-                         True where the actuator token is kept (not dropped).
+        {
+            "shot_id": ...,
+            "window_index": ...,
+            "emb_chunks": [np.ndarray(D_i), ...],   # ragged token embeddings
+            "pos": np.ndarray(L,),                  # token positions
+            "id": np.ndarray(L,),                   # signal IDs
+            "mod": np.ndarray(L,),                  # modality IDs
+            "role": np.ndarray(L,),                 # role IDs
+            "signal_name": np.ndarray(L,),          # human-friendly names
 
-      Outputs
-      -------
-     "outputs_emb"    : Dict[int, torch.Tensor]
-                         For each output signal_id:
-                           tensor shape = (B, D_out)
+            "outputs_emb": {signal_id: np.ndarray(D_out), ...},
+            "outputs_shapes": {signal_id: shape, ...},
+            "outputs_names": {signal_id: name, ...},
 
-      "outputs_mask"   : Dict[int, BoolTensor] with shape (B,)
-                         Per-output presence/dropout mask.
+            # Optionally (e.g. eval, if enabled in transforms):
+            # "output": {... native output payloads ...}
+        }
 
-      If cfg_collate["keep_output_native"] == True, also:
-      "output_native"  : Dict[int, torch.Tensor]
-                         Each tensor has shape (B, *orig_output_shape).
-    """
+    Returned batch
+    --------------
+    A dictionary with the following keys:
 
-    # ------------------------------------------------------------------ #
-    def __init__(self, cfg_collate: Dict[str, Any]) -> None:
-        """
-        cfg_collate comes from finetune_default.yaml:
+    Token-level inputs
+    ------------------
+    "emb"            : List[List[torch.Tensor]]
+                       Ragged embeddings before projection:
+                         emb[b][t] is a 1D tensor (D_i,)
+                       Padded positions (t >= length_b) are left as empty
+                       tensors (shape (0,)).
+
+    "pos"            : LongTensor (B, L)
+    "id"             : LongTensor (B, L)
+    "mod"            : LongTensor (B, L)
+    "role"           : LongTensor (B, L)
+    "signal_name"    : List[List[str]]
+
+    "padding_mask"   : BoolTensor (B, L)
+                       True where there is a *real* token (not padding),
+                       i.e. where original length > t.
+
+    "input_mask"     : BoolTensor (B, L)
+                       True where the input token is kept (not dropped).
+
+    "actuator_mask"  : BoolTensor (B, L)
+                       True where the actuator token is kept (not dropped).
+
+    Outputs
+    -------
+    "outputs_emb"    : Dict[int, torch.Tensor]
+                       For each output `signal_id`:
+                         tensor shape = (B, D_out)
+
+    "outputs_mask"   : Dict[int, BoolTensor] with shape (B,)
+                       Per-output presence/dropout mask.
+
+    If `cfg_collate["keep_output_native"] == True`, also:
+
+    "output_native"  : Dict[int, torch.Tensor]
+                       Each tensor has shape (B, *orig_output_shape).
+
+    Configuration
+    -------------
+    `cfg_collate` is expected to follow the structure in `finetune_default.yaml`:
+
+    .. code-block:: yaml
 
         collate:
           # INPUT DROPOUT
           p_drop_inputs: 0.08
           p_drop_inputs_overrides: {}          # keyed by signal_name
 
-          # output DROPOUT
+          # OUTPUT DROPOUT
           p_drop_outputs: 0.0
           p_drop_outputs_overrides: {}         # keyed by output signal_name
 
           # ACTUATORS DROPOUT
           p_drop_actuators: 0.0
-          p_drop_actuators_overrides: {}      # keyed by signal_name
+          p_drop_actuators_overrides: {}       # keyed by signal_name
 
           # CHUNK DROPOUT (coarse time-based masking)
           p_drop_inputs_chunks: 0.08
@@ -89,7 +119,10 @@ class MMTCollate:
 
           # EVAL-ONLY: include native outputs (Y_native)
           # keep_output_native: false
-        """
+    """
+
+    # ------------------------------------------------------------------ #
+    def __init__(self, cfg_collate: Dict[str, Any]) -> None:
         self.cfg = cfg_collate
         self.keep_output_native = bool(cfg_collate.get("keep_output_native", False))
 
@@ -103,69 +136,32 @@ class MMTCollate:
         """
         Collate a batch of MMT windows into padded model-ready tensors.
 
-        Accepted input formats
-        ----------------------
-        This collate supports two equivalent forms for each batch element:
-
-          1) A single tokenized window dict:
-                {
-                    "shot_id": ...,
-                    "window_index": ...,
-                    "emb_chunks": [...],
-                    "pos": np.ndarray(L,),
-                    "id": np.ndarray(L,),
-                    "mod": np.ndarray(L,),
-                    "role": np.ndarray(L,),
-                    "signal_name": np.ndarray(L,),
-                    "outputs_emb": {...},
-                    "outputs_shapes": {...},
-                    "outputs_names": {...},
-                    ...
-                }
-
-          2) An iterable (e.g. generator/list) of such window dicts for a shot.
-
-        Output format
-        -------------
-        Returns a dictionary with torch tensors as described in the class
-        docstring.
+        Input
+        -----
+        batch: List[dict]
+            Each element must be a single window dict as described in the
+            class docstring.  `None` entries are skipped (defensive) but
+            should not normally appear when using WindowStreamedDataset or
+            WindowCachedDataset.
         """
-
         # --------------------------------------------------------------- #
-        # 0. Flatten batch into a list of window dicts
+        # 0. Sanity-check + filter Nones → flat list of window dicts
         # --------------------------------------------------------------- #
         flat_windows: List[Dict[str, Any]] = []
 
         for item in batch:
             if item is None:
                 continue
-
-            # Case 1: already a single window dict
-            if isinstance(item, dict):
-                flat_windows.append(item)
-                continue
-
-            # Case 2: iterable of window dicts (e.g. generator per shot)
-            try:
-                for w in item:
-                    if w is None:
-                        continue
-                    if not isinstance(w, dict):
-                        raise TypeError(
-                            "MMTCollate expected window dicts inside iterables, "
-                            f"got {type(w)}"
-                        )
-                    flat_windows.append(w)
-            except TypeError:
+            if not isinstance(item, dict):
                 raise TypeError(
-                    "MMTCollate expected each batch element to be either a window dict "
-                    "or an iterable of window dicts. "
-                    f"Got {type(item)} instead."
+                    "MMTCollate now expects each batch element to be a single "
+                    f"window dict, got {type(item)} instead."
                 )
+            flat_windows.append(item)
 
         B = len(flat_windows)
         if B == 0:
-            raise ValueError("MMTCollate received an empty flattened batch.")
+            raise ValueError("MMTCollate received an empty batch of windows.")
 
         # --------------------------------------------------------------- #
         # 1. Extract per-window token arrays + output metadata
@@ -223,6 +219,7 @@ class MMTCollate:
         input_mask = np.ones((B, L_max), dtype=np.int8)
         actuator_mask = np.ones((B, L_max), dtype=np.int8)
 
+        # Ragged embeddings kept as Python nested lists of np.ndarrays
         emb_batch: List[List[np.ndarray]] = [
             [np.empty((0,), dtype=np.float32) for _ in range(L_max)] for _ in range(B)
         ]
@@ -419,12 +416,11 @@ class MMTCollate:
                 if arr is not None:
                     emb_t[i][t] = torch.from_numpy(arr)
 
-        # Outputs: embeddings (now as dense tensors of shape (B, D))
+        # Outputs: embeddings (dense tensors of shape (B, D))
         outputs_emb_t: Dict[int, torch.Tensor] = {}
         outputs_mask_t: Dict[int, torch.Tensor] = {}
 
         for sig_id, emb_list in outputs_emb_batch.items():
-            # emb_list: List[np.ndarray] with shape (D,) each
             emb_arr = np.stack(emb_list, axis=0)  # (B, D)
             outputs_emb_t[sig_id] = torch.from_numpy(emb_arr)
             outputs_mask_t[sig_id] = torch.from_numpy(
@@ -440,13 +436,6 @@ class MMTCollate:
         # --------------------------------------------------------------- #
         # 10. Assemble final batch dict (torch)
         # --------------------------------------------------------------- #
-        # At this point, pos is a tensor of shape (B, L)
-        B = pos_t.shape[0]
-        L = pos_t.shape[1]
-
-        # Debug: how many windows/tokens per batch?
-        print("[COLLATE DEBUG] windows_in_batch=%d, seq_len=%d", B, L)
-
         batch_out: Dict[str, Any] = {
             "emb": emb_t,
             "pos": pos_t,
