@@ -84,9 +84,7 @@ def initialize_mmt_datasets(
         "test": None,
     }
 
-    splits = ("train", "val", "test")
-
-    for split in splits:
+    for split in ("train", "val", "test"):
         base_ds = datasets_train_val_test.get(split)
         if base_ds is None:
             continue
@@ -202,23 +200,48 @@ def initialize_mmt_dataloaders(
     -------
     dict
         Mapping from split name to DataLoader or None.
+
+    NOTES:
+    --------------
+    Each DataLoader now has an attribute:
+
+        loader.is_streaming : bool
+
+    which training/evaluation loops can use to apply streaming logic:
+
+      - Cached mode  → full epoch (len(dataloader) meaningful)
+      - Streaming    → epoch length controlled by
+                       cfg.loader.streaming.batches_per_epoch
+
     """
+
+    # ----------------------------------------------------------------------
+    # Guard: num_workers must be >= 1
+    # ----------------------------------------------------------------------
+
     if verbose:
         print("\n\n---------- MMT DATASET & DATALOADER INITIALIZATION ----------\n")
 
     loaders: Dict[str, Optional[DataLoader]] = {k: None for k in datasets.keys()}
 
-    # Seeding helpers (optional)
+    # ----------------------------------------------------------------------
+    # Optional deterministic seeding
+    # ----------------------------------------------------------------------
     worker_fn = None
     generator = None
     if seed is not None:
         worker_fn = make_worker_seed_fn()
         generator = _make_data_generator(seed)
 
-    # Default pin_memory
+    # ----------------------------------------------------------------------
+    # Pin memory default
+    # ----------------------------------------------------------------------
     if pin_memory is None:
         pin_memory = torch.cuda.is_available()
 
+    # ----------------------------------------------------------------------
+    # Build loaders
+    # ----------------------------------------------------------------------
     for split, ds in datasets.items():
         if ds is None:
             loaders[split] = None
@@ -226,18 +249,26 @@ def initialize_mmt_dataloaders(
                 print(f"[MMT] Split '{split}': dataset is None → no DataLoader.")
             continue
 
-        is_iterable = isinstance(ds, IterableDataset)
-        effective_shuffle = False if is_iterable else bool(shuffle)
+        # Detect streaming mode
+        is_streaming = isinstance(ds, IterableDataset)
+
+        # IterableDataset → DataLoader shuffle MUST be False
+        effective_shuffle = False if is_streaming else bool(shuffle)
 
         if verbose:
-            ds_type = "IterableDataset" if is_iterable else "Map-style Dataset"
+            ds_type = (
+                "IterableDataset (STREAMING)"
+                if is_streaming
+                else "Map-style Dataset (CACHED)"
+            )
             print(
                 f"[MMT] Building DataLoader for split='{split}' "
-                f"({ds_type}), shuffle={effective_shuffle}, "
-                f"batch_size={batch_size}, num_workers={num_workers}"
+                f"→ {ds_type}, batch_size={batch_size}, "
+                f"shuffle={effective_shuffle}, num_workers={num_workers}"
             )
 
-        loaders[split] = DataLoader(
+        # Actual DataLoader creation
+        loader = DataLoader(
             dataset=ds,
             batch_size=batch_size,
             num_workers=num_workers,
@@ -248,5 +279,10 @@ def initialize_mmt_dataloaders(
             generator=generator,
             pin_memory=pin_memory,
         )
+
+        # Tag loader with streaming info (Option A core)
+        loader.is_streaming = is_streaming
+
+        loaders[split] = loader
 
     return loaders

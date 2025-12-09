@@ -32,4 +32,6 @@ loader:
   num_workers: 4
   shuffle: true
   drop_last: false
+  streaming:
+    batches_per_epoch: null   # ignored in evaluation
 

@@ -11,195 +11,125 @@ logger = logging.getLogger("mmt.SelectValidWindows")
 
 class SelectValidWindowsTransform:
     """
-    Select (or drop) a single window based on validity criteria at *chunk* level,
-    with an optional additional stride in time between *kept* windows.
+    Select (or drop) a single window based on validity criteria at *chunk*
+    level, with an optional additional stride between *kept* windows.
 
     This transform is designed to run **after** ChunkWindowsTransform, as part
-    of the model_transform chain inside TaskModelTransformWrapper. It operates
-    on a **single window dict** and returns either:
+    of the `model_transform` chain inside `TaskModelTransformWrapper`. It
+    operates on a **single window dict** and returns either:
 
-      - the window (with some signals masked to None), or
+      - the window (possibly with some signals masked to None), or
       - None, if the window should be dropped entirely.
 
     Expected input (after ChunkWindowsTransform)
     --------------------------------------------
     A window dict with at least:
 
-        {
-            "shot_id": ...,
-            "window_index": ...,
-            "t_cut": float,       # window cut time (seconds, relative)
-            "input_length": float,
-            "stride": float,      # stride used by TaskModelTransformWrapper (informative)
+        window = {
+            "shot_id": Hashable,
+            "window_index": int,
+            "t_cut": float,          # center time of the window
+            "stride": float,         # base time step between consecutive windows
             "chunks": {
                 "input":    [chunk_dict, ...],
                 "actuator": [chunk_dict, ...],
             },
             "output": {
-                var_name: {"values": np.ndarray, ...},
+                <signal_name>: {"values": array_like} or array_like,
                 ...
             },
-            ...
         }
 
-    Each chunk_dict has:
+    Chunk dictionaries are expected to have the form:
 
-        {
-            "role": "input" | "actuator",
-            "chunk_index_in_window": int,
-            "chunk_index_global": int | None,
-            "chunk_start_time": float,  # optional, for debugging
+        chunk = {
+            "chunk_start_sample": int,     # global sample index on shot timeline
             "signals": {
-                var_name: np.ndarray,  # time axis is the chunk
+                <signal_name>: array_like or None,
                 ...
             },
         }
 
-    Behaviour (per window)
-    ----------------------
-    The goal is to:
+    High-level behaviour
+    --------------------
+    1. Optional window-level subsampling:
+       If `window_stride_sec` is not None, windows are subsampled *per shot*
+       so that the difference in `window_index` between consecutive **kept**
+       windows is at least:
 
-      1. Optionally subsample windows in time at *window* level (via
-         `window_stride_sec`), dropping windows that are too close in t_cut
-         to the last kept window for the same shot.
+           steps_per_window = round(window_stride_sec / stride)
 
-      2. Apply chunk-level masking and signal validity checks, and decide
-         whether the window is worth keeping based on:
+       where `stride` is the base time step (in seconds) used by
+       `TaskModelTransformWrapper` to generate `t_cuts`. This makes
+       subsampling robust to small floating-point jitter in `t_cut`, and
+       aligns the kept windows to the same underlying grid as chunks.
 
-         • number of valid input/actuator signals
-         • number of valid output signals
 
-    The steps are:
-
-    0. Optional window-level subsampling (window_stride_sec)
-       -----------------------------------------------------
-       If `window_stride_sec` is not None, the transform enforces a minimum
-       time separation between *kept* windows within each shot:
-
-         • Windows are assumed to be processed in (shot_id, window_index)
-           order, with strictly increasing t_cut within a shot.
-
-         • For each shot_id, the transform keeps track of the last kept
-           t_cut and window_index.
-
-         • For a new window:
-
-             - If this looks like a new pass / epoch over the same shot
-               (window_index <= last_window_index), the state for that
-               shot_id is reset.
-
-             - Otherwise, if (t_cut - last_kept_t_cut) < window_stride_sec,
-               the window is **dropped early** (returns None immediately).
-
-             - If kept, the last_kept_t_cut and last_window_index are
-               updated for that shot.
-
-       This is used to aggressively reduce the number of windows per shot
-       for training, without modifying the baseline TaskModelTransformWrapper
-       or the underlying task definition. For evaluation, set
-       `window_stride_sec = None` so that *all* windows are kept.
-
-    1. Chunk-level masking for inputs/actuators
-       ----------------------------------------
+    2. Chunk-level masking and validity:
        For all chunks under "input" and "actuator":
-         • values is None or empty      → treated as missing.
-         • if accept_na == False:
-               any NaN / ±inf present  → the signal is masked in that chunk
-                                        (signals[var_name] = None).
-           accept_na == True:
-               - all non-finite        → masked (treated as missing);
-               - mixed finite/nonfinite→ kept as-is (including NaNs).
-         • all finite, non-empty array → kept and counted as a "valid chunk"
-                                        for that (role, signal_name).
 
-       This produces, for each role ("input"/"actuator") and signal_name,
-       a count of valid chunks: valid_chunks_by_sig[role][signal_name].
+         • if values is None or empty → signal is treated as missing.
+         • values are converted to numpy arrays; NaN/inf handling depends on
+           `accept_na`:
 
-    2. Per-signal chunk threshold
-       --------------------------
-       For each role in {"input", "actuator"} and each signal_name:
-         • if number of valid chunks < min_valid_chunks:
-               → the signal is considered invalid for the entire window:
-                 signals[var_name] = None in *all* chunks of that role.
+             - accept_na = False:
+                   any NaN/inf → the entire signal is masked (treated missing)
+             - accept_na = True:
+                   NaNs are allowed to remain; only the case where *all*
+                   values are non-finite causes the signal to be masked.
 
-       After this step, a signal counts as "present" on the X-side only if it
-       has at least `min_valid_chunks` valid chunks.
+       We count, for each role ("input", "actuator"), how many chunks contain
+       at least `min_valid_chunks` valid entries for a given signal name.
+       All such signal names across input+actuator are pooled into a single
+       set `valid_x_signals`, and we define:
 
-    3. Window-level counts for inputs + actuators
-       ------------------------------------------
-       Count how many (role, signal_name) pairs still have at least one
-       non-None value across all chunks. This is:
+           n_inputs_actuators = len(valid_x_signals)
 
-           n_inputs_actuators
+    3. Output-level masking and validity:
+       For each entry under window["output"]:
 
-       This number must be >= min_valid_inputs_actuators for the window to
-       be considered valid.
+           - if the entry is not a dict, it is treated as raw `values`;
+           - if dict, we read `entry["values"]`.
 
-    4. Outputs (not chunked)
-       ---------------------
-       For each output variable:
-         • values is None / empty / all NaN/inf → treated as missing
-           (entry["values"] = None).
-         • if accept_na == False:
-               any NaN / ±inf  → entire signal masked (entry["values"] = None).
-           accept_na == True:
-               - all non-finite → masked as missing;
-               - mixed          → kept as-is (including NaNs).
-         • all finite          → kept and counted as a valid output.
-
-       This gives:
+       The same `_mask_if_bad` logic is used. A signal is counted as a valid
+       output if it is not masked. The total is:
 
            n_outputs_valid
 
-    5. Drop / keep decision
-       --------------------
-       If either:
+    4. Final decision:
+       The window is **dropped** (returns None) if either:
+
            n_inputs_actuators < min_valid_inputs_actuators
            OR
            n_outputs_valid    < min_valid_outputs
 
-       then the window is **dropped** (the transform returns None).
-       Otherwise, the window is kept and returned (with some signals possibly
-       masked to None at chunk or output level).
+       Otherwise, the window is kept and returned, with any masked signals
+       set to None in the chunk/output structures.
 
     Parameters
     ----------
-    min_valid_inputs_actuators:
-        Minimum number of distinct (role, signal_name) pairs across "input"
-        and "actuator" that must remain valid after chunk-level masking and
-        min_valid_chunks enforcement.
+    min_valid_inputs_actuators : int, default=1
+        Minimum number of distinct signals across input+actuator that must
+        have at least `min_valid_chunks` valid chunks.
+    min_valid_chunks : int, default=1
+        Minimum number of valid chunks a signal must appear in, to be
+        counted as "valid" for inputs/actuators.
+    min_valid_outputs : int, default=1
+        Minimum number of valid output signals required to keep the window.
+    accept_na : bool, default=False
+        If False, any NaN/inf in a non-empty array invalidates the entire
+        signal. If True, NaNs are allowed as long as there is at least one
+        finite value.
+    window_stride_sec : float or None, default=None
+        If not None, windows are subsampled in time per shot. Subsampling is
+        implemented via an index-based stride using the `stride` and
+        `window_index` fields:
 
-    min_valid_chunks:
-        Minimum number of valid chunks per (role, signal_name). Signals that
-        do not reach this threshold are masked to None in all chunks.
+            steps_per_window = round(window_stride_sec / stride)
 
-    min_valid_outputs:
-        Minimum number of valid output signals (after masking) required for
-        the window to be kept.
-
-    accept_na:
-        Controls how mixed finite / non-finite arrays are treated.
-
-        - If False (default):
-            Any NaN or ±inf in a signal causes the entire signal to be masked
-            (treated as missing) for that chunk or output.
-
-        - If True:
-            Only signals that are entirely non-finite (all NaN/inf) are masked.
-            Mixed finite/non-finite arrays are kept as-is and may contain NaNs.
-            Use this only if downstream encoders / models can cope with NaNs.
-
-    window_stride_sec:
-        Optional minimum time separation, in seconds, between *kept* windows
-        for the same shot. If None (default), no additional subsampling is
-        performed and every window that passes the validity checks is kept.
-
-        If set to a positive float, windows are processed in temporal order
-        (t_cut increasing) and only windows whose `t_cut` is at least
-        `window_stride_sec` after the last *kept* window for that `shot_id`
-        are retained. This is typically used in training configs to reduce
-        the number of windows per shot, while evaluation configs can set
-        window_stride_sec = null to keep all windows.
+        Only windows whose `window_index` differs from the last kept window
+        by at least `steps_per_window` are retained. If `stride` is missing
+        or non-positive, a fallback time-based check on `t_cut` is used.
     """
 
     def __init__(
@@ -215,14 +145,15 @@ class SelectValidWindowsTransform:
         self.min_valid_outputs = int(min_valid_outputs)
         self.accept_na = bool(accept_na)
 
-        # Window-level subsampling configuration
+        # Window-level subsampling configuration (in seconds)
         self.window_stride_sec = (
             float(window_stride_sec) if window_stride_sec is not None else None
         )
         # Per-shot state: shot_key -> (last_t_cut, last_window_index)
-        self._last_kept_by_shot: Dict[Hashable, Tuple[float, int | None]] = {}
+        self._last_kept_by_shot: Dict[Hashable, Tuple[float | None, int | None]] = {}
 
     # ------------------------------------------------------------------ helpers
+
     def _mask_if_bad(self, values: Any) -> Tuple[bool, Any]:
         """
         Decide whether a signal should be masked based on its values and
@@ -259,6 +190,7 @@ class SelectValidWindowsTransform:
         return False, arr
 
     # ------------------------------------------------------------------ main API
+
     def __call__(self, window: Dict[str, Any] | None) -> Dict[str, Any] | None:
         """
         Apply optional window-level subsampling, then chunk-level masking and
@@ -280,72 +212,62 @@ class SelectValidWindowsTransform:
         if window is None:
             return None
 
-        # --- safe extraction of window fields ---------------------------------------
         shot_id = window.get("shot_id")
-        if shot_id is not None:
-            shot_id = int(shot_id)
-
         w_idx = window.get("window_index")
-        if w_idx is not None:
-            w_idx = int(w_idx)
+        t_cut = window.get("t_cut")  # kept only for logging / debugging
+        stride = window.get("stride")  # base dt from TaskModelTransformWrapper
 
-        t_cut = window.get("t_cut")
-        if t_cut is not None:
-            t_cut = float(t_cut)
-
-        # ---------------------------------------------------------------------------
+        # ------------------------------------------------------------------
+        # 0) Optional window-level subsampling (index-based, using stride)
+        # ------------------------------------------------------------------
         if self.window_stride_sec is not None:
-            if t_cut is None:
-                raise KeyError(
-                    "SelectValidWindowsTransform(window_stride_sec=...) "
-                    "requires window['t_cut'] to be present."
+            # We *require* stride and window_index when subsampling is requested
+            if stride is None or stride <= 0.0:
+                raise ValueError(
+                    "[SelectValidWindows] window_stride_sec is set (%.4f), "
+                    "but window['stride'] is %r for shot_id=%r, window_index=%r. "
+                    "TaskModelTransformWrapper must provide a positive 'stride'."
+                    % (self.window_stride_sec, stride, shot_id, w_idx)
+                )
+            if w_idx is None:
+                raise ValueError(
+                    "[SelectValidWindows] window_stride_sec is set (%.4f), "
+                    "but window['window_index'] is None for shot_id=%r. "
+                    "TaskModelTransformWrapper must provide 'window_index'."
+                    % (self.window_stride_sec, shot_id)
                 )
 
             key: Hashable = shot_id if shot_id is not None else "__global__"
 
-            last = self._last_kept_by_shot.get(key)
-            if last is not None:
-                last_t_cut, last_w_idx = last
+            # Retrieve last kept info for this shot (if any)
+            last_t_cut, last_w_idx = self._last_kept_by_shot.get(key, (None, None))
 
-                # Detect window index reset
-                if (
-                    (w_idx is not None)
-                    and (last_w_idx is not None)
-                    and (w_idx <= last_w_idx)
-                ):
-                    # new epoch → ignore previous t_cut for stride check
-                    last_t_cut = None
+            # Detect epoch wrap / reset: if window_index goes backwards or repeats,
+            # we reset the kept state for this shot.
+            if last_w_idx is not None and w_idx <= last_w_idx:
+                last_t_cut = None
+                last_w_idx = None
 
-                # Subsampling
-                if (
-                    last_t_cut is not None
-                    and (t_cut - last_t_cut) < self.window_stride_sec
-                ):
-                    logger.debug(
-                        "[SelectValidWindows] dropping window %s (shot %s) due to "
-                        "window_stride_sec=%.4f (t_cut=%.6f last_t=%.6f)",
-                        w_idx,
-                        shot_id,
-                        self.window_stride_sec,
-                        t_cut,
-                        last_t_cut,
-                    )
-                    return None
-
-            # Keep
-            self._last_kept_by_shot[key] = (
-                t_cut,
-                w_idx,
+            # Convert desired time stride into an integer number of base steps
+            steps_per_window = max(
+                1, int(round(self.window_stride_sec / float(stride)))
             )
 
-        chunks_dict = window.get("chunks") or {}
-        input_chunks = chunks_dict.get("input") or []
-        act_chunks = chunks_dict.get("actuator") or []
-        output_group = window.get("output") or {}
+            if (last_w_idx is not None) and ((w_idx - last_w_idx) < steps_per_window):
+                return None
+
+            # Keep this window and update state for this shot
+            self._last_kept_by_shot[key] = (
+                float(t_cut) if t_cut is not None else None,
+                int(w_idx),
+            )
 
         # ------------------------------------------------------------------
         # 1) First pass: per-chunk masking + count valid chunks per signal
         # ------------------------------------------------------------------
+        input_chunks = (window.get("chunks") or {}).get("input") or []
+        act_chunks = (window.get("chunks") or {}).get("actuator") or []
+
         valid_chunks_by_sig = {
             "input": defaultdict(int),
             "actuator": defaultdict(int),
@@ -366,49 +288,23 @@ class SelectValidWindowsTransform:
         _process_role_chunks("actuator", act_chunks)
 
         # ------------------------------------------------------------------
-        # 2) Enforce min_valid_chunks per signal
+        # 2) Count valid input/actuator signals
         # ------------------------------------------------------------------
-        def _mask_signals_with_too_few_chunks(role: str, chunks) -> None:
-            if not chunks:
-                return
-            all_sig_names = set()
-            for ch in chunks:
-                sigs = ch.get("signals") or {}
-                all_sig_names.update(sigs.keys())
-
-            for sig_name in all_sig_names:
-                n_chunks = valid_chunks_by_sig[role].get(sig_name, 0)
-                if n_chunks < self.min_valid_chunks:
-                    for ch in chunks:
-                        sigs = ch.get("signals") or {}
-                        if sig_name in sigs:
-                            sigs[sig_name] = None
-
-        _mask_signals_with_too_few_chunks("input", input_chunks)
-        _mask_signals_with_too_few_chunks("actuator", act_chunks)
-
-        # ------------------------------------------------------------------
-        # 3) Count how many input+actuator signals remain (window-level)
-        # ------------------------------------------------------------------
-        valid_x_signals = set()  # (role, name)
-
-        def _collect_valid_signals(role: str, chunks) -> None:
-            for ch in chunks:
-                sigs = ch.get("signals") or {}
-                for sig_name, val in sigs.items():
-                    if val is not None:
-                        valid_x_signals.add((role, sig_name))
-
-        _collect_valid_signals("input", input_chunks)
-        _collect_valid_signals("actuator", act_chunks)
+        valid_x_signals = set()
+        for role in ("input", "actuator"):
+            for sig_name, count in valid_chunks_by_sig[role].items():
+                if count >= self.min_valid_chunks:
+                    valid_x_signals.add(sig_name)
 
         n_inputs_actuators = len(valid_x_signals)
 
         # ------------------------------------------------------------------
-        # 4) Outputs: window-level masking and counting
+        # 3) Outputs: window-level masking and counting
         # ------------------------------------------------------------------
+        output_group = window.get("output") or {}
         n_outputs_valid = 0
-        for name, entry in (output_group or {}).items():
+
+        for name, entry in list(output_group.items()):
             if not isinstance(entry, dict):
                 # Allow shorthand "name: values"
                 values = entry
@@ -429,7 +325,7 @@ class SelectValidWindowsTransform:
                 n_outputs_valid += 1
 
         # ------------------------------------------------------------------
-        # 5) Drop / keep decision for this window
+        # 4) Drop / keep decision for this window
         # ------------------------------------------------------------------
         keep = True
         if n_inputs_actuators < self.min_valid_inputs_actuators:
@@ -437,9 +333,8 @@ class SelectValidWindowsTransform:
         if n_outputs_valid < self.min_valid_outputs:
             keep = False
 
-        logger.debug(
-            "[SelectValidWindows] window %s (shot %s): "
-            "valid_inputs_actuators=%d, valid_outputs=%d → %s",
+        logger.info(
+            "win %s (shot %s): valid_inputs_actuators=%d, valid_outputs=%d → %s",
             w_idx,
             shot_id,
             n_inputs_actuators,

@@ -113,10 +113,9 @@ class WindowStreamedDataset(IterableDataset):
 
     Notes
     -----
-    - This class is designed to be paired with `WindowCachedDataset` so that
-      both cached and streaming paths expose the same semantics:
-        * item = window dict
-        * batch_size = number of windows per batch
+    - WindowStreamedDataset is an IterableDataset. __len__ returns the number of shots,
+      NOT the number of windows. In streaming training mode, this value is ignored,
+      and epoch length is controlled by loader.streaming.batches_per_epoch.
     """
 
     def __init__(

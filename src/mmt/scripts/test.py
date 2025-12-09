@@ -13,7 +13,8 @@ from scripts.pipelines.utils.preprocessing_utils import (
 )
 
 from mmt.data.baseline_bridge import build_baseline_task_config
-from mmt.utils.config_loader import load_experiment_config
+from mmt.utils.config.loader import load_experiment_config
+from mmt.utils.config.validator import validate_config
 from mmt.utils.seed import set_seed
 from mmt.utils.logger import setup_logging
 
@@ -37,6 +38,7 @@ from mmt.utils.mmt_init_data import initialize_mmt_dataloaders, initialize_mmt_d
 from mmt.data.collate import MMTCollate
 from mmt.models.mmt import MultiModalTransformer
 from mmt.training.loop import train_finetune
+
 
 DEBUG_MODE = False
 
@@ -83,6 +85,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     args = parse_args_finetune()
     cfg_mmt = load_experiment_config(args.phase_config)
+    validate_config(cfg_mmt.raw)
 
     # Small sub-configs for readability
     cfg_prep = cfg_mmt.preprocessing
@@ -223,6 +226,13 @@ def main() -> None:
         verbose=True,
     )
 
+    if DEBUG_MODE:
+        ds = datasets_mmt["train"]
+        shot = ds[0]
+        for _ in shot:
+            # apply only the transforms you want to debug
+            continue
+
     # ------------------------------------------------------------------
     # Optionally materialise streaming datasets to RAM (window-level)
     # ------------------------------------------------------------------
@@ -284,6 +294,7 @@ def main() -> None:
         val_loader=dataloaders_mmt["val"],
         run_dir=run_dir,
         training_cfg=cfg_training,
+        loader_cfg=cfg_loader,
     )
 
     logger.info("[Training] Completed. Summary:")

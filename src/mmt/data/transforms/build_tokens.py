@@ -244,9 +244,9 @@ class BuildTokensTransform:
         window["outputs_names"] = outputs_names
 
         logger.debug(
-            "[BuildTokens] shot=%s win=%s | tokens=%d (context=%d, act=%d) | pos=[%s..%s]",
-            window.get("shot_id"),
+            "win %s (shot %s) | tokens=%d (context=%d, act=%d) | pos=[%s..%s]",
             window.get("window_index"),
+            window.get("shot_id"),
             len(emb_list),
             sum(r == ROLE_CONTEXT for r in role_list),
             sum(r == ROLE_ACTUATOR for r in role_list),

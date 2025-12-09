@@ -1,29 +1,54 @@
 """
 loop.py — High-level training loop for the Multi-Modal Transformer (MMT)
+=======================================================================
 
-This module coordinates the entire finetuning workflow:
+This module orchestrates the complete finetuning flow of the MMT model,
+including:
 
-    • Strict validation of the training configuration.
-    • Stage-by-stage orchestration (warm, main, transfer, etc.).
-    • Stage-level coarse freezing (backbone / mod-heads / adapters).
-    • Per-batch automatic freezing via param-group toggling.
-    • Warmup+cosine LR scheduling.
-    • AMP-safe forward/backward passes.
-    • Grad accumulation.
-    • Best & latest checkpointing.
-    • Strict resume of interrupted runs.
-    • Early stopping.
+    • Multi-stage training (warm, main, transfer, etc.)
+    • Freezing/unfreezing backbone and modality-specific components
+    • Per-stage optimizers and LR schedulers (cosine + warmup)
+    • AMP training, gradient accumulation
+    • Best and latest checkpointing
+    • Strict resume of interrupted runs
+    • Early stopping
+    • Full evaluation pass per epoch
 
-All low-level helpers are implemented in:
-    - config_validation.py
-    - loop_utils.py
-    - scheduler.py
-    - checkpoint_io.py
-    - losses.py
-    - amp_utils.py
+IMPORTANT:
+    This module assumes configuration validity has already been checked by:
 
-The goal of this module is to remain clean, readable, and focused on
-the high-level logic of the training pipeline.
+        from mmt.utils.config import validate_config
+        validate_config(cfg.raw)
+
+    No config validation is performed here.
+
+-------------------------------------------------------------------------------
+DATASET: CACHED AND STREAMED BEHAVIOUR
+-------------------------------------------------------------------------------
+
+MMT supports two dataset regimes:
+
+1) **Cached mode** (WindowCachedDataset)
+   - Map-style dataset
+   - len(dataloader) == true number of batches
+   - Epoch = full pass over all windows
+
+2) **Streaming mode** (WindowStreamedDataset)
+   - IterableDataset yielding windows sequentially
+   - __len__ returns number of shots, NOT windows
+   - True number of windows is unknown without a full pre-scan
+   - Therefore len(dataloader) CANNOT be used as epoch length
+   - Epoch length must be defined via:
+
+         loader.streaming.batches_per_epoch
+
+   - Training stops after this many batches
+   - Validation ALWAYS exhausts the dataloader
+
+-------------------------------------------------------------------------------
+The `history` object tracks structured per-epoch training statistics and is
+returned to the caller for logging, visualization, or experiment tracking.
+-------------------------------------------------------------------------------
 """
 
 from __future__ import annotations
@@ -35,34 +60,29 @@ from typing import Dict, Any
 import torch
 
 from mmt.models.mmt import MultiModalTransformer
-
-# Training utilities
-from .config_validation import validate_training_config, validate_stage_config
-from .loop_utils import (
+from mmt.training.loop_utils import (
     backbone_lr,
     log_train_setup,
     run_one_epoch,
 )
-
-from .scheduler import (
+from mmt.training.scheduler import (
     build_optimizer_and_scheduler,
     apply_stage_freeze_policy,
 )
-
-from .checkpoint_io import (
+from mmt.training.checkpoint_io import (
     save_best,
     save_latest,
     resume_from_latest,
 )
+from mmt.training.amp_utils import get_amp_config
 
-from .amp_utils import get_amp_config
 
 logger = logging.getLogger("mmt.Training")
 
 
-# ======================================================================
-# Public API: train_finetune()
-# ======================================================================
+# =============================================================================
+# Entry point: train_finetune()
+# =============================================================================
 
 
 def train_finetune(
@@ -72,74 +92,81 @@ def train_finetune(
     *,
     run_dir: str,
     training_cfg: Dict[str, Any],
+    loader_cfg: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Finetune the Multi-Modal Transformer using the NEW strict configuration.
+    Finetune the MMT model using the (already-validated) training configuration.
 
-    This entrypoint performs the following:
+    Parameters
+    ----------
+    model : MultiModalTransformer
+    train_loader, val_loader : DataLoader
+        DataLoaders returned by initialize_mmt_dataloaders()
+        Each loader has attribute `.is_streaming`.
+    run_dir : str
+        Directory used for checkpoints and logs.
+    training_cfg : dict
+        The validated training configuration.
+    training_cfg : dict
+        The validated loader configuration.
 
-        1. Validate the training config.
-        2. Validate each stage definition.
-        3. Optionally resume training (strict).
-        4. For each stage:
-              - Apply coarse freeze policy.
-              - Build optimizer + scheduler.
-              - Run epochs with AMP, accumulation, LN scheduling.
-              - Save best & latest checkpoints.
-              - Early stopping across stages.
-        5. Return training history.
-
-    All low-level details (toggling, forward passes, scaler) are handled
-    by the imported utilities and not reimplemented here.
+    Returns
+    -------
+    Dict[str, Any]
+        {
+            "history": <structured history dictionary>,
+            "best_val": float,
+            "epochs_run": int,
+            "global_step": int
+        }
     """
     os.makedirs(run_dir, exist_ok=True)
 
-    # ------------------------------------------------------------------
-    # 1. Strict validation of global training config
-    # ------------------------------------------------------------------
-    validate_training_config(training_cfg)
-
+    # -------------------------------------------------------------------------
+    # Extract fields from training_cfg
+    # -------------------------------------------------------------------------
     stages = training_cfg["stages"]
-    if len(stages) == 0:
-        raise ValueError("training.stages must contain at least one stage")
-
-    for stage in stages:
-        validate_stage_config(stage)
-
-    # Extract global config
     resume_flag = training_cfg["resume"]
     early_patience = int(training_cfg["early_stop"]["patience"])
     early_delta = float(training_cfg["early_stop"]["delta"])
+
     output_weights = training_cfg["loss"]["output_weights"] or {}
     use_adamw = training_cfg["optimizer"]["use_adamw"]
 
     warmup_frac = float(training_cfg["scheduler"]["warmup_steps_fraction"])
     warmup_frac = float(max(0.0, min(1.0, warmup_frac)))
 
-    # ------------------------------------------------------------------
-    # 2. AMP + device setup
-    # ------------------------------------------------------------------
+    # Streaming or cached mode?
+    is_streaming = getattr(train_loader, "is_streaming", False)
+    if is_streaming:
+        train_batches_per_epoch = int(loader_cfg["streaming"]["batches_per_epoch"])
+    else:
+        train_batches_per_epoch = len(train_loader)
+
+    # -------------------------------------------------------------------------
+    # Device, AMP, scaler
+    # -------------------------------------------------------------------------
     device, amp_enabled, amp_dtype = get_amp_config(model, enable=True)
     scaler = torch.amp.GradScaler(
         "cuda", enabled=(device.type == "cuda" and amp_enabled)
     )
 
-    # ------------------------------------------------------------------
-    # 3. Logging initial setup
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Initial reporting
+    # -------------------------------------------------------------------------
     log_train_setup(
         model,
         device,
         amp_enabled,
         amp_dtype,
-        len(train_loader),
+        train_batches_per_epoch,
         stages,
         training_cfg,
     )
 
-    # ------------------------------------------------------------------
-    # 4. Optional strict resume
-    # ------------------------------------------------------------------
+    # -------------------------------------------------------------------------
+    # Resume (optional)
+    # -------------------------------------------------------------------------
     global_step = 0
     best_val = float("inf")
     bad_epochs = 0
@@ -148,7 +175,7 @@ def train_finetune(
 
     if resume_flag:
         try:
-            start_epoch_global, best_val_so_far, meta = resume_from_latest(
+            start_epoch_global, best_so_far, meta = resume_from_latest(
                 run_dir,
                 model,
                 optimizer=None,
@@ -156,34 +183,33 @@ def train_finetune(
                 scaler=None,
                 map_location=device,
             )
-            best_val = float(best_val_so_far)
+            best_val = float(best_so_far)
             global_step = int(meta.get("global_step", 0))
             bad_epochs = int(meta.get("bad_epochs", 0))
             start_stage_idx = int(meta.get("stage_index", 0))
             start_epoch_in_stage = int(meta.get("epoch_in_stage", 1))
 
             logger.info(
-                f"[resume] Resumed training: "
-                f"stage_idx={start_stage_idx}, "
-                f"epoch_in_stage={start_epoch_in_stage}, "
-                f"best_val={best_val:.6f}"
+                f"[resume] Resumed training: stage_idx={start_stage_idx}, "
+                f"epoch_in_stage={start_epoch_in_stage}, best_val={best_val:.6f}"
             )
         except Exception as e:
             logger.warning(
-                f"[resume] Failed to resume from latest: {e!s} — starting from scratch."
+                f"[resume] Failed to resume from latest checkpoint: {e!s}. "
+                f"Starting from scratch."
             )
 
-    # ==================================================================
-    # 5. Main training loop over stages
-    # ==================================================================
+    # -------------------------------------------------------------------------
+    # History structure
+    # -------------------------------------------------------------------------
+    history: Dict[str, Any] = {"stages": {}}
+
+    # ======================================================================
+    # Stage loop
+    # ======================================================================
     total_epochs_run = 0
-    history: Dict[str, Any] = {}
-    n_batches = len(train_loader)
 
     for stage_idx, stage in enumerate(stages):
-        # --------------------------------------------------------------
-        # Skip completed stages if resuming
-        # --------------------------------------------------------------
         if stage_idx < start_stage_idx:
             total_epochs_run += stage["epochs"]
             continue
@@ -191,11 +217,11 @@ def train_finetune(
         name = stage["name"]
         epochs = int(stage["epochs"])
 
+        # Freeze policy + optim hyperparameters
         freeze_cfg = stage["freeze"]
         lr_cfg = stage["optimizer"]["lr"]
         wd_cfg = stage["optimizer"]["wd"]
 
-        # Numeric fields: convert at point of use
         grad_accum_steps = int(stage["scheduler"]["grad_accum_steps"])
 
         lr_backbone = float(lr_cfg["backbone"])
@@ -206,13 +232,12 @@ def train_finetune(
         wd_modality_heads = float(wd_cfg["modality_heads"])
         wd_output_adapters = float(wd_cfg["output_adapters"])
 
-        steps_per_epoch = math.ceil(n_batches / max(1, grad_accum_steps))
+        # ---- Stage steps / scheduler steps ----
+        steps_per_epoch = math.ceil(train_batches_per_epoch / max(1, grad_accum_steps))
         total_steps = steps_per_epoch * epochs
         warmup_steps = int(round(warmup_frac * total_steps))
 
-        # --------------------------------------------------------------
-        # 5a. Apply coarse freeze policy for this stage
-        # --------------------------------------------------------------
+        # ---- Stage freezing ----
         apply_stage_freeze_policy(
             model,
             freeze_backbone=freeze_cfg["backbone"],
@@ -220,9 +245,7 @@ def train_finetune(
             freeze_output_adapters=freeze_cfg["output_adapters"],
         )
 
-        # --------------------------------------------------------------
-        # 5b. Build optimizer + scheduler (fresh per stage)
-        # --------------------------------------------------------------
+        # ---- New optimizer + scheduler per stage ----
         optimizer, scheduler = build_optimizer_and_scheduler(
             model,
             lr_backbone=lr_backbone,
@@ -242,16 +265,19 @@ def train_finetune(
             f"total_steps={total_steps}, warmup={warmup_steps} -----"
         )
 
-        # --------------------------------------------------------------
-        # 5c. Epoch loop
-        # --------------------------------------------------------------
+        # Create history list for this stage
+        history["stages"][name] = []
+
+        # ==================================================================
+        # Epoch loop
+        # ==================================================================
         for epoch_in_stage in range(
             start_epoch_in_stage if stage_idx == start_stage_idx else 1,
             epochs + 1,
         ):
             epoch_global = total_epochs_run + epoch_in_stage
 
-            # ------------------------------ TRAIN ------------------------------
+            # ---------------------------- TRAIN ----------------------------
             train_loss, global_step = run_one_epoch(
                 model,
                 train_loader,
@@ -265,9 +291,10 @@ def train_finetune(
                 grad_accum_steps=grad_accum_steps,
                 train=True,
                 global_step=global_step,
+                max_batches=train_batches_per_epoch if is_streaming else None,
             )
 
-            # ------------------------------ VALIDATE ---------------------------
+            # ---------------------------- VALIDATION -----------------------
             val_loss, _ = run_one_epoch(
                 model,
                 val_loader,
@@ -281,18 +308,33 @@ def train_finetune(
                 grad_accum_steps=1,
                 train=False,
                 global_step=global_step,
+                max_batches=None,  # always full validation
             )
 
             bb_lr = backbone_lr(optimizer)
             bb_lr_str = f"{bb_lr:.3e}" if bb_lr is not None else "n/a"
+
             logger.info(
                 f"Stage {name} | Epoch {epoch_in_stage}/{epochs} "
-                f"(global={epoch_global}) "
-                f"| train={train_loss:.6f}, val={val_loss:.6f}, "
+                f"(global={epoch_global}) | "
+                f"train={train_loss:.6f}, val={val_loss:.6f}, "
                 f"best={best_val:.6f}, lr_backbone={bb_lr_str}"
             )
 
-            # ------------------------ BEST CHECKPOINT --------------------------
+            # ---------------------------- HISTORY UPDATE -------------------
+            history["stages"][name].append(
+                {
+                    "epoch_global": epoch_global,
+                    "epoch_in_stage": epoch_in_stage,
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "lr_backbone": bb_lr,
+                    "best_val": best_val,
+                    "global_step": global_step,
+                }
+            )
+
+            # ---------------------------- BEST CHECKPOINT ------------------
             improved = (val_loss + early_delta) < best_val
             if improved:
                 best_val = val_loss
@@ -311,12 +353,13 @@ def train_finetune(
                 )
 
                 logger.info(
-                    f"[checkpoint] New best @ global_epoch {epoch_global}: val={best_val:.6f}"
+                    f"[checkpoint] New best @ global_epoch {epoch_global}: "
+                    f"val={best_val:.6f}"
                 )
             else:
                 bad_epochs += 1
 
-            # ------------------------ LATEST CHECKPOINT ------------------------
+            # ---------------------------- LATEST CHECKPOINT ---------------
             save_latest(
                 run_dir,
                 model,
@@ -334,35 +377,29 @@ def train_finetune(
                 },
             )
 
-            # --------------------------- EARLY STOP ----------------------------
+            # ---------------------------- EARLY STOP -----------------------
             if 0 < early_patience <= bad_epochs:
                 logger.info(
-                    f"[early_stop] Patience exhausted after {bad_epochs} bad epochs."
+                    f"[early_stop] Patience exhausted after {bad_epochs} epochs."
                 )
                 total_epochs_run += epoch_in_stage
-                history.update(
-                    {
-                        "best_val": best_val,
-                        "epochs_run": total_epochs_run,
-                        "global_step": global_step,
-                    }
-                )
+
+                history["best_val"] = best_val
+                history["epochs_run"] = total_epochs_run
+                history["global_step"] = global_step
                 return history
 
         total_epochs_run += epochs
-        start_epoch_in_stage = 1  # reset for next stage
+        start_epoch_in_stage = 1
 
-    # ==================================================================
-    # 6. Final history & return
-    # ==================================================================
-    history.update(
-        {
-            "best_val": best_val,
-            "epochs_run": total_epochs_run,
-            "global_step": global_step,
-        }
-    )
+    # ======================================================================
+    # All stages done
+    # ======================================================================
+    history["best_val"] = best_val
+    history["epochs_run"] = total_epochs_run
+    history["global_step"] = global_step
     logger.info(
         f"Training finished: epochs_run={total_epochs_run}, best_val={best_val:.6f}"
     )
+
     return history

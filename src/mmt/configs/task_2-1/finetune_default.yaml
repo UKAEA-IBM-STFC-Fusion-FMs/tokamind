@@ -27,10 +27,12 @@ preprocessing:
     window_stride_sec: 0.005
 
 loader:
-  batch_size: 1000
+  batch_size: 100
   num_workers: 1
   shuffle: true
   drop_last: false
+  streaming:
+    batches_per_epoch: 10  # REQUIRED when training with cache_tokens: false, document in config guide
 
 # How to initialise the model's weights for this run.
 #
@@ -79,7 +81,7 @@ training:
 
   stages:
     - name: ft_warm
-      epochs: 2
+      epochs: 1
 
       scheduler:
         grad_accum_steps: 2
@@ -101,7 +103,7 @@ training:
         output_adapters: false
 
     - name: ft_main
-      epochs: 2
+      epochs: 1
 
       scheduler:
         grad_accum_steps: 2

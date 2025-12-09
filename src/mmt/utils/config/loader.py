@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, cast
 from importlib.resources import files
 
-from .paths import get_repo_root
+from mmt.utils.paths import get_repo_root
 
 
 """

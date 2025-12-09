@@ -240,20 +240,14 @@ class ChunkWindowsTransform:
             stride_samples=stride_samples,
         )
 
-        t_str = f"{t_cut:.6f}"
         logger.debug(
-            f"[ChunkingTransform] t_cut={t_str} → "
-            f"{len(chunks_input)} input chunks, {len(chunks_act)} actuator chunks"
+            "window %s (shot %s, t_cut=%s) → %d input chunks, %d actuator chunks",
+            window.get("window_index"),
+            window.get("shot_id"),
+            f"{t_cut:.6f}",
+            len(chunks_input),
+            len(chunks_act),
         )
-
-        for ch in chunks_input + chunks_act:
-            logger.debug(
-                "[Chunking] t_cut=%.6f, role=%s, chunk_sample=%d, t_start=%.6f",
-                t_cut,
-                ch["role"],
-                ch["chunk_start_sample"],
-                ch["chunk_start_time"],
-            )
 
         # Attach chunks; keep original input/actuator/output untouched for now
         window = dict(window)  # shallow copy to avoid side effects if needed

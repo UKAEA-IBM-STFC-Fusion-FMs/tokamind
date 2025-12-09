@@ -215,8 +215,8 @@ class EmbedChunksTransform:
         # ------------------------------------------------------------------
         # Debug summary
         # ------------------------------------------------------------------
-        logger.debug(
-            "[EmbeddingTransform] window %s (shot %s): "
+        logger.info(
+            "win %s (shot %s): "
             "chunks=%d, signal_new_emb=%d, signal_cache_hits=%d, "
             "out_signals=%d, out_new_emb=%d",
             w_idx,

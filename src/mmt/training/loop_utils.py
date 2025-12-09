@@ -237,25 +237,63 @@ def run_one_epoch(
     grad_accum_steps: int,
     train: bool,
     global_step: int,
+    max_batches: Optional[int] = None,
 ) -> Tuple[float, int]:
     """
-    Run one epoch in train or eval mode.
+    Run one epoch over a DataLoader, in either train or eval mode.
 
-    Responsibilities:
-      • Move batch to device
-      • Automatic LR toggling (train only)
-      • Forward + loss under AMP
-      • Backward under AMP (train only)
-      • Grad accumulation
-      • Scheduler stepping
-      • Loss aggregation
+    This is the low-level driver used by the high-level loop in loop.py.
+    It is fully agnostic to cached vs streaming datasets; the only extra
+    control is the optional `max_batches` argument.
+
+    Parameters
+    ----------
+    model :
+        The MMT model (nn.Module).
+    loader :
+        A PyTorch DataLoader yielding collated window batches.
+    optimizer : torch.optim.Optimizer or None
+        Required when train=True, ignored when train=False.
+    scheduler : LRScheduler or None
+        Optional LR scheduler, stepped after each optimizer step.
+    scaler : torch.cuda.amp.GradScaler or None
+        Optional AMP scaler (enabled only on CUDA devices).
+    device : torch.device
+        Target device for the batch tensors.
+    amp_enabled : bool
+        Whether to use autocast for forward pass.
+    output_weights : Mapping[Hashable, float]
+        Per-output weights for the prediction-space loss.
+    output_to_modality : Mapping[Hashable, str]
+        Mapping from output-id -> modality string, used by LR toggling.
+    grad_accum_steps : int
+        Number of micro-batches to accumulate before one optimizer step.
+    train : bool
+        If True, run in training mode with optimizer and scheduler steps.
+        If False, run in eval mode (no gradients, no optimizer, no scheduler).
+    global_step : int
+        Current global optimizer-step counter (for logging / schedulers).
+    max_batches : int or None, optional
+        If not None, process at most this many batches from the loader.
+        This is used in STREAMING mode to define an "epoch" by a fixed
+        number of batches rather than a full pass over an IterableDataset.
+        In cached mode, this should be left as None to process the full
+        dataloader.
 
     Returns
     -------
     avg_loss : float
-        Mean loss over all batches.
+        Mean loss over all processed batches.
     global_step : int
-        Updated optimizer-step counter (unchanged in eval mode).
+        Updated global optimizer-step counter (unchanged in eval mode).
+
+    Notes
+    -----
+    • When `max_batches` is not None and the loader yields fewer batches
+      than requested (e.g. streaming dataset exhausts early), the loop
+      simply runs over the available batches and stops when the iterator
+      ends.
+    • Timing information is logged per batch when train=True.
     """
     if train and optimizer is None:
         raise ValueError("optimizer must be provided when train=True.")
@@ -271,21 +309,26 @@ def run_one_epoch(
     n_batches = 0
 
     for batch_idx, batch in enumerate(loader):
+        # Early stop for streaming mode
+        if max_batches is not None and batch_idx >= max_batches:
+            break
+
         t0 = time.time()
         batch = move_batch_to_device(batch, device)
         t1 = time.time()
+
         outputs_mask = batch["outputs_mask"]
 
-        # Per-batch automatic LR enabling/disabling
+        # Per-batch automatic LR enabling/disabling (train only)
         if train:
-            act = active_outputs_from_mask(outputs_mask)
+            active = active_outputs_from_mask(outputs_mask)
             toggle_param_groups(
                 optimizer,
-                active_outputs=act,
+                active_outputs=active,
                 output_to_modality=output_to_modality,
             )
 
-        # Forward pass
+        # ----------------------- FORWARD -----------------------
         with amp_ctx_for_model(model, enable=amp_enabled):
             out = model(batch)
             preds = out.get("pred", {})
@@ -302,16 +345,16 @@ def run_one_epoch(
             else:
                 loss_for_backprop = loss_t
         t2 = time.time()
-        # Backward pass
+
+        # ----------------------- BACKWARD ----------------------
         if train:
             if scaler is not None and scaler.is_enabled():
                 scaler.scale(loss_for_backprop).backward()
             else:
                 loss_for_backprop.backward()
-
             t3 = time.time()
 
-            # Accumulation step triggers optimizer step
+            # Gradient accumulation → optimizer step
             if (batch_idx + 1) % grad_accum_steps == 0:
                 if scaler is not None and scaler.is_enabled():
                     scaler.unscale_(optimizer)
@@ -331,7 +374,7 @@ def run_one_epoch(
 
             t4 = time.time()
 
-            logger.debug(
+            logger.info(
                 f"[TIMING] batch {batch_idx}: "
                 f"move={t1 - t0:.4f}s  "
                 f"forward={t2 - t1:.4f}s  "

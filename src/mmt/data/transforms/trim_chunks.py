@@ -168,8 +168,9 @@ class TrimChunksTransform:
         trimmed_act = self._trim_role(actuator_chunks, t_out_end)
 
         logger.debug(
-            "[TrimChunks] t_cut=%.6f | input %d→%d | actuator %d→%d | max=%d",
-            t_cut,
+            "win %s (shot %s) | input %d→%d, actuator %d→%d | max=%d",
+            window.get("window_index"),
+            window.get("shot_id"),
             len(input_chunks),
             len(trimmed_input),
             len(actuator_chunks),

@@ -17,7 +17,7 @@ from typing import Any, Dict
 
 import yaml
 
-from mmt.utils.config_loader import ExperimentConfig
+from mmt.utils.config.loader import ExperimentConfig
 
 
 def build_baseline_task_config(cfg: ExperimentConfig) -> Dict[str, Any]:
