@@ -1,7 +1,7 @@
 experiment_base: mmt/configs/task_2-1/experiment_base.yaml
 embedding_config: mmt/configs/task_2-1/embeddings_default.yaml
 phase: finetune
-run_id: null
+run_id: test_2
 
 collate:
   p_drop_inputs: 0.08
@@ -27,8 +27,8 @@ preprocessing:
     window_stride_sec: 0.005
 
 loader:
-  batch_size: 1
-  num_workers: 4
+  batch_size: 1000
+  num_workers: 0
   shuffle: true
   drop_last: false
 
@@ -79,7 +79,7 @@ training:
 
   stages:
     - name: ft_warm
-      epochs: 5
+      epochs: 2
 
       scheduler:
         grad_accum_steps: 2
@@ -94,6 +94,7 @@ training:
           modality_heads: 0.05
           output_adapters: 0.05
 
+      # model_dir is null, freeze must be all false
       freeze:
         backbone: false
         modality_heads: false
@@ -115,7 +116,8 @@ training:
           modality_heads: 0.05
           output_adapters: 0.05
 
+      # model_dir is null, freeze must be all false
       freeze:
-        backbone: true
+        backbone: false
         modality_heads: false
         output_adapters: false

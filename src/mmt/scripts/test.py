@@ -38,7 +38,7 @@ from mmt.data.collate import MMTCollate
 from mmt.models.mmt import MultiModalTransformer
 from mmt.training.loop import train_finetune
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def parse_args_finetune() -> argparse.Namespace:
@@ -142,7 +142,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model-specific transform chain (shot -> windows)
     # ------------------------------------------------------------------
-    model_specific_transform = ComposeTransforms(
+    mmt_transform_map = ComposeTransforms(
         [
             ChunkWindowsTransform(
                 chunk_length_sec=cfg_chunks["chunk_length"],
@@ -219,7 +219,7 @@ def main() -> None:
         datasets_train_val_test,
         dict_metadata,
         cfg_task,
-        model_specific_transform=model_specific_transform,
+        model_specific_transform=mmt_transform_map,
         verbose=True,
     )
 

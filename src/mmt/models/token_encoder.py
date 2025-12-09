@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, cast
+from typing import Any, Dict
 
 import torch
 import torch.nn as nn
@@ -100,19 +100,112 @@ class TokenEncoder(nn.Module):
         self.cls_id = self.num_signals
 
     # ------------------------------------------------------------------
-    def _get_proj(self, sid: int, in_dim: int, device: torch.device) -> nn.Linear:
-        key = str(int(sid))
+    # def _get_proj(self, sid: int, in_dim: int, device: torch.device) -> nn.Linear:
+    #     key = str(int(sid))
+    #     if key not in self._proj_by_sid:
+    #         layer = nn.Linear(in_dim, self.d_model)
+    #         self._proj_by_sid[key] = layer.to(device)
+    #         self._in_dim_by_sid[key] = in_dim
+    #     else:
+    #         if self._in_dim_by_sid[key] != in_dim:
+    #             raise ValueError(
+    #                 f"Signal id {sid} was first seen with in_dim={self._in_dim_by_sid[key]}, "
+    #                 f"but now has in_dim={in_dim}."
+    #             )
+    #     return cast(nn.Linear, self._proj_by_sid[key])
+
+    def _get_proj(self, sig_id: int, in_dim: int, device: torch.device) -> nn.Linear:
+        """
+        Return (and lazily create) the projection layer for a given signal id.
+
+        If the same signal id is ever seen with a different input dimension
+        than before, log detailed debug information and raise a ValueError.
+        """
+        import logging
+
+        logger = logging.getLogger("mmt.TokenEncoder")
+
+        # ModuleDict keys must be strings; keep that consistent
+        key = str(int(sig_id))
+
         if key not in self._proj_by_sid:
-            layer = nn.Linear(in_dim, self.d_model)
-            self._proj_by_sid[key] = layer.to(device)
-            self._in_dim_by_sid[key] = in_dim
-        else:
-            if self._in_dim_by_sid[key] != in_dim:
-                raise ValueError(
-                    f"Signal id {sid} was first seen with in_dim={self._in_dim_by_sid[key]}, "
-                    f"but now has in_dim={in_dim}."
+            # First time we see this signal id → create a new projection layer
+            proj = nn.Linear(in_dim, self.d_model).to(device)
+            self._proj_by_sid[key] = proj
+
+            # Optional: log once at creation time
+            spec = None
+            if hasattr(self, "signal_specs"):
+                try:
+                    spec = self.signal_specs.get_by_id(int(sig_id))
+                except Exception:
+                    spec = None
+
+            if spec is not None:
+                logger.debug(
+                    "TokenEncoder: created proj for signal id=%d "
+                    "(role=%s, name=%s, modality=%s) with in_dim=%d → d_model=%d",
+                    int(sig_id),
+                    getattr(spec, "role", "<unknown>"),
+                    getattr(spec, "name", "<unknown>"),
+                    getattr(spec, "modality", "<unknown>"),
+                    in_dim,
+                    self.d_model,
                 )
-        return cast(nn.Linear, self._proj_by_sid[key])
+            else:
+                logger.debug(
+                    "TokenEncoder: created proj for signal id=%d with in_dim=%d → d_model=%d",
+                    int(sig_id),
+                    in_dim,
+                    self.d_model,
+                )
+
+            return proj
+
+        # We already have a projection for this signal id
+        proj = self._proj_by_sid[key]
+
+        if proj.in_features != in_dim:
+            spec = None
+            if hasattr(self, "signal_specs"):
+                try:
+                    spec = self.signal_specs.get_by_id(int(sig_id))
+                except Exception:
+                    spec = None
+
+            role = (
+                getattr(spec, "role", "<unknown>") if spec is not None else "<unknown>"
+            )
+            name = (
+                getattr(spec, "name", "<unknown>") if spec is not None else "<unknown>"
+            )
+            modality = (
+                getattr(spec, "modality", "<unknown>")
+                if spec is not None
+                else "<unknown>"
+            )
+
+            logger.error(
+                "TokenEncoder: in_dim mismatch for signal id=%d "
+                "(role=%s, name=%s, modality=%s). "
+                "First seen in_dim=%d, now in_dim=%d. "
+                "This usually means inconsistent SignalSpecRegistry / codec "
+                "wiring between embedding transforms and the model.",
+                int(sig_id),
+                role,
+                name,
+                modality,
+                proj.in_features,
+                in_dim,
+            )
+
+            raise ValueError(
+                f"Signal id {int(sig_id)} (role={role}, name={name}, modality={modality}) "
+                f"was first seen with in_dim={proj.in_features}, "
+                f"but now has in_dim={in_dim}."
+            )
+
+        return proj
 
     # ------------------------------------------------------------------
     def forward(self, batch: Dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:

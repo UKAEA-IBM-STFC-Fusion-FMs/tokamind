@@ -287,8 +287,9 @@ def build_signal_specs(
     logger.info("Built SignalSpecRegistry with %d signals", registry.num_signals)
     for spec in registry.specs:
         logger.info(
-            "  • %-30s | role=%-8s | modality=%-10s | encoder=%s | dim=%s",
+            "  • %-30s | id=%s | role=%-8s | modality=%-10s | encoder=%s | dim=%s",
             spec.name,
+            spec.signal_id,
             spec.role,
             spec.modality,
             spec.encoder_name,

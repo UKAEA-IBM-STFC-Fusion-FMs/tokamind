@@ -198,7 +198,7 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     # --- Compute run paths ---
     repo_root = get_repo_root()
     runs_root = repo_root / "runs"
-    run_id = merged.get("run_dir", None)
+    run_id = merged.get("run_id", None)
 
     if run_id is None:
         task = merged.get("task", "unknown_task")

@@ -215,3 +215,18 @@ class WindowStreamedDataset(IterableDataset):
                     idx_shot,
                 )
                 continue
+
+    def __len__(self) -> int:
+        """
+        Approximate epoch length for compatibility with code that calls len().
+
+        We return the number of *shots* in the underlying dataset. This is not
+        equal to the number of window-level batches, but is sufficient for:
+          - logging,
+          - approximate scheduling (warmup, total_steps),
+          - code that expects a finite length for IterableDataset.
+
+        For exact, window-level control over steps per epoch you should prefer
+        the cached (map-style) path, where len(dataset) == num_windows.
+        """
+        return len(self.shot_dataset)

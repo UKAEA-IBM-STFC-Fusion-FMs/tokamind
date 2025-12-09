@@ -84,44 +84,28 @@ def initialize_mmt_datasets(
         "test": None,
     }
 
-    # Train
-    base_train = datasets_train_val_test.get("train")
-    if base_train is not None:
-        datasets_mmt["train"] = TaskModelTransformWrapper(
-            base_train,
-            dict_metadata,
-            config_task,
-            model_specific_transform,
-            verbose=verbose,
-        )
-        if verbose:
-            print(f"[MMT] len(mast_train_dataset): {len(datasets_mmt['train'])}")
+    splits = ("train", "val", "test")
 
-    # Val
-    base_val = datasets_train_val_test.get("val")
-    if base_val is not None:
-        datasets_mmt["val"] = TaskModelTransformWrapper(
-            base_val,
-            dict_metadata,
-            config_task,
-            model_specific_transform,
-            verbose=False,
-        )
-        if verbose:
-            print(f"[MMT] len(mast_val_dataset): {len(datasets_mmt['val'])}")
+    for split in splits:
+        base_ds = datasets_train_val_test.get(split)
+        if base_ds is None:
+            continue
 
-    # Test
-    base_test = datasets_train_val_test.get("test")
-    if base_test is not None:
-        datasets_mmt["test"] = TaskModelTransformWrapper(
-            base_test,
+        # Only the train split respects the `verbose` flag of this function;
+        # val/test are kept quiet to avoid log spam.
+        wrapper_verbose = bool(verbose) if split == "train" else False
+
+        wrapped = TaskModelTransformWrapper(
+            base_ds,
             dict_metadata,
             config_task,
             model_specific_transform,
-            verbose=False,
+            verbose=wrapper_verbose,
         )
+        datasets_mmt[split] = wrapped
+
         if verbose:
-            print(f"[MMT] len(mast_test_dataset): {len(datasets_mmt['test'])}")
+            print(f"[MMT] len(mast_{split}_dataset): {len(wrapped)}")
 
     return datasets_mmt
 

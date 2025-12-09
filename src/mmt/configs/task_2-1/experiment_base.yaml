@@ -20,9 +20,6 @@ preprocessing:
   trim_chunks:
      max_chunks: 50     # maximum number of chunks in the history
 
-  cache:
-    enabled: true
-
 model:
   backbone:
     d_model: 128

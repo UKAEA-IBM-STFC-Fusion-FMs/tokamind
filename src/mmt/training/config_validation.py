@@ -96,12 +96,37 @@ def validate_training_config(training_cfg: Dict[str, Any]) -> None:
         _ = _get_nested(training_cfg, path)
 
 
+def _validate_freeze_lr_consistency(stage_cfg: Dict[str, Any]) -> None:
+    name = stage_cfg.get("name", "<unnamed-stage>")
+
+    freeze = stage_cfg["freeze"]
+    lr_cfg = stage_cfg["optimizer"]["lr"]
+    wd_cfg = stage_cfg["optimizer"]["wd"]
+
+    for block in ("backbone", "modality_heads", "output_adapters"):
+        if bool(freeze.get(block, False)):
+            lr = float(lr_cfg.get(block, 0.0))
+            wd = float(wd_cfg.get(block, 0.0))
+
+            if lr > 0.0 or wd > 0.0:
+                raise ValueError(
+                    f"Stage '{name}': freeze.{block}=True but "
+                    f"optimizer.lr.{block}={lr} and optimizer.wd.{block}={wd}. "
+                    "When a block is frozen for a whole stage, its LR and WD "
+                    "must be set to 0. Either unfreeze it or set LR/WD to 0."
+                )
+
+
 def validate_stage_config(stage_cfg: Dict[str, Any]) -> None:
     """
     Validate the configuration of a single training stage.
 
-    This only checks that all required fields are present. Type and
-    numeric correctness are enforced later, at the point of use.
+    This only checks that all required fields are present, plus a few
+    simple cross-field consistency rules (e.g. freeze vs lr).
     """
+    # 1) Presence checks (existing behaviour)
     for path, _expected_type in REQUIRED_STAGE_FIELDS:
         _ = _get_nested(stage_cfg, path)
+
+    # 2) Cross-field consistency: freeze.* vs optimizer.lr.*
+    _validate_freeze_lr_consistency(stage_cfg)

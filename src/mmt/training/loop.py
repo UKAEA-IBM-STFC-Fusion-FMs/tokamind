@@ -284,11 +284,12 @@ def train_finetune(
             )
 
             bb_lr = backbone_lr(optimizer)
+            bb_lr_str = f"{bb_lr:.3e}" if bb_lr is not None else "n/a"
             logger.info(
                 f"Stage {name} | Epoch {epoch_in_stage}/{epochs} "
                 f"(global={epoch_global}) "
                 f"| train={train_loss:.6f}, val={val_loss:.6f}, "
-                f"best={best_val:.6f}, lr_backbone={bb_lr:.3e if bb_lr else 'n/a'}"
+                f"best={best_val:.6f}, lr_backbone={bb_lr_str}"
             )
 
             # ------------------------ BEST CHECKPOINT --------------------------

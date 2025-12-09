@@ -453,4 +453,9 @@ class MMTCollate:
         if self.keep_output_native:
             batch_out["output_native"] = output_native_t
 
+        for w in range(len(batch_out)):
+            print(np.array((batch_out["id"][w])))
+            for i in range(len(batch_out["emb"][w])):
+                print(int(np.array(batch_out["emb"][w][i].shape)))
+
         return batch_out
