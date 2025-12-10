@@ -20,7 +20,7 @@ The goal is to give a clean separation between:
 - streaming, shot-based datasets (shot -> iterable of windows), and
 - cached, window-based datasets (item -> single window dict),
 
-while keeping a symmetric, user-friendly API in the training scripts.
+while keeping a symmetric, user-friendly API in the train scripts.
 
 Note on shuffling
 -----------------
@@ -251,7 +251,7 @@ def materialize_tokenized_split_to_ram(
     -------
     WindowCachedDataset
         A dataset storing exactly *one window dict per item*, ready for fast
-        training with MMTCollate (window-level batches).
+        train with MMTCollate (window-level batches).
 
     Notes
     -----

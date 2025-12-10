@@ -1,14 +1,14 @@
 """
-loop_utils.py — Runtime utilities for MMT training loop.
+loop_utils.py — Runtime utilities for MMT train loop.
 
 This module groups all runtime helpers used by the finetuning and
 pretraining loops:
 
     • Moving collated batches to device (CPU/GPU/MPS)
     • Determining which outputs are active in a batch
-    • Logging training setup
+    • Logging train setup
     • Extracting LR from param groups
-    • Running a full training or validation epoch
+    • Running a full train or validation epoch
     • AMP-safe backward + grad accumulation
 
 It contains NO global configuration logic (handled in config_validation.py),
@@ -32,7 +32,7 @@ from .scheduler import toggle_param_groups
 
 import time
 
-logger = logging.getLogger("mmt.Training")
+logger = logging.getLogger("mmt.Train")
 
 # Max gradient norm for clipping (matches original loop.py behaviour)
 _MAX_GRAD_NORM = 1.0
@@ -185,7 +185,7 @@ def log_train_setup(
     amp_dtype: Optional[torch.dtype],
     train_loader_len: int,
     stages: list[Dict[str, Any]],
-    training_cfg: Dict[str, Any],
+    train_cfg: Dict[str, Any],
 ) -> None:
     """
     Compact logging of device, AMP, parameters, and stage definitions.
@@ -193,7 +193,7 @@ def log_train_setup(
     n_params = sum(p.numel() for p in model.parameters())
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    logger.info("======== MMT Training setup ========")
+    logger.info("======== MMT Train setup ========")
     logger.info("Device       : %s", device)
     logger.info("AMP enabled  : %s (%s)", amp_enabled, amp_dtype)
     logger.info("Params       : total=%d, trainable=%d", n_params, n_trainable)
@@ -212,8 +212,8 @@ def log_train_setup(
             },
         )
 
-    pat = training_cfg["early_stop"]["patience"]
-    dlt = training_cfg["early_stop"]["delta"]
+    pat = train_cfg["early_stop"]["patience"]
+    dlt = train_cfg["early_stop"]["delta"]
     logger.info("Early stopping: patience=%d, delta=%.4f", pat, dlt)
     logger.info("====================================")
 
@@ -269,7 +269,7 @@ def run_one_epoch(
     grad_accum_steps : int
         Number of micro-batches to accumulate before one optimizer step.
     train : bool
-        If True, run in training mode with optimizer and scheduler steps.
+        If True, run in train mode with optimizer and scheduler steps.
         If False, run in eval mode (no gradients, no optimizer, no scheduler).
     global_step : int
         Current global optimizer-step counter (for logging / schedulers).
@@ -313,9 +313,9 @@ def run_one_epoch(
         if max_batches is not None and batch_idx >= max_batches:
             break
 
-        t0 = time.time()
+        t0 = time.perf_counter()
         batch = move_batch_to_device(batch, device)
-        t1 = time.time()
+        t1 = time.perf_counter()
 
         outputs_mask = batch["outputs_mask"]
 
@@ -344,7 +344,7 @@ def run_one_epoch(
                 loss_for_backprop = loss_t / float(grad_accum_steps)
             else:
                 loss_for_backprop = loss_t
-        t2 = time.time()
+        t2 = time.perf_counter()
 
         # ----------------------- BACKWARD ----------------------
         if train:
@@ -352,7 +352,7 @@ def run_one_epoch(
                 scaler.scale(loss_for_backprop).backward()
             else:
                 loss_for_backprop.backward()
-            t3 = time.time()
+            t3 = time.perf_counter()
 
             # Gradient accumulation → optimizer step
             if (batch_idx + 1) % grad_accum_steps == 0:
@@ -372,7 +372,7 @@ def run_one_epoch(
 
                 global_step += 1
 
-            t4 = time.time()
+            t4 = time.perf_counter()
 
             logger.info(
                 f"[TIMING] batch {batch_idx}: "

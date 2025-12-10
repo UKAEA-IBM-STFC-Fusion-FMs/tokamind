@@ -15,7 +15,7 @@ level of **shots**:
 
     shot_idx → iterable of window dicts (or a single window dict, or None)
 
-For training, however, we want to think purely in terms of *windows*:
+For train, however, we want to think purely in terms of *windows*:
 
     - `batch_size` is "number of windows per batch"
     - collate operates on List[window_dict]
@@ -27,7 +27,7 @@ all windows in memory.
 
 Usage
 -----
-Typical usage in a training script:
+Typical usage in a train script:
 
 .. code-block:: python
 
@@ -114,7 +114,7 @@ class WindowStreamedDataset(IterableDataset):
     Notes
     -----
     - WindowStreamedDataset is an IterableDataset. __len__ returns the number of shots,
-      NOT the number of windows. In streaming training mode, this value is ignored,
+      NOT the number of windows. In streaming train mode, this value is ignored,
       and epoch length is controlled by loader.streaming.batches_per_epoch.
     """
 

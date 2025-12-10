@@ -177,7 +177,7 @@ class MultiModalTransformer(nn.Module):
      • `modality_latent` contains one latent vector per modality.
      • `pred` maps each output signal_id → its prediction vector (dimension K_t).
 
-     Downstream training code computes losses directly from `pred`
+     Downstream train code computes losses directly from `pred`
      (MSE, masked MSE, task-specific losses, etc.).
     """
 

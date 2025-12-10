@@ -37,7 +37,7 @@ from mmt.data.datasets.window_cached_dataset import WindowCachedDataset
 from mmt.utils.mmt_init_data import initialize_mmt_dataloaders, initialize_mmt_datasets
 from mmt.data.collate import MMTCollate
 from mmt.models.mmt import MultiModalTransformer
-from mmt.training.loop import train_finetune
+from mmt.train.loop import train_finetune
 
 
 DEBUG_MODE = False
@@ -88,7 +88,7 @@ def main() -> None:
     validate_config(cfg_mmt.raw)
 
     # Small sub-configs for readability
-    cfg_prep = cfg_mmt.preprocessing
+    cfg_prep = cfg_mmt.preprocess
     cfg_chunks = cfg_prep["chunk"]
     cfg_trim = cfg_prep["trim_chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
@@ -97,7 +97,7 @@ def main() -> None:
     cfg_model = cfg_mmt.model
     cfg_loader = cfg_mmt.loader
     cfg_collate = cfg_mmt.collate
-    cfg_training = cfg_mmt.training
+    cfg_train = cfg_mmt.train
 
     cache_tokens = cfg_data.get("cache_tokens", False)
     num_workers_cache = cfg_data.get("num_workers_cache", 0)
@@ -204,7 +204,7 @@ def main() -> None:
         load_parts = model_init_cfg.get("load_parts", None)
 
         if run_init is not None:
-            from mmt.training.checkpoint_io import load_parts_from_run_dir
+            from mmt.train.checkpoint_io import load_parts_from_run_dir
 
             logger.info("[WarmStart] Loading parts from previous run_dir: %s", run_init)
             load_parts_from_run_dir(
@@ -287,17 +287,17 @@ def main() -> None:
     # ------------------------------------------------------------------
     run_dir = cfg_mmt.paths["run_dir"]
 
-    logger.info("[Training] Starting finetuning test run...")
+    logger.info("[Train] Starting finetuning test run...")
     history = train_finetune(
         model=model,
         train_loader=dataloaders_mmt["train"],
         val_loader=dataloaders_mmt["val"],
         run_dir=run_dir,
-        training_cfg=cfg_training,
+        train_cfg=cfg_train,
         loader_cfg=cfg_loader,
     )
 
-    logger.info("[Training] Completed. Summary:")
+    logger.info("[Train] Completed. Summary:")
     logger.info("%s", history)
 
     # # small debug printing

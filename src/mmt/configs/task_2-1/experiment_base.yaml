@@ -10,10 +10,9 @@ seed: 54
 
 data:
   local: false         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: 2   # None / null → uses all shots;
+  subset_of_shots: 1   # None / null → uses all shots;
 
-preprocessing:
-
+preprocess:
   chunk:
     chunk_length: 0.005          # 5 ms per chunk (placeholder)
     stride: null                 # null => non-overlapping chunks

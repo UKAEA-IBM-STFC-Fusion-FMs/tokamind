@@ -36,7 +36,7 @@ Given a *phase config path*, the loader:
      (Uses the first path component of `baseline_config` as the package name.)
   6. Creates a run directory (output_root + cache_root) and stores merged config.
   7. Returns an ExperimentConfig object providing dynamic attribute access
-     to all merged YAML fields (cfg.preprocessing, cfg.model, cfg.collate, etc.).
+     to all merged YAML fields (cfg.preprocess, cfg.model, cfg.collate, etc.).
 
 This preserves the complete functionality expected by the FAIRMAST baseline
 bridge while allowing new configuration fields to be added without modifying
@@ -129,7 +129,7 @@ class ExperimentConfig:
     Dynamic configuration object.
 
     Every top-level key in the merged YAML dictionary is available
-    as an attribute: cfg.model, cfg.preprocessing, cfg.collate, etc.
+    as an attribute: cfg.model, cfg.preprocess, cfg.collate, etc.
 
     The full merged dictionary is stored in cfg.raw.
     """

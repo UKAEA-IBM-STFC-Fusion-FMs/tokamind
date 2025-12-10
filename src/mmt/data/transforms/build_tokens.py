@@ -210,7 +210,7 @@ class BuildTokensTransform:
         pos = self._compute_pos_ids(t_cut, t_list)
 
         # ------------------------------------------------------------------
-        # 4) OUTPUTS (unchanged)
+        # 4) OUTPUTS
         # ------------------------------------------------------------------
         outputs_emb = {}
         outputs_shapes = {}

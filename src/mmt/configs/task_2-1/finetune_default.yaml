@@ -1,7 +1,7 @@
 experiment_base: mmt/configs/task_2-1/experiment_base.yaml
 embedding_config: mmt/configs/task_2-1/embeddings_default.yaml
 phase: finetune
-run_id: test_2
+run_id: test_finetune
 
 collate:
   p_drop_inputs: 0.08
@@ -15,11 +15,11 @@ collate:
   p_drop_actuators_chunks: 0.0
 
 data:
-  cache_tokens: false
-  num_workers_cache: 8
+  cache_tokens: true
+  num_workers_cache: 2
   keep_output_native: false
 
-preprocessing:
+preprocess:
   valid_windows:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
@@ -28,16 +28,16 @@ preprocessing:
 
 loader:
   batch_size: 100
-  num_workers: 1
+  num_workers: 10
   shuffle: true
   drop_last: false
   streaming:
-    batches_per_epoch: 10  # REQUIRED when training with cache_tokens: false, document in config guide
+    batches_per_epoch: 10  # REQUIRED when train with cache_tokens: false, document in config guide
 
 # How to initialise the model's weights for this run.
 #
-# - If run_dir is null    → train from scratch.
-# - If run_dir is a path  → init from that previous run using overlap loading.
+# - If model_dir is null    → train from scratch.
+# - If model_dir is a path  → init from that previous run using overlap loading.
 #
 #   *Overlap loading* means we only copy parameters whose keys AND shapes
 #   match between the checkpoint and the current model; everything else
@@ -47,22 +47,24 @@ loader:
 #   - change shapes in some submodules
 #   between pretrain and finetune.
 #
-# load_parts controls which large blocks we reuse:
+# load_parts controls which large blocks we reuse.
+# true: the intersection between new signals and old signals blocks
+# are automatically loaded
 #   backbone:        token encoder + transformer trunk
 #   modality_heads:  modality-level heads G_mod
 #   output_adapters: per-output adapters ψ
 model_init:
-  model_dir: null          # e.g. "runs/pretrain_task_2-1/some_run/model"
+  model_dir: "runs/test"          # e.g. "runs/run_id"
   load_parts:
     backbone: true
-    modality_heads: true
+    modality_heads: false
     output_adapters: false
 
-training:
+train:
   # This is run-level behaviour, not per-stage.
   # If true and checkpoints/latest exists in *this* run_dir, we strictly
   # resume that run: model weights + optimizer + scheduler + scaler + RNG +
-  # epoch counters. This is different from model_init.run_dir, which is a
+  # epoch counters. This is different from model_init.model_dir, which is a
   # warm-start from some *other* run.
   resume: false
 
@@ -81,29 +83,29 @@ training:
 
   stages:
     - name: ft_warm
-      epochs: 1
+      epochs: 2   # if resume = true, total number of epochs, not number of new epochs
 
       scheduler:
         grad_accum_steps: 2
 
       optimizer:
         lr:
-          backbone: 5e-4
+          backbone: 0  # 5e-4
           modality_heads: 2e-3
           output_adapters: 2e-3
         wd:
-          backbone: 0.05
+          backbone: 0  # 0.05
           modality_heads: 0.05
           output_adapters: 0.05
 
       # model_dir is null, freeze must be all false
       freeze:
-        backbone: false
+        backbone: true
         modality_heads: false
         output_adapters: false
 
     - name: ft_main
-      epochs: 1
+      epochs: 0
 
       scheduler:
         grad_accum_steps: 2

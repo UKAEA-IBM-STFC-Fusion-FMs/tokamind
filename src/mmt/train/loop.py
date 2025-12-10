@@ -1,14 +1,14 @@
 """
-loop.py — High-level training loop for the Multi-Modal Transformer (MMT)
+loop.py — High-level train loop for the Multi-Modal Transformer (MMT)
 =======================================================================
 
 This module orchestrates the complete finetuning flow of the MMT model,
 including:
 
-    • Multi-stage training (warm, main, transfer, etc.)
+    • Multi-stage train (warm, main, transfer, etc.)
     • Freezing/unfreezing backbone and modality-specific components
     • Per-stage optimizers and LR schedulers (cosine + warmup)
-    • AMP training, gradient accumulation
+    • AMP train, gradient accumulation
     • Best and latest checkpointing
     • Strict resume of interrupted runs
     • Early stopping
@@ -42,11 +42,11 @@ MMT supports two dataset regimes:
 
          loader.streaming.batches_per_epoch
 
-   - Training stops after this many batches
+   - Train stops after this many batches
    - Validation ALWAYS exhausts the dataloader
 
 -------------------------------------------------------------------------------
-The `history` object tracks structured per-epoch training statistics and is
+The `history` object tracks structured per-epoch train statistics and is
 returned to the caller for logging, visualization, or experiment tracking.
 -------------------------------------------------------------------------------
 """
@@ -60,24 +60,24 @@ from typing import Dict, Any
 import torch
 
 from mmt.models.mmt import MultiModalTransformer
-from mmt.training.loop_utils import (
+from mmt.train.loop_utils import (
     backbone_lr,
     log_train_setup,
     run_one_epoch,
 )
-from mmt.training.scheduler import (
+from mmt.train.scheduler import (
     build_optimizer_and_scheduler,
     apply_stage_freeze_policy,
 )
-from mmt.training.checkpoint_io import (
+from mmt.train.checkpoint_io import (
     save_best,
     save_latest,
     resume_from_latest,
 )
-from mmt.training.amp_utils import get_amp_config
+from mmt.train.amp_utils import get_amp_config
 
 
-logger = logging.getLogger("mmt.Training")
+logger = logging.getLogger("mmt.Train")
 
 
 # =============================================================================
@@ -91,11 +91,11 @@ def train_finetune(
     val_loader,
     *,
     run_dir: str,
-    training_cfg: Dict[str, Any],
+    train_cfg: Dict[str, Any],
     loader_cfg: Dict[str, Any],
 ) -> Dict[str, Any]:
     """
-    Finetune the MMT model using the (already-validated) training configuration.
+    Finetune the MMT model using the (already-validated) train configuration.
 
     Parameters
     ----------
@@ -105,9 +105,9 @@ def train_finetune(
         Each loader has attribute `.is_streaming`.
     run_dir : str
         Directory used for checkpoints and logs.
-    training_cfg : dict
-        The validated training configuration.
-    training_cfg : dict
+    train_cfg : dict
+        The validated train configuration.
+    train_cfg : dict
         The validated loader configuration.
 
     Returns
@@ -123,17 +123,17 @@ def train_finetune(
     os.makedirs(run_dir, exist_ok=True)
 
     # -------------------------------------------------------------------------
-    # Extract fields from training_cfg
+    # Extract fields from train_cfg
     # -------------------------------------------------------------------------
-    stages = training_cfg["stages"]
-    resume_flag = training_cfg["resume"]
-    early_patience = int(training_cfg["early_stop"]["patience"])
-    early_delta = float(training_cfg["early_stop"]["delta"])
+    stages = train_cfg["stages"]
+    resume_flag = train_cfg["resume"]
+    early_patience = int(train_cfg["early_stop"]["patience"])
+    early_delta = float(train_cfg["early_stop"]["delta"])
 
-    output_weights = training_cfg["loss"]["output_weights"] or {}
-    use_adamw = training_cfg["optimizer"]["use_adamw"]
+    output_weights = train_cfg["loss"]["output_weights"] or {}
+    use_adamw = train_cfg["optimizer"]["use_adamw"]
 
-    warmup_frac = float(training_cfg["scheduler"]["warmup_steps_fraction"])
+    warmup_frac = float(train_cfg["scheduler"]["warmup_steps_fraction"])
     warmup_frac = float(max(0.0, min(1.0, warmup_frac)))
 
     # Streaming or cached mode?
@@ -161,7 +161,7 @@ def train_finetune(
         amp_dtype,
         train_batches_per_epoch,
         stages,
-        training_cfg,
+        train_cfg,
     )
 
     # -------------------------------------------------------------------------
@@ -187,11 +187,16 @@ def train_finetune(
             global_step = int(meta.get("global_step", 0))
             bad_epochs = int(meta.get("bad_epochs", 0))
             start_stage_idx = int(meta.get("stage_index", 0))
-            start_epoch_in_stage = int(meta.get("epoch_in_stage", 1))
+            last_epoch_in_stage = int(meta.get("epoch_in_stage", 0))
+            start_epoch_in_stage = last_epoch_in_stage + 1
+            if start_epoch_in_stage < 1:
+                start_epoch_in_stage = 1
 
             logger.info(
-                f"[resume] Resumed training: stage_idx={start_stage_idx}, "
-                f"epoch_in_stage={start_epoch_in_stage}, best_val={best_val:.6f}"
+                f"[resume] Resumed train: stage_idx={start_stage_idx}, "
+                f"last_epoch_in_stage={last_epoch_in_stage}, "
+                f"next_epoch_in_stage={start_epoch_in_stage}, "
+                f"best_val={best_val:.6f}"
             )
         except Exception as e:
             logger.warning(
@@ -399,7 +404,7 @@ def train_finetune(
     history["epochs_run"] = total_epochs_run
     history["global_step"] = global_step
     logger.info(
-        f"Training finished: epochs_run={total_epochs_run}, best_val={best_val:.6f}"
+        f"Train finished: epochs_run={total_epochs_run}, best_val={best_val:.6f}"
     )
 
     return history

@@ -1,4 +1,4 @@
-# mmt/training/losses.py
+# mmt/train/losses.py
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ Loss utilities for the Multi-Modal Transformer.
 
 We compute a **single masked MSE loss in prediction (coeff) space**.
 
-The training pipeline is expected to provide:
+The train pipeline is expected to provide:
 
   • preds:  {output_key -> Tensor(B, K)}
       Model predictions in coeff space, one (B, K) tensor per output.

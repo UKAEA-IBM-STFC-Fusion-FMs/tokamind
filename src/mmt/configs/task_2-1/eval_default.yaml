@@ -2,7 +2,7 @@
 #
 # Evaluation-only config for task 2-1.
 # Uses the same experiment + embedding definitions as fine-tuning,
-# but no training hyperparameters.
+# but no train hyperparameters.
 
 # PLACEHOLDER
 
@@ -19,7 +19,7 @@ data:
   keep_output_native: true
 
 
-preprocessing:
+preprocess:
   valid_windows:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1

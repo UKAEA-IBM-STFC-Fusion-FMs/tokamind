@@ -207,7 +207,7 @@ def initialize_mmt_dataloaders(
 
         loader.is_streaming : bool
 
-    which training/evaluation loops can use to apply streaming logic:
+    which train/evaluation loops can use to apply streaming logic:
 
       - Cached mode  → full epoch (len(dataloader) meaningful)
       - Streaming    → epoch length controlled by

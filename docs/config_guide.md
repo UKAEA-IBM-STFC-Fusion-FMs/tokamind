@@ -18,7 +18,7 @@ For each task (e.g. `task_2-1`) we use three logical layers:
      - link to the **baseline FAIRMAST task config** (`baseline_config`), i.e. the YAML file from the separate baseline repository that defines the raw task (inputs, outputs, windowing, etc.)
      - global settings (`global.seed`)
      - data options (`data.local`, `data.subset_of_shots`)
-     - preprocessing settings (`preprocessing.valid_windows`, `preprocessing.chunking`, `preprocessing.cache`)
+     - preprocess settings (`preprocess.valid_windows`, `preprocess.chunking`, `preprocess.cache`)
      - high-level model shape (`model.backbone`, `model.modality_heads`, `model.adapters`)
 
 
@@ -38,7 +38,7 @@ For each task (e.g. `task_2-1`) we use three logical layers:
    - Defines:
      - `phase` (`"finetune"` or `"eval"`)
      - which `experiment_base` and `embedding_config` to use
-     - phase-specific sections like `training`, `evaluation`, `run`, etc.
+     - phase-specific sections like `train`, `evaluation`, `run`, etc.
 
 The **phase config** is the only file you pass to the loader; it in turn points to the experiment base and embedding config.
 

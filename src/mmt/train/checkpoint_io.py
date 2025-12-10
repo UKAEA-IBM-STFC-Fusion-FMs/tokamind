@@ -7,7 +7,7 @@ to three distinct phases of the MMT lifecycle:
 ======================================================================
 1) Strict resume of the *same* run
 ----------------------------------------------------------------------
-Triggered when `training.resume: true` and a `checkpoints/latest/`
+Triggered when `train.resume: true` and a `checkpoints/latest/`
 directory exists under the current run_dir.
 
     resume_from_latest(run_dir, model, optimizer, scheduler, scaler)
@@ -227,7 +227,7 @@ def _save_model_triplet(model: nn.Module, subdir: str) -> None:
     """
     Save backbone, modality_heads, and output_adapters state_dicts.
 
-    These are always saved separately so the training loop can:
+    These are always saved separately so the train loop can:
       - warm-start only selected blocks,
       - resume strictly,
       - evaluate safely even if optimizer is absent.
@@ -529,8 +529,8 @@ def resume_from_latest(
     """
     Strict resume of the *same* run.
 
-    The training loop decides whether resume is allowed
-    (training.resume = true).
+    The train loop decides whether resume is allowed
+    (train.resume = true).
 
     Restores:
       - model triplet
