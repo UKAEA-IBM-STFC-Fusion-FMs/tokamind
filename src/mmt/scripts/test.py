@@ -12,7 +12,7 @@ from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
 )
 
-from mmt.data.baseline_bridge import build_baseline_task_config
+from mmt.utils.config.baseline_bridge import build_baseline_task_config
 from mmt.utils.config.loader import load_experiment_config
 from mmt.utils.config.validator import validate_config
 from mmt.utils.seed import set_seed
