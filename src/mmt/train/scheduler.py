@@ -99,11 +99,14 @@ def build_param_groups(
     if not hasattr(model, "backbone"):
         raise AttributeError("Model must expose .backbone")
 
-    backbone_params = _trainable(model.backbone.parameters())
+    # IMPORTANT: for the backbone we *do not* filter by requires_grad.
+    # Freezing is handled via requires_grad=False + lr=0 in the stage config.
+    backbone_params = list(model.backbone.parameters())
     if not backbone_params:
-        raise RuntimeError("No trainable parameters found in model.backbone.")
+        # This would indicate a structural bug (empty backbone), not just "frozen".
+        raise RuntimeError("model.backbone has no parameters.")
 
-    groups = [
+    groups: list[Dict] = [
         {
             "params": backbone_params,
             "lr": lr_backbone,
@@ -118,7 +121,7 @@ def build_param_groups(
         raise AttributeError("Model must expose .modality_heads (nn.ModuleDict)")
 
     for modality, head in model.modality_heads.items():
-        params = _trainable(head.parameters())
+        params = _trainable(head.parameters())  # here we *do* filter
         if not params:
             continue
         groups.append(

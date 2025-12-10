@@ -112,6 +112,10 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+import logging
+
+logger = logging.getLogger("mmt.Train")
+
 # ======================================================================
 # Low-level atomic save / load helpers
 # ======================================================================
@@ -321,7 +325,6 @@ def load_parts_from_run_dir(
     *,
     load_parts: Optional[Dict[str, bool]] = None,
     map_location: str | torch.device = "cpu",
-    verbose: bool = True,
 ) -> None:
     """
     Overlap-load selected parts of `model` from a previous run_dir.
@@ -367,52 +370,72 @@ def load_parts_from_run_dir(
     map_location:
         Device to map tensors to when loading.
 
-    verbose:
-        If True, prints a short summary of how many params were reused.
-
     Raises
     ------
     FileNotFoundError
         If no 'checkpoints/best' or 'checkpoints/latest' directory is found
         under run_dir, or if required .pt files are missing.
     """
+    # Locate checkpoint directory (prefer 'best', else 'latest')
     ckpt = _best_or_latest_dir(run_dir)
     if ckpt is None:
         raise FileNotFoundError(
             f"No checkpoints/best or checkpoints/latest found under '{run_dir}'."
         )
 
+    # Default: load all three parts unless explicitly overridden
     if load_parts is None:
-        load_parts = {"backbone": True, "modality_heads": True, "output_adapters": True}
+        load_parts = {
+            "backbone": True,
+            "modality_heads": True,
+            "output_adapters": True,
+        }
 
-    stats = {}
+    # Helper: count total number of tensor parameters in a state_dict
+    def _count_params(sd: Dict[str, Any]) -> int:
+        n = 0
+        for v in sd.values():
+            if isinstance(v, torch.Tensor):
+                n += v.numel()
+        return n
 
-    def _load(block_name, get_fn, load_fn, filename):
+    # Collect load statistics: {block_name: (loaded_params, total_params)}
+    stats: Dict[str, tuple[int, int]] = {}
+
+    # Load a specific block (backbone / modality_heads / output_adapters)
+    def _load(block_name: str, get_fn, load_fn, filename: str) -> None:
+        # Skip if user disabled loading for this block
         if not load_parts.get(block_name, False):
             return
+
         path = os.path.join(ckpt, filename)
         if not os.path.exists(path):
             raise FileNotFoundError(f"Missing '{filename}' in checkpoint {ckpt}.")
-        loaded = _tload(path, map_location)
-        current = get_fn()
-        overlap = _filter_overlap_state(loaded, current)
-        load_fn(overlap, strict=False)
-        stats[block_name] = (len(overlap), len(current))
 
+        loaded_sd = _tload(path, map_location)
+        current_sd = get_fn()
+
+        # Keep only keys present in both checkpoint and current model
+        overlap_sd = _filter_overlap_state(loaded_sd, current_sd)
+        if overlap_sd:
+            load_fn(overlap_sd, strict=False)
+
+        # Store how many parameters were reused vs total in the current block
+        stats[block_name] = (_count_params(overlap_sd), _count_params(current_sd))
+
+    # Try loading each block independently
     _load(
         "backbone",
         model.get_backbone_state_dict,
         model.load_backbone_state_dict,
         "backbone.pt",
     )
-
     _load(
         "modality_heads",
         model.get_modality_heads_state_dict,
         model.load_modality_heads_state_dict,
         "modality_heads.pt",
     )
-
     _load(
         "output_adapters",
         model.get_output_adapters_state_dict,
@@ -420,12 +443,22 @@ def load_parts_from_run_dir(
         "output_adapters.pt",
     )
 
-    if verbose and stats:
-        parts = ", ".join(
-            f"{k}: {n_loaded}/{n_total} matched"
-            for k, (n_loaded, n_total) in stats.items()
-        )
-        print(f"[WarmStart] Loaded from {ckpt}: {parts}")
+    # Summary log: show loaded vs skipped blocks for user clarity
+    all_parts = ["backbone", "modality_heads", "output_adapters"]
+    summary_lines = []
+
+    for part in all_parts:
+        if load_parts.get(part, False):
+            if part in stats:
+                n_loaded, n_total = stats[part]
+                summary_lines.append(f"{part}: {n_loaded}/{n_total} params matched")
+            else:
+                summary_lines.append(f"{part}: loaded (no overlapping params found)")
+        else:
+            summary_lines.append(f"{part}: skipped (load_parts=False)")
+
+    summary_text = " | ".join(summary_lines)
+    logger.info(f"[WarmStart] Loaded from {ckpt}: {summary_text}")
 
 
 # ======================================================================

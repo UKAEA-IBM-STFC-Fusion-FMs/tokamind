@@ -48,8 +48,7 @@ loader:
 #   between pretrain and finetune.
 #
 # load_parts controls which large blocks we reuse.
-# true: the intersection between new signals and old signals blocks
-# are automatically loaded
+# true: only the intersection between model_init signals and model_new signals is kept
 #   backbone:        token encoder + transformer trunk
 #   modality_heads:  modality-level heads G_mod
 #   output_adapters: per-output adapters ψ
@@ -57,8 +56,8 @@ model_init:
   model_dir: "runs/test"          # e.g. "runs/run_id"
   load_parts:
     backbone: true
-    modality_heads: false
-    output_adapters: false
+    modality_heads: true
+    output_adapters: true
 
 train:
   # This is run-level behaviour, not per-stage.
@@ -73,7 +72,9 @@ train:
     delta: 0.0
 
   loss:
-    output_weights: {}
+    output_weights:
+      summary-ip: 1.2
+      pf_active-coil_current: 3
 
   optimizer:
     use_adamw: true

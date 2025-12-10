@@ -60,7 +60,7 @@ class TokenEncoder(nn.Module):
         attn_keep: BoolTensor(B, L+1)
     """
 
-    ROLE_CONTEXT = 0
+    ROLE_INPUT = 0
     ROLE_ACTUATOR = 1
     ROLE_OUTPUT = 2
 
@@ -76,20 +76,33 @@ class TokenEncoder(nn.Module):
         self.max_positions = int(max_positions)
         self.debug_checks = bool(debug_checks)
 
+        # Numeric metadata definitions remain unchanged and are provided
+        # by SignalSpecRegistry for id/mod masks and metadata embeddings.
         self.num_signals = signal_specs.num_signals
         self.num_modalities = len(signal_specs.modalities)
 
-        # ⚠️ projection modules keyed by (signal_id, role_id)
-        self._proj = nn.ModuleDict()
-        self._proj_in_dim: Dict[str, int] = {}
+        # ---------------------------------------------------------------
+        # Stable mapping from signal_id → canonical key "role:name"
+        # ---------------------------------------------------------------
+        self.sid_to_key: Dict[int, str] = {}
+        for spec in signal_specs.specs:
+            self.sid_to_key[spec.signal_id] = spec.canonical_key
 
-        # ------------------------------------------------------------------
+        # ---------------------------------------------------------------
+        # Per-signal projection layers (keyed by canonical name)
+        # ---------------------------------------------------------------
+        self.proj_layers = nn.ModuleDict()
+        self.proj_in_dim: Dict[str, int] = {}
+
+        # ---------------------------------------------------------------
         # CLS token parameters
+        # ---------------------------------------------------------------
         self.cls_content = nn.Parameter(torch.randn(self.d_model))
         self.cls_id = self.num_signals  # CLS occupies id=num_signals
-        # ------------------------------------------------------------------
 
+        # ---------------------------------------------------------------
         # Metadata embeddings
+        # ---------------------------------------------------------------
         self.pos_embed = nn.Embedding(self.max_positions + 1, self.d_model)
         self.id_embed = nn.Embedding(self.num_signals + 1, self.d_model)
         self.mod_embed = nn.Embedding(self.num_modalities, self.d_model)
@@ -98,8 +111,7 @@ class TokenEncoder(nn.Module):
     # ------------------------------------------------------------------
     def _get_proj(
         self,
-        sig_id: int,
-        role_id: int,
+        canonical_key: str,
         in_dim: int,
         device: torch.device,
     ) -> nn.Linear:
@@ -114,26 +126,24 @@ class TokenEncoder(nn.Module):
             • dims never collide
             • TokenEncoder never mismatches in_dim again
         """
-        key = f"{int(sig_id)}:{int(role_id)}"
 
-        # Skip PAD tokens (sid < 0 or in_dim == 0)
-        if sig_id < 0 or in_dim == 0:
+        if in_dim <= 0:
             raise RuntimeError(
-                f"TokenEncoder._get_proj called on PAD token sid={sig_id}, in_dim={in_dim}"
+                f"TokenEncoder._get_proj called with invalid in_dim={in_dim}."
             )
 
-        if key not in self._proj:
+        if canonical_key not in self.proj_layers:
             layer = nn.Linear(in_dim, self.d_model).to(device)
-            self._proj[key] = layer
-            self._proj_in_dim[key] = in_dim
+            self.proj_layers[canonical_key] = layer
+            self.proj_in_dim[canonical_key] = in_dim
         else:
-            if self._proj_in_dim[key] != in_dim:
+            if self.proj_in_dim[canonical_key] != in_dim:
                 raise ValueError(
-                    f"(signal_id={sig_id}, role_id={role_id}) was first seen with "
-                    f"in_dim={self._proj_in_dim[key]}, now has in_dim={in_dim}."
+                    f"Projection for '{canonical_key}' was first created with "
+                    f"in_dim={self.proj_in_dim[canonical_key]}, now sees in_dim={in_dim}."
                 )
 
-        return cast(nn.Linear, self._proj[key])
+        return cast(nn.Linear, self.proj_layers[canonical_key])
 
     # ------------------------------------------------------------------
     def forward(self, batch: Dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
@@ -145,14 +155,14 @@ class TokenEncoder(nn.Module):
         padding_mask = batch["padding_mask"]
 
         if not isinstance(emb, list):
-            raise TypeError("batch['emb'] must be a list-of-lists of tensors")
+            raise TypeError("batch['emb'] must be a list-of-lists of tensors.")
 
         B, L = pos.shape
         device = pos.device
 
-        # ------------------------------------------------------------------
+        # ---------------------------------------------------------------
         # Project token content
-        # ------------------------------------------------------------------
+        # ---------------------------------------------------------------
         tokens = torch.zeros(B, L, self.d_model, dtype=torch.float32, device=device)
 
         for b in range(B):
@@ -162,28 +172,35 @@ class TokenEncoder(nn.Module):
 
                 vec = emb[b][t]
                 if not isinstance(vec, torch.Tensor):
-                    raise TypeError("emb[b][t] must be a torch.Tensor")
+                    raise TypeError("emb[b][t] must be a torch.Tensor.")
 
                 if vec.ndim != 1:
                     raise ValueError(
-                        f"emb[{b}][{t}] must be 1D vector, got shape={tuple(vec.shape)}"
+                        f"emb[{b}][{t}] must be a 1D vector, got shape={tuple(vec.shape)}."
                     )
 
                 in_dim = vec.shape[0]
                 sid_bt = int(sid[b, t].item())
-                rid_bt = int(role[b, t].item())
 
                 if sid_bt >= 0 and in_dim > 0:
-                    proj = self._get_proj(sid_bt, rid_bt, in_dim, device)
+                    canonical = self.sid_to_key.get(sid_bt)
+                    if canonical is None:
+                        raise KeyError(
+                            f"No canonical key found for signal_id={sid_bt}."
+                        )
+
+                    proj = self._get_proj(canonical, in_dim, device)
                     tokens[b, t] = proj(vec.to(device=device, dtype=torch.float32))
 
-        # ------------------------------------------------------------------
+        # ---------------------------------------------------------------
         # CLS token
+        # ---------------------------------------------------------------
         cls_tok = self.cls_content.view(1, 1, -1).expand(B, 1, -1)
         tokens = torch.cat([cls_tok, tokens], dim=1)
 
-        # ------------------------------------------------------------------
+        # ---------------------------------------------------------------
         # Metadata embeddings
+        # ---------------------------------------------------------------
         pos_cls = torch.zeros(B, 1, dtype=torch.long, device=device)
         sid_cls = torch.full((B, 1), self.cls_id, dtype=torch.long, device=device)
 
@@ -192,11 +209,12 @@ class TokenEncoder(nn.Module):
 
         tokens = tokens + self.pos_embed(pos_full) + self.id_embed(sid_full)
 
-        # Non-CLS modality + role embeddings
+        # Non-CLS tokens also get modality and role embeddings
         tokens[:, 1:, :] += self.mod_embed(mod) + self.role_embed(role)
 
-        # ------------------------------------------------------------------
+        # ---------------------------------------------------------------
         # Attention mask
+        # ---------------------------------------------------------------
         cls_mask = torch.ones(B, 1, dtype=torch.bool, device=device)
         attn_keep = torch.cat([cls_mask, padding_mask], dim=1)
 

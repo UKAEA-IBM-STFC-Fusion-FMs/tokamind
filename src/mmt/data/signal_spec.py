@@ -72,13 +72,20 @@ class SignalSpec:
         Name of the embedding codec to use (e.g., "dct3d", "identity").
 
     encoder_kwargs : Dict[str, Any]
-        Codec-specific parameters.
+        Codec-specific parameters used to configure the codec.
 
     signal_id : int
-        Unique integer identifier **per (role, name)**.
+        Unique integer identifier **per (role, name)**. This ID is used in the
+        token pipeline and metadata arrays.
 
     embedding_dim : int
         Dimension of the codec output for a single chunk.
+
+    Notes
+    -----
+    A single physical signal may appear in multiple roles (e.g. as input and
+    as output). Each role receives its own SignalSpec and its own `signal_id`
+    because the embedding parameters and output dimensions may differ.
     """
 
     name: str
@@ -88,6 +95,18 @@ class SignalSpec:
     encoder_kwargs: Dict[str, Any]
     signal_id: int
     embedding_dim: int
+
+    @property
+    def canonical_key(self) -> str:
+        """
+        Return a stable, human-readable key uniquely identifying this
+        role-specific signal.
+
+        This key is used to index learnable per-signal modules
+        (e.g. projection layers, adapters) so that module names remain
+        consistent and independent of the internal numeric `signal_id`.
+        """
+        return f"{self.role}:{self.name}"
 
 
 # ---------------------------------------------------------------------------
@@ -338,3 +357,16 @@ def build_signal_role_modality_map(
         signals_by_role[role] = role_map
 
     return signals_by_role
+
+
+def canonical_key(role: str, name: str) -> str:
+    """
+    Build a stable, human-readable key for a (role, name) pair.
+
+    This is used by the MMT model to key all per-signal learnable modules
+    (input projections, missing token embeddings, output adapters) so that:
+        • warm-starting is semantically correct,
+        • adapters are uniquely associated with each physical+role signal,
+        • ordering changes in SignalSpecRegistry do NOT affect loaded weights.
+    """
+    return f"{role}:{name}"

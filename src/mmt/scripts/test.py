@@ -178,44 +178,6 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Model
-    # ------------------------------------------------------------------
-    model = MultiModalTransformer(
-        signal_specs=signal_specs,
-        d_model=cfg_backbone["d_model"],
-        n_layers=cfg_backbone["n_layers"],
-        n_heads=cfg_backbone["n_heads"],
-        dim_ff=cfg_backbone["dim_ff"],
-        dropout=cfg_backbone["dropout"],
-        backbone_activation=cfg_backbone["activation"],
-        max_positions=max_positions,
-        modality_heads_cfg=cfg_modality_heads,
-        output_adapters_cfg=cfg_output_adapters,
-        debug_tokens=False,
-    )
-    model.to(device)
-
-    # ------------------------------------------------------------------
-    # Optional warm-start from previous run
-    # ------------------------------------------------------------------
-    model_init_cfg = cfg_mmt.get("model_init", None)
-    if model_init_cfg is not None:
-        run_init = model_init_cfg.get("run_dir", None)
-        load_parts = model_init_cfg.get("load_parts", None)
-
-        if run_init is not None:
-            from mmt.train.checkpoint_io import load_parts_from_run_dir
-
-            logger.info("[WarmStart] Loading parts from previous run_dir: %s", run_init)
-            load_parts_from_run_dir(
-                model,
-                run_init,
-                load_parts=load_parts,
-                map_location=device,
-                verbose=True,
-            )
-
-    # ------------------------------------------------------------------
     # Model-level datasets (TaskModelTransformWrapper, shot-based)
     # ------------------------------------------------------------------
     datasets_mmt = initialize_mmt_datasets(
@@ -281,6 +243,44 @@ def main() -> None:
         drop_last=cfg_loader["drop_last"],
         seed=cfg_mmt.seed,
     )
+
+    # ------------------------------------------------------------------
+    # Model
+    # ------------------------------------------------------------------
+    model = MultiModalTransformer(
+        signal_specs=signal_specs,
+        d_model=cfg_backbone["d_model"],
+        n_layers=cfg_backbone["n_layers"],
+        n_heads=cfg_backbone["n_heads"],
+        dim_ff=cfg_backbone["dim_ff"],
+        dropout=cfg_backbone["dropout"],
+        backbone_activation=cfg_backbone["activation"],
+        max_positions=max_positions,
+        modality_heads_cfg=cfg_modality_heads,
+        output_adapters_cfg=cfg_output_adapters,
+        debug_tokens=False,
+    )
+    model.to(device)
+
+
+    # ------------------------------------------------------------------
+    # Optional warm-start from previous run
+    # ------------------------------------------------------------------
+    model_init_cfg = cfg_mmt.get("model_init", None)
+    if model_init_cfg is not None:
+        run_init = model_init_cfg.get("model_dir", None)
+        load_parts = model_init_cfg.get("load_parts", None)
+
+        if run_init is not None:
+            from mmt.train.checkpoint_io import load_parts_from_run_dir
+
+            logger.info("[WarmStart] Loading parts from previous run_dir: %s", run_init)
+            load_parts_from_run_dir(
+                model,
+                run_init,
+                load_parts=load_parts,
+                map_location=device,
+            )
 
     # ------------------------------------------------------------------
     # Run a short finetuning test (few epochs, config-driven)

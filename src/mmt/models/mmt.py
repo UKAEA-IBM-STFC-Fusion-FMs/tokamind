@@ -46,6 +46,10 @@ class MultiModalTransformer(nn.Module):
        • adds positional, signal-ID and role embeddings,
        • prepends a learned CLS token (`pos = 0`, `role = OUTPUT`).
 
+     Internally, per-signal projection layers are keyed by a stable canonical
+     string derived from the SignalSpec, so that module names remain independent
+     of the numeric `signal_id` used in the preprocessing pipeline.
+
      Output:
          tokens : (B, L+1, d_model)
          attn_keep : (B, L+1)  — True where the token is real (including CLS)
@@ -90,6 +94,12 @@ class MultiModalTransformer(nn.Module):
        • an OutputAdapter: a small linear or MLP mapping `G_mod → K_t`.
 
          pred[sid] = adapter_sid(modality_latent[modality_of_sid])
+
+     Internally, output adapters are stored in a ModuleDict keyed by a canonical
+     string derived from the SignalSpec (e.g. `"output:pf_active-coil_current"`),
+     while the public `pred` dictionary is still keyed by numeric `signal_id`.
+     This ensures that warm-starting and checkpoint loading are driven by
+     stable, human-readable keys rather than by internal ID ordering.
 
      This cleanly separates:
          • modality-level representation learning (shared),
@@ -225,6 +235,7 @@ class MultiModalTransformer(nn.Module):
             raise ValueError("SignalSpecRegistry contains no outputs (role='output').")
         self.output_specs = output_specs
 
+        # Map signal_id → modality name
         self.output2modality: Dict[int, str] = {}
         modalities = sorted(set(s.modality for s in output_specs))
         for spec in output_specs:
@@ -265,6 +276,8 @@ class MultiModalTransformer(nn.Module):
 
         self.output_adapters = nn.ModuleDict()
         self.output_dims: Dict[int, int] = {}
+        # Mapping from signal_id → canonical adapter key "role:name"
+        self.output_sid_to_key: Dict[int, str] = {}
 
         for spec in output_specs:
             g = spec.modality
@@ -281,12 +294,16 @@ class MultiModalTransformer(nn.Module):
 
             hidden = hidden_overrides.get(spec.name, hidden_default)
 
-            self.output_adapters[str(spec.signal_id)] = OutputAdapter(
+            # Use a stable canonical key for the adapter name (role:name)
+            adapter_key = spec.canonical_key
+            self.output_adapters[adapter_key] = OutputAdapter(
                 in_dim=G_mod,
                 out_dim=K_t,
                 hidden=hidden,
             )
+
             self.output_dims[spec.signal_id] = K_t
+            self.output_sid_to_key[spec.signal_id] = adapter_key
 
         self._print_init_summary(modalities, per_mod_hidden, per_mod_dim)
 
@@ -351,7 +368,8 @@ class MultiModalTransformer(nn.Module):
         for spec in self.output_specs:
             sid = spec.signal_id
             g = self.output2modality[sid]
-            adapter = self.output_adapters[str(sid)]
+            adapter_key = self.output_sid_to_key[sid]
+            adapter = self.output_adapters[adapter_key]
             preds[sid] = adapter(modality_latent[g])
 
         return {
