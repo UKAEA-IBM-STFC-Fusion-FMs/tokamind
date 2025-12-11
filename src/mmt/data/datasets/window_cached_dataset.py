@@ -288,13 +288,13 @@ def materialize_tokenized_split_to_ram(
 
             if idx % log_interval == 0:
                 logger.debug(
-                    "[TokenCache] Cached %d windows so far (RAM: %.3f GB)",
+                    "Cached %d windows so far (RAM: %.3f GB)",
                     len(flat_windows),
                     get_ram_gb(),
                 )
 
         logger.info(
-            "[TokenCache] Finished caching %d tokenised windows using %d workers "
+            "Finished caching %d tokenised windows using %d workers "
             "(Final RAM: %.3f GB)",
             len(flat_windows),
             num_workers_cache,
@@ -327,13 +327,13 @@ def materialize_tokenized_split_to_ram(
 
         if idx % log_interval == 0:
             logger.debug(
-                "[TokenCache] Single-process cached %d windows (RAM: %.3f GB)",
+                "Single-process cached %d windows (RAM: %.3f GB)",
                 len(flat_windows),
                 get_ram_gb(),
             )
 
     logger.info(
-        "[TokenCache] Materialised %d tokenised windows from %d items "
+        "Materialised %d tokenised windows from %d items "
         "(single process, Final RAM: %.3f GB)",
         len(flat_windows),
         n_items,

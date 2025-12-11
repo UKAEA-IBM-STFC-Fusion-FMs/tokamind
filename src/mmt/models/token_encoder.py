@@ -13,51 +13,64 @@ class TokenEncoder(nn.Module):
     TokenEncoder
     =============
 
-    This module projects per-signal embeddings (one vector per token)
-    into a common d_model, adds metadata embeddings (pos/id/mod/role),
-    and prepends a CLS token.
+    Projects per-signal embeddings (one vector per token) into a shared
+    `d_model`, adds metadata embeddings (pos/id/mod/role), and prepends
+    a learned CLS token.
 
     -------------------------------------------------------------------
-    IMPORTANT ARCHITECTURAL DECISION
+    Projection layers and canonical keys
     -------------------------------------------------------------------
-    Projection layers are **not** keyed by `signal_id` alone, but by the
-    pair `(signal_id, role_id)`.
+    Per-signal projection layers are **not keyed by signal_id**. Instead
+    each role-specific signal uses a **canonical name**:
 
-    Why?
-    ----
-    The same physical signal (same signal_id) may appear in multiple roles:
+        canonical_key = f"{role}:{name}"
 
-        • as input   → small DCT embedding (e.g., dim=10)
-        • as actuator → larger profile embedding (e.g., dim=40)
-        • as output   → scalar embedding (e.g., dim=1)
+    Examples:
+        "input:pf_active-coil_current"
+        "actuator:summary-power_nbi"
+        "output:pf_active-coil_current"
 
-    These different roles naturally have **different embedding dimensions**.
-    Keying projections only by signal_id forces incompatible vectors to
-    share the same Linear, causing the classic runtime error:
+    This ensures:
+      • different roles of the same physical signal get different
+        projection layers,
+      • projection dimensions remain consistent,
+      • checkpoint loading (resume/warm-start) is stable and predictable,
+      • ordering of signals in the registry does not affect model state.
 
-        “Signal id X was first seen with in_dim=A but now has in_dim=B.”
-
-    With the correct design:
-        projection_key = (signal_id, role_id)
-
-    we preserve *physical identity* (signal id remains meaningful) but
-    avoid dimension collisions between roles.
+    All projection layers are created **eagerly in __init__** using each
+    SignalSpec's encoder output dimension. This guarantees that strict
+    checkpoint loading works (no “unexpected key” errors).
 
     -------------------------------------------------------------------
-    Expected batch structure (from MMTCollate)
+    Batch structure expected from MMTCollate
     -------------------------------------------------------------------
     batch = {
-        "emb":  List[List[Tensor]]          # emb[b][t] is (D_i,)
+        "emb":  List[List[Tensor]]        # emb[b][t] has shape (D_i,)
         "pos":  LongTensor(B, L)
-        "id":   LongTensor(B, L)            # physical signal id
-        "mod":  LongTensor(B, L)            # modality id
-        "role": LongTensor(B, L)            # 0=input, 1=actuator, 2=output
+        "id":   LongTensor(B, L)          # physical signal id
+        "mod":  LongTensor(B, L)          # modality id
+        "role": LongTensor(B, L)          # 0=input, 1=actuator, 2=output
         "padding_mask": BoolTensor(B, L)
     }
 
-    Output:
-        tokens:    Tensor(B, L+1, d_model)
-        attn_keep: BoolTensor(B, L+1)
+    -------------------------------------------------------------------
+    Outputs
+    -------------------------------------------------------------------
+    tokens:     Tensor(B, L+1, d_model)
+        CLS token at position 0, followed by projected & embedded tokens.
+
+    attn_keep:  BoolTensor(B, L+1)
+        True where tokens are real (including CLS), used as attention mask.
+
+    -------------------------------------------------------------------
+    Additional notes
+    -------------------------------------------------------------------
+    • TokenEncoder is a first-class model block: it is saved/loaded
+      separately in checkpoints and supports warm-start.
+
+    • Device semantics follow the model: projection layers are moved to
+      the model device via `model.to(device)`, and input vectors are
+      cast to the correct device automatically in forward().
     """
 
     ROLE_INPUT = 0
@@ -76,72 +89,79 @@ class TokenEncoder(nn.Module):
         self.max_positions = int(max_positions)
         self.debug_checks = bool(debug_checks)
 
-        # Numeric metadata definitions remain unchanged and are provided
-        # by SignalSpecRegistry for id/mod masks and metadata embeddings.
         self.num_signals = signal_specs.num_signals
         self.num_modalities = len(signal_specs.modalities)
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # Stable mapping from signal_id → canonical key "role:name"
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         self.sid_to_key: Dict[int, str] = {}
         for spec in signal_specs.specs:
             self.sid_to_key[spec.signal_id] = spec.canonical_key
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # Per-signal projection layers (keyed by canonical name)
-        # ---------------------------------------------------------------
+        # Pre-create all of them so that strict checkpoint loading works.
+        # ------------------------------------------------------------------
         self.proj_layers = nn.ModuleDict()
         self.proj_in_dim: Dict[str, int] = {}
 
-        # ---------------------------------------------------------------
+        for spec in signal_specs.specs:
+            key = spec.canonical_key
+            in_dim = int(spec.embedding_dim)
+            if in_dim <= 0:
+                continue
+            if key in self.proj_layers:
+                # Same canonical key across roles is not expected; if you ever
+                # share projections manually, you can handle it here.
+                continue
+            layer = nn.Linear(in_dim, self.d_model)
+            self.proj_layers[key] = layer
+            self.proj_in_dim[key] = in_dim
+
+        # ------------------------------------------------------------------
         # CLS token parameters
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         self.cls_content = nn.Parameter(torch.randn(self.d_model))
         self.cls_id = self.num_signals  # CLS occupies id=num_signals
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # Metadata embeddings
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         self.pos_embed = nn.Embedding(self.max_positions + 1, self.d_model)
         self.id_embed = nn.Embedding(self.num_signals + 1, self.d_model)
         self.mod_embed = nn.Embedding(self.num_modalities, self.d_model)
         self.role_embed = nn.Embedding(3, self.d_model)
 
-    # ------------------------------------------------------------------
+        # ------------------------------------------------------------------
+
     def _get_proj(
         self,
         canonical_key: str,
         in_dim: int,
-        device: torch.device,
     ) -> nn.Linear:
         """
-        Return (or lazily create) the projection layer for a given (signal_id, role_id).
+        Return the projection layer associated with a role-specific signal.
 
-        Projection key format:
-            key = f"{sig_id}:{role_id}"
-
-        This ensures:
-            • same physical signal in different roles → different Linear layers
-            • dims never collide
-            • TokenEncoder never mismatches in_dim again
+        All projection layers are created in __init__ using the encoder
+        output dimension (embedding_dim) for each signal. Here we only
+        check that the incoming vectors have a consistent size.
         """
-
         if in_dim <= 0:
             raise RuntimeError(
                 f"TokenEncoder._get_proj called with invalid in_dim={in_dim}."
             )
 
         if canonical_key not in self.proj_layers:
-            layer = nn.Linear(in_dim, self.d_model).to(device)
-            self.proj_layers[canonical_key] = layer
-            self.proj_in_dim[canonical_key] = in_dim
-        else:
-            if self.proj_in_dim[canonical_key] != in_dim:
-                raise ValueError(
-                    f"Projection for '{canonical_key}' was first created with "
-                    f"in_dim={self.proj_in_dim[canonical_key]}, now sees in_dim={in_dim}."
-                )
+            raise KeyError(
+                f"No projection layer registered for canonical key '{canonical_key}'."
+            )
+
+        if self.proj_in_dim[canonical_key] != in_dim:
+            raise ValueError(
+                f"Projection for '{canonical_key}' was first created with "
+                f"in_dim={self.proj_in_dim[canonical_key]}, now sees in_dim={in_dim}."
+            )
 
         return cast(nn.Linear, self.proj_layers[canonical_key])
 
@@ -189,8 +209,10 @@ class TokenEncoder(nn.Module):
                             f"No canonical key found for signal_id={sid_bt}."
                         )
 
-                    proj = self._get_proj(canonical, in_dim, device)
-                    tokens[b, t] = proj(vec.to(device=device, dtype=torch.float32))
+                    proj = self._get_proj(canonical, in_dim)
+                    tokens[b, t] = proj(
+                        vec.to(device=tokens.device, dtype=torch.float32)
+                    )
 
         # ---------------------------------------------------------------
         # CLS token

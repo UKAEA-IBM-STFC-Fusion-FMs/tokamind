@@ -39,6 +39,7 @@ from mmt.data.collate import MMTCollate
 from mmt.models.mmt import MultiModalTransformer
 from mmt.train.loop import train_finetune
 
+import logging
 
 DEBUG_MODE = False
 
@@ -123,6 +124,8 @@ def main() -> None:
         console=True,
     )
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
+
+    logger = logging.getLogger("mmt.Task")
     logger.info(f"task = {cfg_mmt.task} | phase = {cfg_mmt.phase} | device = {device}")
 
     # ------------------------------------------------------------------
@@ -211,14 +214,15 @@ def main() -> None:
         use_cache_for_split = cache_tokens and split in ("train", "val")
 
         if use_cache_for_split:
-            logger.info("[Caching] Starting caching split=%s", split)
+            logger = logging.getLogger("mmt.Cache")
+            logger.info("Starting caching split=%s", split)
             t0 = time.perf_counter()
             ds = WindowCachedDataset.from_streaming(
                 ds_stream,
                 num_workers_cache=num_workers_cache,
             )
             t1 = time.perf_counter()
-            logger.info("[Caching] Finished caching %s in %.3f seconds", split, t1 - t0)
+            logger.info("Finished caching %s in %.3f seconds", split, t1 - t0)
         else:
             # Window-level streaming dataset (also used for test / non-cached splits)
             ds = WindowStreamedDataset(
@@ -262,7 +266,6 @@ def main() -> None:
     )
     model.to(device)
 
-
     # ------------------------------------------------------------------
     # Optional warm-start from previous run
     # ------------------------------------------------------------------
@@ -274,7 +277,6 @@ def main() -> None:
         if run_init is not None:
             from mmt.train.checkpoint_io import load_parts_from_run_dir
 
-            logger.info("[WarmStart] Loading parts from previous run_dir: %s", run_init)
             load_parts_from_run_dir(
                 model,
                 run_init,
@@ -285,14 +287,13 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Run a short finetuning test (few epochs, config-driven)
     # ------------------------------------------------------------------
-    run_dir = cfg_mmt.paths["run_dir"]
-
-    logger.info("[Train] Starting finetuning test run...")
+    logger = logging.getLogger("mmt.Train")
+    logger.info("Starting finetuning test run...")
     history = train_finetune(
         model=model,
         train_loader=dataloaders_mmt["train"],
         val_loader=dataloaders_mmt["val"],
-        run_dir=run_dir,
+        run_dir=cfg_mmt.paths["run_dir"],
         train_cfg=cfg_train,
         loader_cfg=cfg_loader,
     )

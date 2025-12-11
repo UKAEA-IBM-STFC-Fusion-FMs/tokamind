@@ -1,83 +1,50 @@
 """
-validator.py — Centralised configuration validation for the MMT pipeline
-===============================================================================
+Validator for the MMT experiment configuration (MMT v0).
 
-This module performs ALL cross-field validation of experiment configuration
-after YAML loading and merging, but BEFORE dataset/model/train objects
-are constructed.
+This module validates and normalizes the full YAML-merged experiment
+configuration produced by the config loader. The validator enforces
+the MMT v0 specification:
 
-Why a dedicated validator?
---------------------------
-MMT supports two fundamentally different data-loading regimes:
+  • mandatory global training fields,
+  • mandatory stage-level fields (epochs, lr/wd, freeze, scheduler),
+  • automatic inheritance of lr/wd from backbone,
+  • freeze → force lr=0 and wd=0 (with warnings),
+  • model_init.load_parts normalized (defaults to True),
+  • dataset loader rules (streamed vs cached),
+  • basic sanity checks (num_workers >= 1).
 
-    1) Cached mode   (cache_tokens = true)
-       • WindowCachedDataset
-       • len(dataset) == true number of windows
-       • len(dataloader) is well-defined
-       • Dataloader epoch-size = full pass over windows
-
-    2) Streaming mode (cache_tokens = false)
-       • WindowStreamedDataset (IterableDataset)
-       • __len__ reports number of *shots*, not windows
-       • Total window count is unknown without a full pre-scan
-       • Hence, epoch boundaries must be specified explicitly
-
-In addition, the train pipeline requires:
-    • num_workers >= 1
-    • well-formed train stages
-    • LR/WD consistency with freeze flags
-    • loader.streaming.batches_per_epoch for streaming train
-
-This validator ensures that the entire configuration is internally consistent
-BEFORE the train loop begins. All checks raise descriptive ValueError
-exceptions to guide the user.
-
-Typical usage:
---------------
-    from mmt.config.config_validator import validate_config
-
-    cfg = load_experiment_config(...)
-    validate_config(cfg.raw)
-
-This function should be called exactly once at the start of run_finetune.py.
+Any missing or inconsistent entry raises a clear KeyError/ValueError
+before training starts.
 """
 
 from __future__ import annotations
-from typing import Any, Dict, Tuple, List
+
+import warnings
+from typing import Any, Dict, List, Tuple
 
 
-# -------------------------------------------------------------------------
-# Nested access helper
-# -------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# Utility: nested retrieval
+# ---------------------------------------------------------------------------
 
 
 def _get_nested(cfg: Dict[str, Any], path: str) -> Any:
     """
-    Retrieve cfg[path], where path is a dotted string like 'a.b.c'.
-
-    Raises
-    ------
-    KeyError
-        If any part of the path is missing.
-
-    Notes
-    -----
-    Type checking is intentionally NOT enforced here: the loader or the
-    consumer (train loop, dataloader, etc.) will later cast to int/float.
+    Retrieve a nested key from dict `cfg` using a dotted path,
+    raising KeyError if any component is missing.
     """
     node = cfg
-    for part in path.split("."):
-        if part not in node:
-            raise KeyError(
-                f"Missing required config entry '{path}' (failed at '{part}')"
-            )
-        node = node[part]
+    parts = path.split(".")
+    for p in parts:
+        if p not in node:
+            raise KeyError(f"Missing required config entry: {path}")
+        node = node[p]
     return node
 
 
-# -------------------------------------------------------------------------
-# TRAIN MAIN-BLOCK REQUIREMENTS
-# -------------------------------------------------------------------------
+# ---------------------------------------------------------------------------
+# REQUIRED TOP-LEVEL TRAIN FIELDS (minimal global spec)
+# ---------------------------------------------------------------------------
 
 REQUIRED_TRAIN_FIELDS: List[Tuple[str, type]] = [
     ("train.resume", bool),
@@ -90,138 +57,214 @@ REQUIRED_TRAIN_FIELDS: List[Tuple[str, type]] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# REQUIRED STAGE FIELDS
+# These fields must exist in each stage block.
+# Types are validated loosely; lr/wd may be None (inherit).
+# ---------------------------------------------------------------------------
+
 REQUIRED_STAGE_FIELDS: List[Tuple[str, type]] = [
     ("name", str),
     ("epochs", int),
     ("scheduler.grad_accum_steps", int),
     ("optimizer.lr.backbone", float),
-    ("optimizer.lr.modality_heads", float),
-    ("optimizer.lr.output_adapters", float),
+    ("optimizer.lr.modality_heads", (float, type(None))),
+    ("optimizer.lr.output_adapters", (float, type(None))),
+    ("optimizer.lr.token_encoder", (float, type(None))),
     ("optimizer.wd.backbone", float),
-    ("optimizer.wd.modality_heads", float),
-    ("optimizer.wd.output_adapters", float),
+    ("optimizer.wd.modality_heads", (float, type(None))),
+    ("optimizer.wd.output_adapters", (float, type(None))),
+    ("optimizer.wd.token_encoder", (float, type(None))),
     ("freeze.backbone", bool),
     ("freeze.modality_heads", bool),
     ("freeze.output_adapters", bool),
+    ("freeze.token_encoder", bool),
 ]
 
 
-def _validate_stage_consistency(stage_cfg: Dict[str, Any]) -> None:
-    """
-    Cross-field checks inside a single train stage.
-    Ensures freeze.* implies LR/WD = 0 for that block.
-    """
-    name = stage_cfg.get("name", "<unnamed-stage>")
+# ---------------------------------------------------------------------------
+# LR/WD INHERITANCE
+# Missing or None → inherit from backbone.
+# ---------------------------------------------------------------------------
 
+
+def _apply_lr_wd_inheritance(stage_cfg: Dict[str, Any]) -> None:
+    lr = stage_cfg["optimizer"]["lr"]
+    wd = stage_cfg["optimizer"]["wd"]
+
+    backbone_lr = float(lr["backbone"])
+    backbone_wd = float(wd["backbone"])
+
+    for block in ("token_encoder", "modality_heads", "output_adapters"):
+        if lr.get(block) is None:
+            lr[block] = backbone_lr
+        if wd.get(block) is None:
+            wd[block] = backbone_wd
+
+
+# ---------------------------------------------------------------------------
+# FREEZE RULES
+# freeze.<block> = True → force lr=0, wd=0 (with warning)
+# ---------------------------------------------------------------------------
+
+
+def _apply_freeze_rules(stage_cfg: Dict[str, Any]) -> None:
+    lr = stage_cfg["optimizer"]["lr"]
+    wd = stage_cfg["optimizer"]["wd"]
     freeze = stage_cfg["freeze"]
-    lr_cfg = stage_cfg["optimizer"]["lr"]
-    wd_cfg = stage_cfg["optimizer"]["wd"]
 
-    for block in ("backbone", "modality_heads", "output_adapters"):
-        if bool(freeze.get(block, False)):
-            lr = float(lr_cfg.get(block, 0.0))
-            wd = float(wd_cfg.get(block, 0.0))
-            if lr > 0.0 or wd > 0.0:
-                raise ValueError(
-                    f"Stage '{name}': freeze.{block}=True but lr={lr} wd={wd}. "
-                    "Frozen blocks must have LR and WD explicitly set to 0."
+    for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
+        if freeze.get(block, False):
+            if lr.get(block, 0.0) != 0.0 or wd.get(block, 0.0) != 0.0:
+                warnings.warn(
+                    f"[MMT config] freeze.{block}=True → forcing lr=0 and wd=0 "
+                    f"(was lr={lr.get(block)}, wd={wd.get(block)})",
+                    stacklevel=2,
+                )
+            lr[block] = 0.0
+            wd[block] = 0.0
+
+
+# ---------------------------------------------------------------------------
+# POST-FREEZE CONSISTENCY CHECK
+# Ensures freeze.<block> actually results in lr=0, wd=0.
+# ---------------------------------------------------------------------------
+
+
+def _validate_stage_consistency(stage_cfg: Dict[str, Any]) -> None:
+    lr = stage_cfg["optimizer"]["lr"]
+    wd = stage_cfg["optimizer"]["wd"]
+    freeze = stage_cfg["freeze"]
+
+    # 1) If frozen → lr and wd must already be zero (enforced by _apply_freeze_rules)
+    for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
+        if freeze.get(block, False):
+            if lr[block] != 0.0 or wd[block] != 0.0:
+                raise RuntimeError(
+                    f"Inconsistent config: block '{block}' is frozen "
+                    f"but lr={lr[block]} or wd={wd[block]} is nonzero."
                 )
 
+    # 2) If NOT frozen, lr=0 for backbone/token_encoder is almost certainly a mistake.
+    #    We do NOT apply this check to modality_heads/output_adapters,
+    #    because their lr is dynamically toggled per batch.
+    for block in ("token_encoder", "backbone"):
+        if not freeze.get(block, False) and lr[block] == 0.0:
+            raise ValueError(
+                f"Inconsistent config: freeze.{block}=False but optimizer.lr.{block}=0. "
+                f"This implicitly disables training for '{block}'. "
+                f"Either set freeze.{block}=True or specify a positive learning rate."
+            )
 
-# -------------------------------------------------------------------------
-# LOADER VALIDATION (STREAMING VS CACHED)
-# -------------------------------------------------------------------------
+
+# ---------------------------------------------------------------------------
+# LOADER VALIDATION (streamed vs cached dataset rules)
+# ---------------------------------------------------------------------------
 
 
 def _validate_loader(cfg: Dict[str, Any]) -> None:
-    """
-    Validate loader-wide rules:
-    - num_workers >= 1
-    - batch_size present
-    - streaming mode requires batches_per_epoch
-    """
-    loader = cfg.get("loader", {})
-    batch_size = loader.get("batch_size", None)
+    loader_cfg = cfg.get("loader", {})
 
-    if batch_size is None:
-        raise ValueError("loader.batch_size is required.")
+    # num_workers must be >=1
+    nw = loader_cfg.get("num_workers", 1)
+    if not isinstance(nw, int) or nw < 1:
+        raise ValueError("loader.num_workers must be an integer >= 1.")
 
-    # --- num_workers rule (global) ---
-    num_workers = loader.get("num_workers", None)
+    # Check mutually exclusive loader modes
+    streamed = loader_cfg.get("streaming", False)
+    cached = loader_cfg.get("cached", False)
 
-    # Must be explicitly provided, and must be an integer ≥ 1
-    if num_workers is None:
-        raise ValueError("loader.num_workers must be specified (>= 1).")
+    if streamed and cached:
+        raise ValueError("loader.streaming and loader.cached cannot both be true.")
 
-    if not isinstance(num_workers, int):
-        raise TypeError(
-            f"loader.num_workers must be an int, got {type(num_workers).__name__}"
+    if not streamed and not cached:
+        warnings.warn(
+            "[MMT config] Neither streaming nor cached dataset mode selected; "
+            "defaulting to cached=False, streaming=False may degrade performance.",
+            stacklevel=2,
         )
 
-    if num_workers <= 0:
-        raise ValueError(
-            "MMT pipeline does not support num_workers=0 because window objects "
-            "are mutated in-place by transforms. Please set num_workers >= 1."
-        )
 
-    # --- Streaming rules ---
-    train_cfg = cfg.get("train", {})
-    cache_tokens = bool(train_cfg.get("cache_tokens", False))
-
-    streaming_cfg = loader.get("streaming", {})
-
-    if not cache_tokens:
-        # streaming mode MUST specify batches_per_epoch
-        if "batches_per_epoch" not in streaming_cfg:
-            raise ValueError(
-                "loader.streaming.batches_per_epoch is required when "
-                "train.cache_tokens = false (streaming mode)."
-            )
-        if streaming_cfg["batches_per_epoch"] <= 0:
-            raise ValueError("loader.streaming.batches_per_epoch must be > 0.")
+# ---------------------------------------------------------------------------
+# MODEL_INIT.load_parts validation
+# Missing entries → default to True (most user-friendly behaviour)
+# ---------------------------------------------------------------------------
 
 
-# -------------------------------------------------------------------------
-# VALIDATION ENTRYPOINT
-# -------------------------------------------------------------------------
+def _normalize_load_parts(cfg: Dict[str, Any]) -> None:
+    mi = cfg.get("model_init", {})
+    lp = mi.get("load_parts")
+
+    if lp is None:
+        raise KeyError("model_init.load_parts must be defined in MMT v0.")
+
+    # Fill missing entries with True
+    for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
+        if lp.get(block) is None:
+            lp[block] = True
+
+
+# ---------------------------------------------------------------------------
+# MAIN VALIDATOR
+# ---------------------------------------------------------------------------
 
 
 def validate_config(cfg: Dict[str, Any]) -> None:
     """
-    Validate the FULL experiment configuration.
+    Validate the full experiment configuration.
 
-    This includes:
-      • presence & minimal consistency of the train block
-      • presence & consistency of all train stages
-      • loader rules (streaming vs cached)
-      • num_workers >= 1
+    This function performs:
+      • validation of the global training block,
+      • validation and normalization of all training stages
+        (lr/wd inheritance, freeze→force-zero rules),
+      • validation of model_init.load_parts,
+      • validation of dataset loader rules (streamed vs cached),
+      • basic sanity checks (num_workers >= 1).
 
     Parameters
     ----------
     cfg : dict
-        The FULL YAML-merged configuration from config_loader.
+        The fully merged configuration loaded by config_loader.
 
     Raises
     ------
     KeyError or ValueError
         If any required entry is missing or inconsistent.
     """
-    # --- Global train fields ---
-    for path, _expected_type in REQUIRED_TRAIN_FIELDS:
-        _ = _get_nested(cfg, path)
 
-    # --- Stage-level checks ---
+    # -----------------------------
+    # Validate global train fields
+    # -----------------------------
+    for path, _t in REQUIRED_TRAIN_FIELDS:
+        _get_nested(cfg, path)
+
     stages = cfg["train"]["stages"]
-    if not isinstance(stages, list) or len(stages) == 0:
-        raise ValueError("train.stages must be a non-empty list.")
 
+    # -----------------------------
+    # Validate and normalize stages
+    # -----------------------------
     for stage in stages:
-        for path, _expected_type in REQUIRED_STAGE_FIELDS:
-            _ = _get_nested(stage, path)
+        # Ensure required fields exist
+        for path, _t in REQUIRED_STAGE_FIELDS:
+            _get_nested(stage, path)
+
+        # 1) Inherit lr/wd from backbone
+        _apply_lr_wd_inheritance(stage)
+
+        # 2) Freeze → force lr=0, wd=0
+        _apply_freeze_rules(stage)
+
+        # 3) Check consistency post-freeze
         _validate_stage_consistency(stage)
 
-    # --- Loader-level checks ---
+    # -----------------------------
+    # Validate model_init.load_parts
+    # -----------------------------
+    _normalize_load_parts(cfg)
+
+    # -----------------------------
+    # Validate dataset loader rules
+    # -----------------------------
     _validate_loader(cfg)
 
-    # All good
     return None
