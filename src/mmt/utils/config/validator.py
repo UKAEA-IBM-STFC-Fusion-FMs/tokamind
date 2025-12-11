@@ -205,11 +205,11 @@ def _normalize_load_parts(cfg: Dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# MAIN VALIDATOR
+# MAIN VALIDATOR for TRAIN and EVAL
 # ---------------------------------------------------------------------------
 
 
-def validate_config(cfg: Dict[str, Any]) -> None:
+def validate_train_config(cfg: Dict[str, Any]) -> None:
     """
     Validate the full experiment configuration.
 
@@ -266,5 +266,48 @@ def validate_config(cfg: Dict[str, Any]) -> None:
     # Validate dataset loader rules
     # -----------------------------
     _validate_loader(cfg)
+
+    return None
+
+
+def validate_eval_config(cfg: Dict[str, Any]) -> None:
+    """
+    Validate the evaluation configuration.
+
+    Evaluation configuration is intentionally MUCH simpler than training:
+    - No train.stages, no lr/wd rules, no freeze rules
+      (these apply only to training).
+    - No model_init.load_parts
+      (evaluation ALWAYS loads all four model blocks).
+    - We still validate loader.num_workers.
+    - We enforce data.keep_output_native = True for metrics + traces.
+    - We DO NOT enforce any streaming/cached logic here.
+      Dataset mode is controlled exclusively via data.cache.enable.
+    """
+
+    # ---------------------------------------------------------
+    # 1. Basic loader validation (num_workers >= 1, etc.)
+    # ---------------------------------------------------------
+    _validate_loader(cfg)
+
+    # ---------------------------------------------------------
+    # 2. keep_output_native MUST be True in eval
+    # ---------------------------------------------------------
+    data_cfg = cfg.get("data", {})
+    kon = data_cfg.get("keep_output_native", None)
+    if not kon:
+        raise ValueError(
+            "For phase='eval', data.keep_output_native must be True "
+            "(native outputs are required for metrics and trace saving)."
+        )
+
+    # ---------------------------------------------------------
+    # 3. No training-related fields required
+    #    We deliberately DO NOT require:
+    #       - train.*
+    #       - model_init.load_parts
+    #       - training stages
+    #       - optimizer/scheduler
+    # ---------------------------------------------------------
 
     return None

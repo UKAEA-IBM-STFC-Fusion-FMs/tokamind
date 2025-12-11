@@ -22,7 +22,7 @@ The train pipeline is expected to provide:
       Encoded labels in the same coeff space. The embedding transforms are
       responsible for producing these; we do *not* re-encode in the loss.
 
-  • outputs_mask: {output_key -> BoolTensor(B,)}
+  • output_mask: {output_key -> BoolTensor(B,)}
       Per-output presence mask:
         - True  → this sample carries a supervised label for that output
                   (and it was not dropped by collate),
@@ -62,7 +62,7 @@ collate-side computation).
 def compute_loss_pred_space(
     preds: Mapping[Hashable, Tensor],
     y_true: Mapping[Hashable, Tensor],
-    outputs_mask: Mapping[Hashable, Tensor],
+    output_mask: Mapping[Hashable, Tensor],
     output_weights: Optional[Mapping[Hashable, float]] = None,
 ) -> Tuple[Tensor, Dict[Hashable, float]]:
     """
@@ -77,7 +77,7 @@ def compute_loss_pred_space(
         Mapping from output_key -> label tensor of shape (B, K), already
         in the same coeff/prediction space as preds.
 
-    outputs_mask:
+    output_mask:
         Mapping from output_key -> BoolTensor(B,), True where that output
         is supervised (present and not dropped) for that sample.
 
@@ -114,11 +114,11 @@ def compute_loss_pred_space(
     logs: Dict[Hashable, float] = {}
 
     for out_key, y_pred in preds.items():
-        if out_key not in y_true or out_key not in outputs_mask:
+        if out_key not in y_true or out_key not in output_mask:
             continue
 
         y_t = y_true[out_key]
-        mask = outputs_mask[out_key]
+        mask = output_mask[out_key]
 
         if y_pred.shape != y_t.shape:
             raise RuntimeError(
@@ -128,7 +128,7 @@ def compute_loss_pred_space(
 
         if mask.dtype != torch.bool:
             raise RuntimeError(
-                f"[{out_key!r}] outputs_mask must be bool tensor, got {mask.dtype}."
+                f"[{out_key!r}] output_mask must be bool tensor, got {mask.dtype}."
             )
 
         if not bool(mask.any()):

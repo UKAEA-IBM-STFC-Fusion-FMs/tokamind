@@ -53,14 +53,14 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
       - "padding_mask"   : BoolTensor (B, L)
       - "input_mask",
         "actuator_mask"  : BoolTensor (B, L)
-      - "outputs_emb"    : Dict[int, Tensor]        # (B, K) per output
-      - "outputs_mask"   : Dict[int, BoolTensor(B,)]
+      - "output_emb"    : Dict[int, Tensor]        # (B, K) per output
+      - "output_mask"   : Dict[int, BoolTensor(B,)]
 
       - optional:
         "output_native"  : Dict[int, Tensor]
 
     For backward-compatibility it also accepts:
-      - "outputs_emb"    : Dict[int, List[Tensor]]
+      - "output_emb"    : Dict[int, List[Tensor]]
                            and converts each list → stacked Tensor(B, K).
 
     Non-tensor entries (e.g. "signal_name") are left untouched.
@@ -97,10 +97,10 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
         batch["emb"] = emb
 
     # Outputs: coeff-space embeddings
-    outputs_emb = batch.get("outputs_emb", None)
-    if isinstance(outputs_emb, dict):
+    output_emb = batch.get("output_emb", None)
+    if isinstance(output_emb, dict):
         new_oe: Dict[Hashable, Tensor] = {}
-        for k, v in outputs_emb.items():
+        for k, v in output_emb.items():
             if isinstance(v, Tensor):
                 # Already dense (B, K)
                 new_oe[k] = _to(v)
@@ -116,16 +116,16 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
                 new_oe[k] = _to(stacked)
             else:
                 raise TypeError(
-                    f"outputs_emb[{k!r}] must be Tensor or list[Tensor], got {type(v)}"
+                    f"output_emb[{k!r}] must be Tensor or list[Tensor], got {type(v)}"
                 )
-        batch["outputs_emb"] = new_oe
+        batch["output_emb"] = new_oe
 
-    # Outputs: masks
-    outputs_mask = batch.get("outputs_mask", None)
-    if isinstance(outputs_mask, dict):
-        batch["outputs_mask"] = {k: _to(v) for k, v in outputs_mask.items()}
+    # Output: masks
+    output_mask = batch.get("output_mask", None)
+    if isinstance(output_mask, dict):
+        batch["output_mask"] = {k: _to(v) for k, v in output_mask.items()}
 
-    # Optional: native outputs
+    # Optional: native output
     output_native = batch.get("output_native", None)
     if isinstance(output_native, dict):
         batch["output_native"] = {k: _to(v) for k, v in output_native.items()}
@@ -138,25 +138,25 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
 # ======================================================================
 
 
-def active_outputs_from_mask(outputs_mask: Mapping[Hashable, Tensor]) -> set[Hashable]:
+def active_outputs_from_mask(output_mask: Mapping[Hashable, Tensor]) -> set[Hashable]:
     """
     Determine which output keys have at least one supervised sample in
     this batch. These keys drive the automatic per-output LR toggling.
 
     Parameters
     ----------
-    outputs_mask : dict
+    output_mask : dict
         Mapping from output_key -> BoolTensor(B,).
 
     Returns
     -------
     set
-        A set of output keys with outputs_mask[k].any() == True.
+        A set of output keys with output_mask[k].any() == True.
     """
     active = set()
-    for key, mask in outputs_mask.items():
+    for key, mask in output_mask.items():
         if mask.dtype != torch.bool:
-            raise RuntimeError(f"outputs_mask[{key!r}] must be a bool tensor.")
+            raise RuntimeError(f"output_mask[{key!r}] must be a bool tensor.")
         if bool(mask.any()):
             active.add(key)
     return active
@@ -326,11 +326,11 @@ def run_one_epoch(
         batch = move_batch_to_device(batch, device)
         t1 = time.perf_counter()
 
-        outputs_mask = batch["outputs_mask"]
+        output_mask = batch["output_mask"]
 
         # Per-batch automatic LR enabling/disabling (train only)
         if train:
-            active = active_outputs_from_mask(outputs_mask)
+            active = active_outputs_from_mask(output_mask)
             toggle_param_groups(
                 optimizer,
                 active_outputs=active,
@@ -344,8 +344,8 @@ def run_one_epoch(
 
             loss_t, _ = compute_loss_pred_space(
                 preds=preds,
-                y_true=batch["outputs_emb"],
-                outputs_mask=outputs_mask,
+                y_true=batch["output_emb"],
+                output_mask=output_mask,
                 output_weights=output_weights,
             )
 

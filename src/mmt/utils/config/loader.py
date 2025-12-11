@@ -18,29 +18,27 @@ Configuration loading utilities for the Multi-Modal Transformer project.
 This module loads and merges experiment configuration files in a flexible,
 reproducible, and open-source-friendly way.
 
-Each experiment is defined by three YAML files stored inside the same
-directory:
+An experiment is defined by three YAML files located in the same directory:
 
-    • experiment_base.yaml          – global experiment structure
-    • embeddings_default.yaml       – embedding configuration
-    • <phase>_default.yaml          – phase-specific config (finetune/eval/pretrain)
+    • experiment_base.yaml        – global experiment structure
+    • embeddings_default.yaml     – embedding configuration
+    • <phase>_default.yaml        – phase-specific config (pretrain / finetune / eval)
 
-Given a *phase config path*, the loader:
+Given a *phase config path*, the loader performs:
 
-  1. Resolves paths relative to the repository root.
-  2. Loads the phase config YAML (e.g. finetune_default.yaml).
-  3. Loads experiment_base.yaml and the embedding config referenced by the phase.
-  4. Deep-merges dictionaries in the order:
+  1. Resolve all config file paths relative to the repository root.
+  2. Load the phase config (e.g., finetune_default.yaml).
+  3. Load experiment_base.yaml and the embedding configuration referenced by the phase.
+  4. Deep-merge dictionaries in the order:
          experiment_base ← embeddings ← phase_config
-  5. Resolves the FAIRMAST baseline config inside the installed baseline package.
-     (Uses the first path component of `baseline_config` as the package name.)
-  6. Creates a run directory (output_root + cache_root) and stores merged config.
-  7. Returns an ExperimentConfig object providing dynamic attribute access
-     to all merged YAML fields (cfg.preprocess, cfg.model, cfg.collate, etc.).
+  5. Resolve the FAIRMAST baseline_config path inside the installed baseline package.
+  6. Resolve model_init.model_dir to an absolute path when present.
+  7. Create an output run directory (<repo_root>/runs/<run_id>) and save config_merged.yaml.
+  8. Return an ExperimentConfig object providing dynamic attribute access
+     (e.g., cfg.model, cfg.preprocess, cfg.loader, …).
 
-This preserves the complete functionality expected by the FAIRMAST baseline
-bridge while allowing new configuration fields to be added without modifying
-the loader.
+The loader preserves full compatibility with the FAIRMAST baseline pipeline while
+remaining simple, extensible, and suitable for open-source use.
 """
 
 
@@ -116,6 +114,62 @@ def _resolve_baseline_config(baseline_config_str: str) -> Path:
     pkg_root_path = cast(Path, cast(object, pkg_root))
 
     return (Path(pkg_root_path) / rel_inside_pkg).resolve()
+
+
+def _compute_paths(merged: Dict[str, Any]) -> Dict[str, str]:
+    repo_root = get_repo_root()
+    global_runs_root = repo_root / "runs"
+
+    phase = merged.get("phase")
+    if phase is None:
+        raise ValueError("Config must define phase (pretrain/finetune/eval).")
+
+    task = merged.get("task", "unknown_task")
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # ----------------------------------------------------------
+    # TRAINING PHASE: pretrain or finetune
+    # ----------------------------------------------------------
+    if phase in ("pretrain", "finetune"):
+        run_id = merged.get("run_id") or f"{task}__{phase}__{timestamp}"
+        run_dir = global_runs_root / run_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+
+        return {
+            "repo_root": str(repo_root),
+            "runs_root": str(global_runs_root),
+            "run_dir": str(run_dir),
+        }
+
+    # ----------------------------------------------------------
+    # EVALUATION PHASE
+    # ----------------------------------------------------------
+    if phase == "eval":
+        init_cfg = merged.get("model_init", {})
+        model_dir = init_cfg.get("model_dir")
+        if model_dir is None:
+            raise ValueError(
+                "Eval phase requires model_init.model_dir pointing to a training run."
+            )
+
+        # Resolve path (absolute)
+        model_dir = Path(_resolve_from_repo_root(model_dir))
+        if not model_dir.exists():
+            raise FileNotFoundError(f"Training run directory not found: {model_dir}")
+
+        eval_id = merged.get("eval_id") or f"eval__{timestamp}"
+
+        eval_dir = model_dir / eval_id
+        eval_dir.mkdir(parents=True, exist_ok=True)
+
+        return {
+            "repo_root": str(repo_root),
+            "runs_root": str(model_dir),  # parent is training run
+            "run_dir": str(eval_dir),  # eval run directory
+            "eval_dir": str(eval_dir),
+        }
+
+    raise ValueError(f"Unsupported phase: {phase}")
 
 
 # ---------------------------------------------------------------------------
@@ -195,25 +249,7 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     merged = _deep_merge(merged, emb_cfg)
     merged = _deep_merge(merged, phase_cfg)
 
-    # --- Compute run paths ---
-    repo_root = get_repo_root()
-    runs_root = repo_root / "runs"
-    run_id = merged.get("run_id", None)
-
-    if run_id is None:
-        task = merged.get("task", "unknown_task")
-        phase = merged.get("phase", "unknown_phase")
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        run_id = f"{task}__{phase}__{timestamp}"
-
-    run_dir = runs_root / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    merged["paths"] = {
-        "repo_root": str(repo_root),
-        "runs_root": str(runs_root),
-        "run_dir": str(run_dir),
-    }
+    merged["paths"] = _compute_paths(merged)
 
     # --- Resolve baseline config exactly as expected by baseline bridge ---
     if "baseline_config" in merged:
@@ -221,7 +257,14 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
             _resolve_baseline_config(merged["baseline_config"])
         )
 
+    # --- Resolve init.model_dir  ---
+    if "model_init" in merged and isinstance(merged["model_init"], dict):
+        model_dir = merged["model_init"].get("model_dir", None)
+        if model_dir is not None:
+            merged["model_init"]["model_dir"] = str(_resolve_from_repo_root(model_dir))
+
     # --- Save merged config in run directory ---
+    run_dir = Path(merged["paths"]["run_dir"])
     merged_yaml_out = run_dir / "config_merged.yaml"
     with merged_yaml_out.open("w") as f:
         yaml.safe_dump(merged, f, sort_keys=False)

@@ -81,9 +81,9 @@ class BuildTokensTransform:
         window["role"]         : np.ndarray(L,)
         window["signal_name"]  : np.ndarray(L,)
 
-        window["outputs_emb"]
-        window["outputs_shapes"]
-        window["outputs_names"]
+        window["output_emb"]
+        window["output_shapes"]
+        window["output_names"]
 
     Deterministic ordering rules
     ----------------------------
@@ -210,22 +210,22 @@ class BuildTokensTransform:
         pos = self._compute_pos_ids(t_cut, t_list)
 
         # ------------------------------------------------------------------
-        # 4) OUTPUTS
+        # 4) output
         # ------------------------------------------------------------------
-        outputs_emb = {}
-        outputs_shapes = {}
-        outputs_names = {}
+        output_emb = {}
+        output_shapes = {}
+        output_names = {}
 
         embedded_output = window.get("embedded_output") or {}
         output_shapes_all = window.get("embedded_output_shapes") or {}
 
         for sig_id, emb in embedded_output.items():
             spec = self.signal_specs.get_by_id(sig_id)
-            outputs_emb[sig_id] = emb
-            outputs_names[sig_id] = spec.name
+            output_emb[sig_id] = emb
+            output_names[sig_id] = spec.name
 
             if sig_id in output_shapes_all:
-                outputs_shapes[sig_id] = output_shapes_all[sig_id]
+                output_shapes[sig_id] = output_shapes_all[sig_id]
             else:
                 raise KeyError(f"Missing output shape for signal_id={sig_id}")
 
@@ -239,9 +239,9 @@ class BuildTokensTransform:
         window["mod"] = np.asarray(mod_list, dtype=np.int16)
         window["role"] = np.asarray(role_list, dtype=np.int8)
 
-        window["outputs_emb"] = outputs_emb
-        window["outputs_shapes"] = outputs_shapes
-        window["outputs_names"] = outputs_names
+        window["output_emb"] = output_emb
+        window["output_shapes"] = output_shapes
+        window["output_names"] = output_names
 
         logger.debug(
             "win %s (shot %s) | tokens=%d (context=%d, act=%d) | pos=[%s..%s]",

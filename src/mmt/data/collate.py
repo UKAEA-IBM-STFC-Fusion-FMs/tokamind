@@ -52,9 +52,9 @@ class MMTCollate:
             "role": np.ndarray(L,),                 # role IDs
             "signal_name": np.ndarray(L,),          # human-friendly names
 
-            "outputs_emb": {signal_id: np.ndarray(D_out), ...},
-            "outputs_shapes": {signal_id: shape, ...},
-            "outputs_names": {signal_id: name, ...},
+            "output_emb": {signal_id: np.ndarray(D_out), ...},
+            "output_shapes": {signal_id: shape, ...},
+            "output_names": {signal_id: name, ...},
 
             # Optionally (e.g. eval, if enabled in transforms):
             # "output": {... native output payloads ...}
@@ -90,11 +90,11 @@ class MMTCollate:
 
     Outputs
     -------
-    "outputs_emb"    : Dict[int, torch.Tensor]
+    "output_emb"    : Dict[int, torch.Tensor]
                        For each output `signal_id`:
                          tensor shape = (B, D_out)
 
-    "outputs_mask"   : Dict[int, BoolTensor] with shape (B,)
+    "output_mask"   : Dict[int, BoolTensor] with shape (B,)
                        Per-output presence/dropout mask.
 
     If `cfg_collate["keep_output_native"] == True`, also:
@@ -106,7 +106,7 @@ class MMTCollate:
     -------------
     `cfg_collate` is expected to follow the structure in `finetune_default.yaml`:
 
-    .. code-block:: yaml
+    .code-block:: yaml
 
         collate:
           # INPUT DROPOUT
@@ -125,7 +125,7 @@ class MMTCollate:
           p_drop_inputs_chunks: 0.08
           p_drop_actuators_chunks: 0.0
 
-          # EVAL-ONLY: include native outputs (Y_native)
+          # EVAL-ONLY: include native output (Y_native)
           # keep_output_native: false
     """
 
@@ -196,14 +196,14 @@ class MMTCollate:
             role_lists.append(w["role"])
             name_lists.append(w["signal_name"])
 
-            out_dicts.append(w["outputs_emb"])
-            out_shapes_dicts.append(w["outputs_shapes"])
-            outputs_names = w.get("outputs_names", {})
-            out_names_dicts.append(outputs_names)
+            out_dicts.append(w["output_emb"])
+            out_shapes_dicts.append(w["output_shapes"])
+            output_names = w.get("output_names", {})
+            out_names_dicts.append(output_names)
 
-            all_target_ids.update(w["outputs_emb"].keys())
+            all_target_ids.update(w["output_emb"].keys())
 
-            for sid, sname in outputs_names.items():
+            for sid, sname in output_names.items():
                 if sid not in id_to_output_name:
                     id_to_output_name[sid] = sname
                 elif id_to_output_name[sid] != sname:
@@ -316,8 +316,8 @@ class MMTCollate:
         # --------------------------------------------------------------- #
         p_drop_outputs = self.cfg.get("p_drop_outputs", 0.0)
 
-        outputs_emb_batch: Dict[int, List[np.ndarray]] = {}
-        outputs_mask_batch_np: Dict[int, np.ndarray] = {}
+        output_emb_batch: Dict[int, List[np.ndarray]] = {}
+        output_mask_batch_np: Dict[int, np.ndarray] = {}
 
         for sig_id in sorted(all_target_ids):
             out_name = id_to_output_name[sig_id]
@@ -356,11 +356,11 @@ class MMTCollate:
                 if random.random() < p:
                     mask[i] = 0
 
-            outputs_emb_batch[sig_id] = emb_list
-            outputs_mask_batch_np[sig_id] = mask
+            output_emb_batch[sig_id] = emb_list
+            output_mask_batch_np[sig_id] = mask
 
         # --------------------------------------------------------------- #
-        # 8. Optional: native outputs (Y_native) as NumPy
+        # 8. Optional: native outputs
         # --------------------------------------------------------------- #
         output_native_batch_np: Dict[int, np.ndarray] = {}
         if self.keep_output_native:
@@ -427,17 +427,17 @@ class MMTCollate:
                     emb_t[i][t] = torch.from_numpy(arr)
 
         # Outputs: embeddings (dense tensors of shape (B, D))
-        outputs_emb_t: Dict[int, torch.Tensor] = {}
-        outputs_mask_t: Dict[int, torch.Tensor] = {}
+        output_emb_t: Dict[int, torch.Tensor] = {}
+        output_mask_t: Dict[int, torch.Tensor] = {}
 
-        for sig_id, emb_list in outputs_emb_batch.items():
+        for sig_id, emb_list in output_emb_batch.items():
             emb_arr = np.stack(emb_list, axis=0)  # (B, D)
-            outputs_emb_t[sig_id] = torch.from_numpy(emb_arr)
-            outputs_mask_t[sig_id] = torch.from_numpy(
-                outputs_mask_batch_np[sig_id].astype(bool)
+            output_emb_t[sig_id] = torch.from_numpy(emb_arr)
+            output_mask_t[sig_id] = torch.from_numpy(
+                output_mask_batch_np[sig_id].astype(bool)
             )
 
-        # Outputs: native (optional)
+        # native outputs (optional)
         output_native_t: Dict[int, torch.Tensor] = {}
         if self.keep_output_native:
             for sig_id, arr in output_native_batch_np.items():
@@ -456,11 +456,18 @@ class MMTCollate:
             "padding_mask": padding_mask_t,
             "input_mask": input_mask_t,
             "actuator_mask": actuator_mask_t,
-            "outputs_emb": outputs_emb_t,
-            "outputs_mask": outputs_mask_t,
+            "output_emb": output_emb_t,
+            "output_mask": output_mask_t,
         }
 
         if self.keep_output_native:
             batch_out["output_native"] = output_native_t
+
+        # Adding shot id and window index to batch
+        first = flat_windows[0]
+        if "shot_id" in first:
+            batch_out["shot_id"] = [w["shot_id"] for w in flat_windows]
+        if "window_index" in first:
+            batch_out["window_index"] = [w["window_index"] for w in flat_windows]
 
         return batch_out

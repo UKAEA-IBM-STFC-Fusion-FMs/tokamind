@@ -89,9 +89,9 @@ class WindowCachedDataset(Dataset):
             "mod": np.ndarray(L,),          # modality IDs
             "role": np.ndarray(L,),         # role IDs
             "signal_name": np.ndarray(L,),  # optional string IDs
-            "outputs_emb": {signal_id: np.ndarray(D), ...},
-            "outputs_shapes": {signal_id: shape, ...},
-            "outputs_names": {signal_id: name, ...},
+            "output_emb": {signal_id: np.ndarray(D), ...},
+            "output_shapes": {signal_id: shape, ...},
+            "output_names": {signal_id: name, ...},
             # optionally (e.g. eval): "output_native" etc.
             ...
         }

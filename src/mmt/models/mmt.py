@@ -180,7 +180,7 @@ class MultiModalTransformer(nn.Module):
          {
              "h_cls"          : Tensor (B, d_model),
              "modality_latent": Dict[str, Tensor(B, G_mod)],
-             "pred"           : Dict[int, Tensor(B, K_t)],
+             "pred"           : Dict[signal_id, Tensor(B, K_t)],
          }
 
      • `h_cls` is the pooled representation (CLS token).
@@ -189,6 +189,28 @@ class MultiModalTransformer(nn.Module):
 
      Downstream train code computes losses directly from `pred`
      (MSE, masked MSE, task-specific losses, etc.).
+
+    Why preds --> signal_id?
+    ----------------
+    Internally, the model uses integer signal IDs for fast routing, indexing,
+    masking, and adapter selection.  These IDs are stable within a given task
+    and ensure that the transformer does not depend on user-facing string names.
+
+    Why not return names here?
+    ---------------------------
+    Higher-level components (training loop, evaluation, trace saving, etc.)
+    convert the model outputs from:
+
+        signal_id → canonical output name
+
+    using the SignalSpecRegistry.  This separation ensures:
+
+        • the model stays efficient and ID-keyed internally,
+        • user-facing APIs (metrics, CSVs, adapters, configs) remain name-keyed.
+
+    Downstream training code computes all losses directly from the returned
+    dict[int → Tensor], and evaluation performs ID→name conversion before
+    decoding and destandardizing outputs.
     """
 
     def __init__(

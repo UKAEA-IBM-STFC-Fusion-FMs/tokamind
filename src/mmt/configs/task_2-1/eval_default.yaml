@@ -1,26 +1,18 @@
-# mmt/configs/task2_1/eval_default.yaml
-#
-# Evaluation-only config for task 2-1.
-# Uses the same experiment + embedding definitions as fine-tuning,
-# but no train hyperparameters.
-
-# PLACEHOLDER
-
 experiment_base: "mmt/configs/task_2-1/experiment_base.yaml"
 embedding_config: "mmt/configs/task_2-1/embeddings_default.yaml"
 phase: "eval"
+eval_id:
 
 # Required: which trained run to evaluate
-init:
-  model_dir: "runs/task_2-1/finetune/2025-12-07_10-42-03_seed-1234"
+model_init:
+  model_dir: "runs/test_trained/"
 
 
 data:
   cache:
     enable: false
     num_workers: 10
-  keep_output_native: false
-
+  keep_output_native: true
 
 
 preprocess:
@@ -32,10 +24,21 @@ preprocess:
 
 
 loader:
-  batch_size: 24
-  num_workers: 4
-  shuffle: true
+  batch_size: 1024
+  num_workers: 1
   drop_last: false
   streaming:
     batches_per_epoch: null   # ignored in evaluation
 
+
+eval:
+  save_dir: null
+
+  metrics:
+    enable: true
+
+  traces:
+    enable: false
+    n_max: 10
+    signals: ["summary-ip"]           # null → save all targets
+    times_indexes: [0, 1]                  # null → save full horizon
