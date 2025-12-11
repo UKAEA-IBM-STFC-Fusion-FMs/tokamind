@@ -381,6 +381,9 @@ class MultiModalTransformer(nn.Module):
     # ------------------------------------------------------------------
     # Checkpoint I/O — three explicit parts: backbone, modality_heads, output_adapters
     # ------------------------------------------------------------------
+    def get_token_encoder_state_dict(self) -> dict:
+        return self.tokens.state_dict()
+
     def get_backbone_state_dict(self) -> dict:
         return self.backbone.state_dict()
 
@@ -390,6 +393,11 @@ class MultiModalTransformer(nn.Module):
 
     def get_modality_heads_state_dict(self) -> dict:
         return self.modality_heads.state_dict()
+
+    def load_token_encoder_state_dict(self, state: dict, strict: bool = True):
+        # Same API pattern as backbone/heads/adapters:
+        missing, unexpected = self.tokens.load_state_dict(state, strict=strict)
+        return missing, unexpected
 
     def load_modality_heads_state_dict(self, state: dict, strict: bool = True):
         missing, unexpected = self.modality_heads.load_state_dict(state, strict=strict)
@@ -401,30 +409,3 @@ class MultiModalTransformer(nn.Module):
     def load_output_adapters_state_dict(self, state: dict, strict: bool = True):
         missing, unexpected = self.output_adapters.load_state_dict(state, strict=strict)
         return missing, unexpected
-
-    # ------------------------------------------------------------------
-    # Freezing helpers — explicit and independent
-    # ------------------------------------------------------------------
-    def freeze_backbone(self) -> None:
-        for p in self.backbone.parameters():
-            p.requires_grad = False
-
-    def unfreeze_backbone(self) -> None:
-        for p in self.backbone.parameters():
-            p.requires_grad = True
-
-    def freeze_modality_heads(self) -> None:
-        for p in self.modality_heads.parameters():
-            p.requires_grad = False
-
-    def unfreeze_modality_heads(self) -> None:
-        for p in self.modality_heads.parameters():
-            p.requires_grad = True
-
-    def freeze_output_adapters(self) -> None:
-        for p in self.output_adapters.parameters():
-            p.requires_grad = False
-
-    def unfreeze_output_adapters(self) -> None:
-        for p in self.output_adapters.parameters():
-            p.requires_grad = True

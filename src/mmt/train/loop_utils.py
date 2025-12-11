@@ -188,7 +188,7 @@ def log_train_setup(
     train_cfg: Dict[str, Any],
 ) -> None:
     """
-    Compact logging of device, AMP, parameters, and stage definitions.
+    Compact logging of device, AMP, parameters, loss weights, and stage definitions.
     """
     n_params = sum(p.numel() for p in model.parameters())
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
@@ -198,6 +198,15 @@ def log_train_setup(
     logger.info("AMP enabled  : %s (%s)", amp_enabled, amp_dtype)
     logger.info("Params       : total=%d, trainable=%d", n_params, n_trainable)
     logger.info("Train loader : %d batches/epoch", train_loader_len)
+
+    # --- Loss weights (do not change across stages) ---
+    loss_cfg = train_cfg.get("loss", {})
+    output_weights = loss_cfg.get("output_weights")
+    if isinstance(output_weights, dict) and output_weights:
+        logger.info("Loss weights : %r", output_weights)
+    else:
+        logger.info("Loss weights : (uniform across outputs)")
+
     logger.info("Stages:")
     for s in stages:
         logger.info(
@@ -211,7 +220,6 @@ def log_train_setup(
                 "acc": s["scheduler"]["grad_accum_steps"],
             },
         )
-
     pat = train_cfg["early_stop"]["patience"]
     dlt = train_cfg["early_stop"]["delta"]
     logger.info("Early stopping: patience=%d, delta=%.4f", pat, dlt)
@@ -298,6 +306,7 @@ def run_one_epoch(
     if train and optimizer is None:
         raise ValueError("optimizer must be provided when train=True.")
 
+    t0_test = time.perf_counter()
     model.train(train)
     if not train:
         torch.set_grad_enabled(False)
@@ -307,11 +316,17 @@ def run_one_epoch(
 
     running_loss = 0.0
     n_batches = 0
+    t1_test = time.perf_counter()
+    logger.info(f"time_optimizer={t1_test - t0_test:.4f}s  ")
 
     for batch_idx, batch in enumerate(loader):
         # Early stop for streaming mode
         if max_batches is not None and batch_idx >= max_batches:
             break
+        t2_test = time.perf_counter()
+        logger.info(
+            f"time between optimizer and move to batch={t2_test - t1_test:.4f}s  "
+        )
 
         t0 = time.perf_counter()
         batch = move_batch_to_device(batch, device)
@@ -347,6 +362,7 @@ def run_one_epoch(
         t2 = time.perf_counter()
 
         # ----------------------- BACKWARD ----------------------
+        t3, t4 = 0, 0
         if train:
             if scaler is not None and scaler.is_enabled():
                 scaler.scale(loss_for_backprop).backward()
@@ -374,16 +390,23 @@ def run_one_epoch(
 
             t4 = time.perf_counter()
 
+        running_loss += float(loss_t.detach().cpu())
+        n_batches += 1
+
+        if train:
             logger.info(
-                f"[TIMING] batch {batch_idx}: "
+                f"[TIMING TRAIN] batch {batch_idx}: "
                 f"move={t1 - t0:.4f}s  "
                 f"forward={t2 - t1:.4f}s  "
                 f"backward={t3 - t2:.4f}s  "
                 f"opt={t4 - t3:.4f}s"
             )
-
-        running_loss += float(loss_t.detach().cpu())
-        n_batches += 1
+        else:
+            logger.info(
+                f"[TIMING VAL] batch {batch_idx}: "
+                f"move={t1 - t0:.4f}s  "
+                f"forward={t2 - t1:.4f}s  "
+            )
 
     avg_loss = running_loss / max(1, n_batches)
 

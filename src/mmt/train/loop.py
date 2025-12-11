@@ -107,7 +107,7 @@ def train_finetune(
         Directory used for checkpoints and logs.
     train_cfg : dict
         The validated train configuration.
-    train_cfg : dict
+    loader_cfg : dict
         The validated loader configuration.
 
     Returns
@@ -229,10 +229,12 @@ def train_finetune(
 
         grad_accum_steps = int(stage["scheduler"]["grad_accum_steps"])
 
+        lr_token_encoder = float(lr_cfg["token_encoder"])
         lr_backbone = float(lr_cfg["backbone"])
         lr_modality_heads = float(lr_cfg["modality_heads"])
         lr_output_adapters = float(lr_cfg["output_adapters"])
 
+        wd_token_encoder = float(wd_cfg["token_encoder"])
         wd_backbone = float(wd_cfg["backbone"])
         wd_modality_heads = float(wd_cfg["modality_heads"])
         wd_output_adapters = float(wd_cfg["output_adapters"])
@@ -245,6 +247,7 @@ def train_finetune(
         # ---- Stage freezing ----
         apply_stage_freeze_policy(
             model,
+            freeze_token_encoder=freeze_cfg["token_encoder"],  # NEW
             freeze_backbone=freeze_cfg["backbone"],
             freeze_modality_heads=freeze_cfg["modality_heads"],
             freeze_output_adapters=freeze_cfg["output_adapters"],
@@ -253,9 +256,11 @@ def train_finetune(
         # ---- New optimizer + scheduler per stage ----
         optimizer, scheduler = build_optimizer_and_scheduler(
             model,
+            lr_token_encoder=lr_token_encoder,
             lr_backbone=lr_backbone,
             lr_modality_heads=lr_modality_heads,
             lr_output_adapters=lr_output_adapters,
+            wd_token_encoder=wd_token_encoder,
             wd_backbone=wd_backbone,
             wd_modality_heads=wd_modality_heads,
             wd_output_adapters=wd_output_adapters,

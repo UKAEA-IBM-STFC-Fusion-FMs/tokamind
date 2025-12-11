@@ -1,7 +1,7 @@
 experiment_base: mmt/configs/task_2-1/experiment_base.yaml
 embedding_config: mmt/configs/task_2-1/embeddings_default.yaml
 phase: finetune
-run_id: test_finetune
+run_id: test
 
 collate:
   p_drop_inputs: 0.08
@@ -53,8 +53,9 @@ loader:
 #   modality_heads:  modality-level heads G_mod
 #   output_adapters: per-output adapters ψ
 model_init:
-  model_dir: "runs/test"          # e.g. "runs/run_id"
+  model_dir: null   # "runs/test"          # e.g. "runs/run_id"
   load_parts:
+    token_encoder: true
     backbone: true
     modality_heads: true
     output_adapters: true
@@ -73,8 +74,7 @@ train:
 
   loss:
     output_weights:
-      summary-ip: 1.2
-      pf_active-coil_current: 3
+#      summary-ip: 1.2
 
   optimizer:
     use_adamw: true
@@ -91,17 +91,19 @@ train:
 
       optimizer:
         lr:
-          backbone: 0  # 5e-4
+          token_encoder: 5e-4        # null: inherit from backbone
+          backbone: 5e-4  # 5e-4
           modality_heads: 2e-3
           output_adapters: 2e-3
         wd:
-          backbone: 0  # 0.05
+          token_encoder: 0.05        # null: inherit from backbone
+          backbone: 0.05  # 0.05
           modality_heads: 0.05
           output_adapters: 0.05
 
-      # model_dir is null, freeze must be all false
       freeze:
-        backbone: true
+        token_encoder: false
+        backbone: false
         modality_heads: false
         output_adapters: false
 
@@ -113,16 +115,19 @@ train:
 
       optimizer:
         lr:
+          token_encoder: 5e-4        # null: inherit from backbone
           backbone: 5e-5
           modality_heads: 1e-3
           output_adapters: 1e-3
         wd:
+          token_encoder: 0.05        # null: inherit from backbone
           backbone: 0.05
           modality_heads: 0.05
           output_adapters: 0.05
 
       # model_dir is null, freeze must be all false
       freeze:
+        token_encoder: false
         backbone: false
         modality_heads: false
         output_adapters: false
