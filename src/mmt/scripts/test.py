@@ -100,8 +100,8 @@ def main() -> None:
     cfg_collate = cfg_mmt.collate
     cfg_train = cfg_mmt.train
 
-    cache_tokens = cfg_data.get("cache_tokens", False)
-    num_workers_cache = cfg_data.get("num_workers_cache", 0)
+    enable_cache = cfg_data["cache"].get("enable", False)
+    num_workers_cache = cfg_data["cache"].get("num_workers", 0)
     keep_output_native = cfg_data.get("keep_output_native", False)
 
     cfg_backbone = cfg_model["backbone"]
@@ -211,7 +211,7 @@ def main() -> None:
             continue
 
         # Decide whether this split should be cached
-        use_cache_for_split = cache_tokens and split in ("train", "val")
+        use_cache_for_split = enable_cache and split in ("train", "val")
 
         if use_cache_for_split:
             logger = logging.getLogger("mmt.Cache")
@@ -298,7 +298,6 @@ def main() -> None:
         loader_cfg=cfg_loader,
     )
 
-    logger.info("[Train] Completed. Summary:")
     logger.info("%s", history)
 
     # # small debug printing

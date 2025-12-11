@@ -16,7 +16,11 @@ init:
 
 
 data:
-  keep_output_native: true
+  cache:
+    enable: false
+    num_workers: 10
+  keep_output_native: false
+
 
 
 preprocess:

@@ -209,20 +209,18 @@ def log_train_setup(
 
     logger.info("Stages:")
     for s in stages:
-        logger.info(
-            "  - %(name)s: epochs=%(epochs)s | freeze=%(freeze)r | lr=%(lr)r | wd=%(wd)r | grad_acc=%(acc)d",
-            {
-                "name": s["name"],
-                "epochs": s["epochs"],
-                "freeze": s["freeze"],
-                "lr": s["optimizer"]["lr"],
-                "wd": s["optimizer"]["wd"],
-                "acc": s["scheduler"]["grad_accum_steps"],
-            },
-        )
+        logger.info("  - %s", s["name"])
+        logger.info("      epochs      : %s", s["epochs"])
+        logger.info("      freeze      : %r", s["freeze"])
+        logger.info("      lr          : %r", s["optimizer"]["lr"])
+        logger.info("      wd          : %r", s["optimizer"]["wd"])
+        logger.info("      grad_acc    : %d", s["scheduler"]["grad_accum_steps"])
+
     pat = train_cfg["early_stop"]["patience"]
     dlt = train_cfg["early_stop"]["delta"]
-    logger.info("Early stopping: patience=%d, delta=%.4f", pat, dlt)
+    logger.info("Early stopping:")
+    logger.info("      patience    : %d", pat)
+    logger.info("      delta       : %.4f", dlt)
     logger.info("====================================")
 
 
@@ -306,7 +304,6 @@ def run_one_epoch(
     if train and optimizer is None:
         raise ValueError("optimizer must be provided when train=True.")
 
-    t0_test = time.perf_counter()
     model.train(train)
     if not train:
         torch.set_grad_enabled(False)
@@ -316,17 +313,14 @@ def run_one_epoch(
 
     running_loss = 0.0
     n_batches = 0
-    t1_test = time.perf_counter()
-    logger.info(f"time_optimizer={t1_test - t0_test:.4f}s  ")
 
+    t_before_next = time.perf_counter()
     for batch_idx, batch in enumerate(loader):
+        t_after_next = time.perf_counter()
+
         # Early stop for streaming mode
         if max_batches is not None and batch_idx >= max_batches:
             break
-        t2_test = time.perf_counter()
-        logger.info(
-            f"time between optimizer and move to batch={t2_test - t1_test:.4f}s  "
-        )
 
         t0 = time.perf_counter()
         batch = move_batch_to_device(batch, device)
@@ -396,6 +390,7 @@ def run_one_epoch(
         if train:
             logger.info(
                 f"[TIMING TRAIN] batch {batch_idx}: "
+                f"time dataloader={t_after_next - t_before_next:.4f}s  "
                 f"move={t1 - t0:.4f}s  "
                 f"forward={t2 - t1:.4f}s  "
                 f"backward={t3 - t2:.4f}s  "
@@ -404,6 +399,7 @@ def run_one_epoch(
         else:
             logger.info(
                 f"[TIMING VAL] batch {batch_idx}: "
+                f"time dataloader={t_after_next - t_before_next:.4f}s  "
                 f"move={t1 - t0:.4f}s  "
                 f"forward={t2 - t1:.4f}s  "
             )

@@ -15,8 +15,9 @@ collate:
   p_drop_actuators_chunks: 0.0
 
 data:
-  cache_tokens: true
-  num_workers_cache: 2
+  cache:
+    enable: true
+    num_workers: 10
   keep_output_native: false
 
 preprocess:
@@ -28,11 +29,11 @@ preprocess:
 
 loader:
   batch_size: 100
-  num_workers: 10
+  num_workers: 1
   shuffle: true
   drop_last: false
   streaming:
-    batches_per_epoch: 10  # REQUIRED when train with cache_tokens: false, document in config guide
+    batches_per_epoch: 10  # REQUIRED when train with cache: enable: false, document in config guide
 
 # How to initialise the model's weights for this run.
 #
