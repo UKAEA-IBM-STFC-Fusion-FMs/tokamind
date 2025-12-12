@@ -17,7 +17,7 @@ collate:
 data:
   cache:
     enable: true
-    num_workers: 10
+    num_workers: 2
   keep_output_native: false
 
 preprocess:
@@ -54,7 +54,7 @@ loader:
 #   modality_heads:  modality-level heads G_mod
 #   output_adapters: per-output adapters ψ
 model_init:
-  model_dir: null   # "runs/test"          # e.g. "runs/run_id"
+  model_dir: "runs/test_trained"           # e.g. "runs/run_id"
   load_parts:
     token_encoder: true
     backbone: true

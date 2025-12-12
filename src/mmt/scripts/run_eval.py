@@ -11,36 +11,39 @@ from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
 )
 
-from mmt.utils.config.baseline_bridge import build_baseline_task_config
-from mmt.utils.config.loader import load_experiment_config
-from mmt.utils.config.validator import validate_eval_config
-from mmt.utils.seed import set_seed
-from mmt.utils.logger import setup_logging
+from mmt.utils.config import (
+    build_baseline_task_config,
+    load_experiment_config,
+    validate_eval_config,
+)
+from mmt.utils import (
+    set_seed,
+    setup_logging,
+    initialize_mmt_datasets,
+    initialize_mmt_dataloaders,
+)
 
-from mmt.data.signal_spec import (
+from mmt.data import (
     build_signal_role_modality_map,
     build_signal_specs,
+    build_codecs,
+    ChunkWindowsTransform,
+    SelectValidWindowsTransform,
+    TrimChunksTransform,
+    EmbedChunksTransform,
+    BuildTokensTransform,
+    ComposeTransforms,
+    WindowStreamedDataset,
+    WindowCachedDataset,
+    MMTCollate,
 )
-from mmt.data.embeddings.codec_utils import build_codecs
 
-from mmt.data.transforms.chunk_windows import ChunkWindowsTransform
-from mmt.data.transforms.select_valid_windows import SelectValidWindowsTransform
-from mmt.data.transforms.trim_chunks import TrimChunksTransform
-from mmt.data.transforms.embed_chunks import EmbedChunksTransform
-from mmt.data.transforms.build_tokens import BuildTokensTransform
-from mmt.data.transforms.compose import ComposeTransforms
-
-from mmt.data.datasets.window_streamed_dataset import WindowStreamedDataset
-from mmt.data.datasets.window_cached_dataset import WindowCachedDataset
-
-from mmt.utils.mmt_init_data import initialize_mmt_dataloaders, initialize_mmt_datasets
-from mmt.data.collate import MMTCollate
-from mmt.models.mmt import MultiModalTransformer
-
-from mmt.train.evaluation import evaluate_metrics, save_traces_for_subset
+from mmt.models import MultiModalTransformer
+from mmt.eval import evaluate_metrics, save_traces_for_subset
 from mmt.train.checkpoint_io import load_best_weights
 
 import logging
+
 
 DEBUG_MODE = False
 
@@ -227,8 +230,20 @@ def main() -> None:
     # ------------------------------------------------------------------
     # DataLoader
     # ------------------------------------------------------------------
+    cfg_drop = cfg_eval.get("drop", {}) or {}
 
-    collate_fn = MMTCollate(cfg_collate={"keep_output_native": keep_output_native})
+    drop_inputs = cfg_drop.get("inputs", []) or []
+    drop_actuators = cfg_drop.get("actuators", []) or []
+    drop_outputs = cfg_drop.get("outputs", []) or []
+
+    collate_cfg = {
+        "keep_output_native": keep_output_native,  # whatever you already use
+        # force-drop selected signals
+        "p_drop_inputs_overrides": {k: 1.0 for k in drop_inputs},
+        "p_drop_actuators_overrides": {k: 1.0 for k in drop_actuators},
+        "p_drop_outputs_overrides": {k: 1.0 for k in drop_outputs},
+    }
+    collate_fn = MMTCollate(cfg_collate=collate_cfg)
 
     eval_loader = initialize_mmt_dataloaders(
         datasets_for_loader,
@@ -264,10 +279,16 @@ def main() -> None:
     epoch_best, best_val, metadata = load_best_weights(
         run_dir=train_run_dir, model=model, map_location=device
     )
+    logger = logging.getLogger("mmt.Eval")
     logger.info(
         f"Loaded checkpoint from {train_run_dir} (epoch={epoch_best}, best_val={best_val})"
     )
-
+    logger.info(
+        "[Eval] Forced drops: inputs=%s actuators=%s outputs=%s",
+        drop_inputs,
+        drop_actuators,
+        drop_outputs,
+    )
     model.eval()
 
     # ------------------------------------------------------------------
@@ -297,7 +318,7 @@ def main() -> None:
 
     # Metrics evaluation (always full window-level metrics)
     if cfg_metrics.get("enable", True):
-        logger.info(f"[Eval] Computing metrics in: {run_dir}/metrics/")
+        logger.info(f"Computing metrics in: {run_dir}/metrics/")
         summary_metrics = evaluate_metrics(
             model=model,
             dataloader=eval_loader,
@@ -306,14 +327,14 @@ def main() -> None:
             codecs=output_codecs,
             id_to_name=id_to_name,
             run_dir=run_dir,  # function will create metrics/ inside it
+            debug=True,
         )
-        logger.info(f"[Eval] Summary metrics: {summary_metrics}")
+        logger.info(f"Summary metrics: {summary_metrics}")
 
     # Trace extraction (subset of shots)
     if cfg_traces.get("enable", False):
         logger.info(
-            f"[Eval] Saving traces (n_max={cfg_traces.get('n_max', 10)}) "
-            f"in: {run_dir}/traces/"
+            f"Saving traces (n_max={cfg_traces.get('n_max', 10)}) in: {run_dir}/traces/"
         )
         save_traces_for_subset(
             model=model,
@@ -326,7 +347,7 @@ def main() -> None:
             traces_cfg=cfg_traces,
         )
 
-    logger.info("[Eval] Done.")
+    logger.info("Done.")
 
 
 if __name__ == "__main__":

@@ -106,17 +106,27 @@ class TokenEncoder(nn.Module):
         self.proj_layers = nn.ModuleDict()
         self.proj_in_dim: Dict[str, int] = {}
 
+        # Only signals that actually become tokens need projection layers.
+        # In this architecture, outputs are NOT tokenized
+        # (they are predicted via output_adapters),
+        # so we intentionally skip role="output" here.
+        TOKEN_ROLES = {"input", "actuator"}
+
         for spec in signal_specs.specs:
+            if spec.role not in TOKEN_ROLES:
+                continue  # skip outputs (and any future non-token roles)
+
             key = spec.canonical_key
             in_dim = int(spec.embedding_dim)
             if in_dim <= 0:
                 continue
+
             if key in self.proj_layers:
                 # Same canonical key across roles is not expected; if you ever
                 # share projections manually, you can handle it here.
                 continue
-            layer = nn.Linear(in_dim, self.d_model)
-            self.proj_layers[key] = layer
+
+            self.proj_layers[key] = nn.Linear(in_dim, self.d_model)
             self.proj_in_dim[key] = in_dim
 
         # ------------------------------------------------------------------

@@ -1,7 +1,7 @@
 experiment_base: "mmt/configs/task_2-1/experiment_base.yaml"
 embedding_config: "mmt/configs/task_2-1/embeddings_default.yaml"
-phase: "eval"
-eval_id:
+phase: eval
+eval_id: eval_test
 
 # Required: which trained run to evaluate
 model_init:
@@ -10,7 +10,7 @@ model_init:
 
 data:
   cache:
-    enable: false
+    enable: true
     num_workers: 10
   keep_output_native: true
 
@@ -20,7 +20,7 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: null
+    window_stride_sec: 0.005
 
 
 loader:
@@ -32,13 +32,18 @@ loader:
 
 
 eval:
-  save_dir: null
+  # list of inputs/actuators/outputs you want to drop for evaluation
+  # null: evaluate the full model
+  inputs: [ "pf_active-coil_current" ]
+  drop:
+    actuators:
+    outputs: ["pf_active-solenoid_current"]
 
   metrics:
     enable: true
 
   traces:
-    enable: false
-    n_max: 10
-    signals: ["summary-ip"]           # null → save all targets
-    times_indexes: [0, 1]                  # null → save full horizon
+    enable: true
+    n_max: 2
+    signals: ["pf_active-coil_current"]           # null → save all outputs
+    times_indexes: [0, 1]                         # null → save full horizon

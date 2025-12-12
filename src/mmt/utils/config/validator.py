@@ -248,6 +248,14 @@ def validate_train_config(cfg: Dict[str, Any]) -> None:
         for path, _t in REQUIRED_STAGE_FIELDS:
             _get_nested(stage, path)
 
+            # check on grad_accum_steps: must be > 0
+            gas = stage["scheduler"]["grad_accum_steps"]
+            if not isinstance(gas, int) or gas < 1:
+                raise ValueError(
+                    "Inconsistent config: scheduler.grad_accum_steps must be an integer >= 1 "
+                    f"(got {gas})."
+                )
+
         # 1) Inherit lr/wd from backbone
         _apply_lr_wd_inheritance(stage)
 

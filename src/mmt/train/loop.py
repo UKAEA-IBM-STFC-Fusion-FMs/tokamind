@@ -74,7 +74,7 @@ from mmt.train.checkpoint_io import (
     save_latest,
     resume_from_latest,
 )
-from mmt.train.amp_utils import get_amp_config
+from mmt.utils.amp_utils import get_amp_config
 
 
 logger = logging.getLogger("mmt.Train")

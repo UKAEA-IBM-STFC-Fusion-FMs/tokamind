@@ -26,7 +26,7 @@ import torch
 from torch import Tensor
 from torch.optim.lr_scheduler import LRScheduler
 
-from .amp_utils import amp_ctx_for_model
+from mmt.utils.amp_utils import amp_ctx_for_model
 from .losses import compute_loss_pred_space
 from .scheduler import toggle_param_groups
 

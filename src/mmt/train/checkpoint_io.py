@@ -291,6 +291,105 @@ def _best_or_latest_dir(run_dir: str) -> Optional[str]:
     return None
 
 
+def _format_name_list(names, *, max_items: int = 20) -> str:
+    """Format a possibly-long list for logs."""
+    names = sorted(set(names))
+    if len(names) <= max_items:
+        return "[" + ", ".join(names) + "]"
+    head = names[:max_items]
+    return "[" + ", ".join(head) + f", ... (+{len(names) - max_items} more)]"
+
+
+def _extract_token_proj_component(key: str) -> Optional[str]:
+    """
+    Extract TokenEncoder per-signal projection component from a state_dict key.
+
+    Expected patterns include:
+      - "proj_layers.<something>.<param>"
+    Where <something> is often like:
+      - "input:pf_active-coil_current"
+      - "output:pf_active-solenoid_current"
+    """
+    if not key.startswith("proj_layers."):
+        return None
+    # e.g. "proj_layers.output:pf_active-coil_current.weight"
+    rest = key[len("proj_layers.") :]
+    comp = rest.split(".", 1)[0]  # "output:pf_active-coil_current"
+    return comp or None
+
+
+def _extract_output_adapter_component(key: str) -> Optional[str]:
+    """
+    Extract output adapter name from a key in the *output_adapters* state_dict.
+
+    Note: model.get_output_adapters_state_dict() is typically scoped, so keys look like:
+      - "<adapter_key>.weight"
+      - "<adapter_key>.bias"
+    """
+    if not key:
+        return None
+    return key.split(".", 1)[0]  # "<adapter_key>"
+
+
+def _component_sets(
+    loaded_sd: Dict[str, Any],
+    current_sd: Dict[str, Any],
+    *,
+    extractor,
+) -> Dict[str, set[str]]:
+    """
+    Compute component-level categories (reused / initialized / incompatible / removed)
+    based on state_dict keys and tensor shapes.
+
+    A component is "reused" if at least one tensor parameter for that component
+    is loaded with matching shape.
+
+    A component is "incompatible" if it exists in both loaded and current, but
+    none of its tensor params have matching shapes (i.e. overlap empty for it).
+    """
+    loaded_keys = [k for k in loaded_sd.keys() if extractor(k) is not None]
+    current_keys = [k for k in current_sd.keys() if extractor(k) is not None]
+
+    loaded_comps = {extractor(k) for k in loaded_keys}
+    current_comps = {extractor(k) for k in current_keys}
+
+    # per-key overlap check (same as _filter_overlap_state but we also track mismatches)
+    reused_comps: set[str] = set()
+    mismatch_comps: set[str] = set()
+
+    common_keys = set(loaded_keys) & set(current_keys)
+    for k in common_keys:
+        comp = extractor(k)
+        if comp is None:
+            continue
+        v_old = loaded_sd.get(k)
+        v_new = current_sd.get(k)
+        if not (isinstance(v_old, torch.Tensor) and isinstance(v_new, torch.Tensor)):
+            continue
+        if v_old.shape == v_new.shape:
+            reused_comps.add(comp)
+        else:
+            mismatch_comps.add(comp)
+
+    removed_comps = loaded_comps - current_comps
+    initialized_comps = current_comps - loaded_comps
+
+    # "incompatible": present in both, but not reused (shape mismatch / no matching tensors)
+    present_in_both = loaded_comps & current_comps
+    incompatible_comps = present_in_both - reused_comps
+
+    # Note: incompatible includes true shape mismatches, and also cases where
+    # the only overlapping keys are non-tensor or absent. That's fine: it's still "not reusable".
+
+    return {
+        "reused": reused_comps,
+        "initialized": initialized_comps,
+        "incompatible": incompatible_comps,
+        "removed": removed_comps,
+        "shape_mismatch": mismatch_comps,  # useful subset for debugging
+    }
+
+
 def load_parts_from_run_dir(
     model: nn.Module,
     run_dir: str,
@@ -365,7 +464,9 @@ def load_parts_from_run_dir(
     def _count(sd):
         return sum(v.numel() for v in sd.values() if isinstance(v, torch.Tensor))
 
-    stats = {}
+    stats: Dict[str, tuple[int, int]] = {}
+    # Store state_dicts for component-level reporting (only for blocks we load)
+    _debug_sds: Dict[str, tuple[Dict[str, Any], Dict[str, Any]]] = {}
 
     def _load(blk, get_fn, load_fn, filename):
         if not load_parts.get(blk, False):
@@ -383,6 +484,7 @@ def load_parts_from_run_dir(
             load_fn(overlap_sd, strict=False)
 
         stats[blk] = (_count(overlap_sd), _count(current_sd))
+        _debug_sds[blk] = (loaded_sd, current_sd)
 
     # Load four blocks
     _load(
@@ -391,21 +493,18 @@ def load_parts_from_run_dir(
         model.load_token_encoder_state_dict,
         "token_encoder.pt",
     )
-
     _load(
         "backbone",
         model.get_backbone_state_dict,
         model.load_backbone_state_dict,
         "backbone.pt",
     )
-
     _load(
         "modality_heads",
         model.get_modality_heads_state_dict,
         model.load_modality_heads_state_dict,
         "modality_heads.pt",
     )
-
     _load(
         "output_adapters",
         model.get_output_adapters_state_dict,
@@ -413,7 +512,9 @@ def load_parts_from_run_dir(
         "output_adapters.pt",
     )
 
-    # Summary
+    # ------------------------------------------------------------------
+    # Summary: block-level param overlap (keep your existing style)
+    # ------------------------------------------------------------------
     summary = []
     for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
         if load_parts.get(block, False):
@@ -425,7 +526,88 @@ def load_parts_from_run_dir(
         else:
             summary.append(f"{block}: skipped (load_parts=False)")
 
+    logger.info("")
     logger.info(f"Loaded from {ckpt}: " + " | ".join(summary))
+
+    # ------------------------------------------------------------------
+    # Detailed warm-start report: token encoder projections
+    # ------------------------------------------------------------------
+    if load_parts.get("token_encoder", False) and "token_encoder" in _debug_sds:
+        loaded_sd, current_sd = _debug_sds["token_encoder"]
+        rep = _component_sets(
+            loaded_sd,
+            current_sd,
+            extractor=_extract_token_proj_component,
+        )
+
+        logger.info("")
+        logger.info("Warm-start detail [token_encoder.proj_layers]")
+        logger.info(
+            "  reused=%d | initialized=%d | incompatible=%d | removed=%d",
+            len(rep["reused"]),
+            len(rep["initialized"]),
+            len(rep["incompatible"]),
+            len(rep["removed"]),
+        )
+
+        if rep["reused"]:
+            logger.info("  reused: %s", _format_name_list(rep["reused"]))
+        if rep["initialized"]:
+            logger.info(
+                "  initialized (new in current): %s",
+                _format_name_list(rep["initialized"]),
+            )
+        if rep["incompatible"]:
+            logger.info(
+                "  incompatible (present but not reusable): %s",
+                _format_name_list(rep["incompatible"]),
+            )
+        if rep["removed"]:
+            logger.info(
+                "  removed (present in checkpoint only): %s",
+                _format_name_list(rep["removed"]),
+            )
+
+    # ------------------------------------------------------------------
+    # Detailed warm-start report: output adapters
+    # ------------------------------------------------------------------
+    if load_parts.get("output_adapters", False) and "output_adapters" in _debug_sds:
+        loaded_sd, current_sd = _debug_sds["output_adapters"]
+        rep = _component_sets(
+            loaded_sd,
+            current_sd,
+            extractor=_extract_output_adapter_component,
+        )
+
+        logger.info("")
+        logger.info("Warm-start detail [output_adapters]")
+        logger.info(
+            "  reused=%d | initialized=%d | incompatible=%d | removed=%d",
+            len(rep["reused"]),
+            len(rep["initialized"]),
+            len(rep["incompatible"]),
+            len(rep["removed"]),
+        )
+
+        if rep["reused"]:
+            logger.info("  reused: %s", _format_name_list(rep["reused"]))
+        if rep["initialized"]:
+            logger.info(
+                "  initialized (new in current): %s",
+                _format_name_list(rep["initialized"]),
+            )
+        if rep["incompatible"]:
+            logger.info(
+                "  incompatible (present but not reusable): %s",
+                _format_name_list(rep["incompatible"]),
+            )
+        if rep["removed"]:
+            logger.info(
+                "  removed (present in checkpoint only): %s",
+                _format_name_list(rep["removed"]),
+            )
+
+        logger.info("")
 
 
 # ======================================================================

@@ -1,6 +1,3 @@
-# mmt/configs/task2_1/experiment_base.yaml
-
-
 task: "task_2-1"
 
 baseline_config: "scripts/pipelines/configs/configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"

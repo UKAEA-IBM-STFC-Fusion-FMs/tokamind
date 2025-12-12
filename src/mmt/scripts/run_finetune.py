@@ -12,32 +12,36 @@ from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
 )
 
-from mmt.utils.config.baseline_bridge import build_baseline_task_config
-from mmt.utils.config.loader import load_experiment_config
-from mmt.utils.config.validator import validate_train_config
-from mmt.utils.seed import set_seed
-from mmt.utils.logger import setup_logging
+from mmt.utils.config import (
+    build_baseline_task_config,
+    load_experiment_config,
+    validate_train_config,
+)
+from mmt.utils import (
+    set_seed,
+    setup_logging,
+    initialize_mmt_datasets,
+    initialize_mmt_dataloaders,
+)
 
-from mmt.data.signal_spec import (
+from mmt.data import (
     build_signal_role_modality_map,
     build_signal_specs,
+    build_codecs,
+    ChunkWindowsTransform,
+    SelectValidWindowsTransform,
+    TrimChunksTransform,
+    EmbedChunksTransform,
+    BuildTokensTransform,
+    ComposeTransforms,
+    WindowStreamedDataset,
+    WindowCachedDataset,
+    MMTCollate,
 )
-from mmt.data.embeddings.codec_utils import build_codecs
 
-from mmt.data.transforms.chunk_windows import ChunkWindowsTransform
-from mmt.data.transforms.select_valid_windows import SelectValidWindowsTransform
-from mmt.data.transforms.trim_chunks import TrimChunksTransform
-from mmt.data.transforms.embed_chunks import EmbedChunksTransform
-from mmt.data.transforms.build_tokens import BuildTokensTransform
-from mmt.data.transforms.compose import ComposeTransforms
-
-from mmt.data.datasets.window_streamed_dataset import WindowStreamedDataset
-from mmt.data.datasets.window_cached_dataset import WindowCachedDataset
-
-from mmt.utils.mmt_init_data import initialize_mmt_dataloaders, initialize_mmt_datasets
-from mmt.data.collate import MMTCollate
-from mmt.models.mmt import MultiModalTransformer
+from mmt.models import MultiModalTransformer
 from mmt.train.loop import train_finetune
+
 
 import logging
 
