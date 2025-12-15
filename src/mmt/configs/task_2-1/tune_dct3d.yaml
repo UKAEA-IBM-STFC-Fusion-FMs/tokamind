@@ -1,0 +1,27 @@
+experiment_base: mmt/configs/task_2-1/experiment_base.yaml
+embedding_config: mmt/configs/task_2-1/embeddings_default.yaml
+phase: tune_dct3d
+
+preprocess:
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    window_stride_sec: 0.005
+
+tune_dct3d:
+  sampling:
+    n_shots: 50
+    max_windows: 2000
+    max_windows_per_shot: 200
+
+  objective:
+    thresholds:
+      input: 0.02
+      actuator: 0.05
+      output: 0.01
+
+  search_space:
+    keep_h: [4, 8, 12, 16]
+    keep_w: [4, 8, 12, 16]
+    keep_t: [3, 5, 7, 9]

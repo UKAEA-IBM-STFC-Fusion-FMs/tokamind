@@ -1,3 +1,34 @@
+"""
+MMT dataset and DataLoader initialization utilities.
+
+This module defines the MMT-side helpers used to turn baseline shot-level
+datasets into model-ready window-level datasets and PyTorch DataLoaders.
+
+Design principles
+-----------------
+- The baseline repository remains the source of truth for data semantics:
+  shot structure, window segmentation, metadata, and
+  `TaskModelTransformWrapper`.
+- The MMT repository owns how model-specific transforms are composed and
+  how window-level data is fed to the model (cached vs streamed, shuffling,
+  batching, seeding).
+
+Responsibilities
+----------------
+1) initialize_mmt_datasets(...)
+   Wrap baseline train/val/test datasets with `TaskModelTransformWrapper`,
+   optionally applying a model-specific transform chain
+   (Chunk → SelectValidWindows → Trim → Embed → BuildTokens).
+
+2) initialize_mmt_dataloaders(...)
+   Build window-level PyTorch DataLoaders that correctly handle both
+   map-style datasets (cached windows) and IterableDatasets
+   (streamed windows), with deterministic seeding support.
+
+This module deliberately does not modify or reimplement baseline logic;
+it composes baseline primitives in an MMT-specific way.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Optional

@@ -50,7 +50,7 @@ DEBUG_MODE = False
 
 def parse_args_eval() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run finetuning for a given task/phase config."
+        description="Run eval for a given task/phase config."
     )
     parser.add_argument(
         "--phase_config",
@@ -124,7 +124,7 @@ def main() -> None:
     logger = setup_logging(
         cfg_mmt.paths["run_dir"],
         logger_name="mmt",
-        filename="finetune.log",
+        filename="eval.log",
         console=True,
     )
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
