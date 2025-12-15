@@ -69,7 +69,7 @@ from mmt.train.scheduler import (
     build_optimizer_and_scheduler,
     apply_stage_freeze_policy,
 )
-from mmt.train.checkpoint_io import (
+from mmt.checkpoints import (
     save_best,
     save_latest,
     resume_from_latest,

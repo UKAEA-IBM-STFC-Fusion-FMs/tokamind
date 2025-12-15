@@ -40,7 +40,7 @@ from mmt.data import (
 
 from mmt.models import MultiModalTransformer
 from mmt.eval import evaluate_metrics, save_traces_for_subset
-from mmt.train.checkpoint_io import load_best_weights
+from mmt.checkpoints import load_best_weights
 
 import logging
 

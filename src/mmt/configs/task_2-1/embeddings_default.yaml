@@ -78,6 +78,13 @@ embeddings:
   # Keyed by signal name as defined in the baseline config.
 
   per_signal_overrides:
+#    input:
+#      pf_active-coil_current:
+#        encoder_name: "dct3d"
+#        encoder_kwargs:
+#          keep_h: 100
+#          keep_w: 1
+#          keep_t: 100
     output:
       equilibrium-psi:
         encoder_name: "dct3d"

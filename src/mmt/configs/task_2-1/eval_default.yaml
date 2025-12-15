@@ -34,8 +34,8 @@ loader:
 eval:
   # list of inputs/actuators/outputs you want to drop for evaluation
   # null: evaluate the full model
-  inputs: [ "pf_active-coil_current" ]
   drop:
+    inputs: ["pf_active-coil_current"]
     actuators:
     outputs: ["pf_active-solenoid_current"]
 

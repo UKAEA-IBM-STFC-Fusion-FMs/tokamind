@@ -271,13 +271,14 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Optional warm-start from previous run
     # ------------------------------------------------------------------
+    # TODO: modify it --> finetune we MUST DO WARMSTARM AND SPECIFY model_init
     model_init_cfg = cfg_mmt.get("model_init", None)
     if model_init_cfg is not None:
         run_init = model_init_cfg.get("model_dir", None)
         load_parts = model_init_cfg.get("load_parts", None)
 
         if run_init is not None:
-            from mmt.train.checkpoint_io import load_parts_from_run_dir
+            from mmt.checkpoints import load_parts_from_run_dir
 
             load_parts_from_run_dir(
                 model,

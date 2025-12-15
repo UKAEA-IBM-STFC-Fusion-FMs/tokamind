@@ -1,278 +1,44 @@
 """
 Evaluation utilities for the Multi-Modal Transformer (MMT).
 
-What this module does
----------------------
-- Runs the model on a window-level dataloader.
-- Decodes predictions from coefficient space to native space via codecs.
-- Destandardises both predictions and ground truth using baseline mean/std.
-- Computes simple native-space MSE metrics and (optionally) saves traces.
+This module provides the high-level evaluation entry points used during
+validation and offline analysis. It operates on window-level dataloaders
+and assumes batches produced by TaskModelTransformWrapper + MMTCollate.
 
-Public entry points
--------------------
+Responsibilities
+----------------
+- Run the model in evaluation mode (no grad, AMP-enabled).
+- Convert predictions from standardised coefficient space to native units.
+- De-standardise ground truth using baseline statistics.
+- Compute native-space MSE metrics per window and per output.
+- Optionally save temporally ordered traces for selected shots.
+
+Public API
+----------
 - evaluate_metrics(...)
-    Compute per-window MSE in native units and save:
-      <run_dir>/metrics/metrics_full.csv
-      <run_dir>/metrics/metrics_summary.csv
+    Compute per-window MSE and write CSV summaries under:
+      <run_dir>/metrics/
 
 - save_traces_for_subset(...)
-    Save per-window native-space traces for a limited set of shots:
-      <run_dir>/traces/<shot_id>__<output>.npz
+    Save native-space true/pred traces ordered by window_index under:
+      <run_dir>/traces/
 
-Both functions are streaming-safe and make no assumptions about dataset size.
+Lower-level decoding and forward-pass logic is delegated to
+`mmt.eval.forward` and `mmt.eval.decode`.
 """
 
 import csv
 from pathlib import Path
-from typing import Dict, Any, Tuple
+from typing import Dict, Any
 
 import numpy as np
 import torch
 
-from mmt.train.loop_utils import move_batch_to_device
-from mmt.utils.amp_utils import amp_ctx_for_model
+from .forward import forward_decode_native
 
 import logging
 
 logger = logging.getLogger("mmt.Eval")
-
-
-# ============================================================================
-# Helpers
-# ============================================================================
-
-
-def _apply_stats(arr: np.ndarray, mean, std) -> np.ndarray:
-    """
-    Invert the standardisation used in the baseline:
-
-        values_std = (values - mean[..., None]) / std[..., None]
-
-    Here `arr` is batch-first, e.g. (B, C, T, ...) or (B, T, ...).
-    `mean` / `std` can be:
-      - scalar
-      - shape (1,)
-      - shape (C,)
-    """
-    mean = np.asarray(mean)
-    std = np.asarray(std)
-
-    # Scalar or effectively scalar
-    if mean.ndim == 0 or (mean.ndim == 1 and mean.shape[0] == 1):
-        return arr * std + mean
-
-    # Per-channel (C,)
-    if arr.ndim < 2:
-        raise ValueError(
-            f"Cannot apply per-channel stats: arr.shape={arr.shape}, mean.shape={mean.shape}"
-        )
-    C = arr.shape[1]
-    if mean.shape[0] != C:
-        raise ValueError(
-            f"Incompatible shapes: mean.shape={mean.shape}, arr.shape={arr.shape} "
-            f"(expected mean.shape[0] == arr.shape[1] == {C})"
-        )
-
-    shape = [1] * arr.ndim
-    shape[1] = C  # (1, C, 1, 1, ...)
-    mean = mean.reshape(shape)
-    std = std.reshape(shape)
-    return arr * std + mean
-
-
-# ============================================================================
-# Decode first, then destandardise
-# ============================================================================
-
-
-def decode_and_destandardize(
-    y_pred_std: Dict[str, np.ndarray],
-    y_true_std: Dict[str, np.ndarray],
-    stats: Dict[str, Dict[str, float]],
-    codecs: Dict[str, Any],
-) -> Dict[str, np.ndarray]:
-    """
-    Decode model outputs from coefficient space and destandardise them in
-    native physical space.
-
-    All inputs are NumPy arrays on CPU:
-
-      - y_pred_std[name] : (B, D)  standardized coefficients
-      - y_true_std[name] : (B, ...) standardized native values
-        (only used here to infer the original native shape per sample)
-
-    Returns
-    -------
-    y_native : dict[name, np.ndarray]
-        Decoded and destandardised predictions in native units.
-    """
-    y_native: Dict[str, np.ndarray] = {}
-
-    for name, pred_std in y_pred_std.items():
-        if name not in stats or name not in codecs or name not in y_true_std:
-            continue
-
-        if pred_std.ndim != 2:
-            raise ValueError(
-                f"y_pred_std[{name!r}] expected shape (B, D), got {pred_std.shape}."
-            )
-
-        codec = codecs[name]
-        true_arr = y_true_std[name]
-        B = pred_std.shape[0]
-        original_shape = true_arr.shape[1:]  # (...,)
-
-        # Decode each sample separately
-        decoded = np.stack(
-            [codec.decode(pred_std[b], original_shape) for b in range(B)],
-            axis=0,
-        )  # (B, ...)
-
-        y_native[name] = _apply_stats(
-            decoded, mean=stats[name]["mean"], std=stats[name]["std"]
-        )
-
-    return y_native
-
-
-# ============================================================================
-# Forward + decode + destandardize
-# ============================================================================
-
-
-def forward_decode_native(
-    batch: Dict[str, Any],
-    model: torch.nn.Module,
-    device: torch.device,
-    stats: Dict[str, Dict[str, float]],
-    codecs: Dict[str, Any],
-    id_to_name: Dict[int, str],
-    debug: bool = True,
-) -> Tuple[
-    Dict[str, np.ndarray],  # y_true_native
-    Dict[str, np.ndarray],  # y_pred_native
-    Dict[str, np.ndarray],  # y_mask (bool)
-    np.ndarray,  # shot_ids
-    np.ndarray,  # window_indices
-]:
-    """
-    Run one evaluation step and return outputs in native physical units.
-
-    Steps
-    -----
-    1. Move the batch to `device` and run the model.
-    2. Extract standardised coefficient predictions from out["pred"] (id-keyed).
-    3. Convert id-keyed dicts (true outputs, masks, preds) into name-keyed dicts.
-    4. Move everything to CPU NumPy.
-    5. Decode + destandardise predictions (coeff → native).
-    6. Destandardise ground truth using the same stats.
-    """
-
-    # 1) Move batch to device and run model
-    batch = move_batch_to_device(batch, device)
-
-    y_true_id = batch["output_native"]  # Dict[int, Tensor] (standardised)
-    y_mask_id = batch["output_mask"]  # Dict[int, Tensor] (bool per window)
-    y_true_emb_id = batch["output_emb"]
-
-    # Metadata: shot_id and window_index must be present
-    if "shot_id" not in batch:
-        raise KeyError("Batch is missing 'shot_id' field required for evaluation.")
-    if "window_index" not in batch:
-        raise KeyError("Batch is missing 'window_index' field required for evaluation.")
-
-    shot_ids = np.asarray(batch["shot_id"])
-    window_indices = np.asarray(batch["window_index"])
-
-    if len(window_indices) != len(shot_ids):
-        raise ValueError(
-            f"'window_index' length {len(window_indices)} does not match "
-            f"'shot_id' length {len(shot_ids)} in evaluation batch."
-        )
-
-    model.eval()
-    with torch.no_grad():
-        with amp_ctx_for_model(model, enable=True):
-            out = model(batch)
-
-    y_pred_std_id = out.get("pred", {})  # Dict[int, Tensor] (standardised coeffs)
-
-    # ---------------------------------------------------------
-    # Optional debug: MSE in *standardised coeff space*,
-    # same space as training loss (pred vs output_emb).
-    # ---------------------------------------------------------
-    if debug:
-        if y_true_emb_id is not None:
-            for sig_id, pred_std in y_pred_std_id.items():
-                if sig_id not in y_true_emb_id or sig_id not in y_mask_id:
-                    continue
-
-                target_std = y_true_emb_id[sig_id]  # (B, D)
-                mask = y_mask_id[sig_id].bool()  # (B,) or (B, 1, ...)
-
-                # Collapse any extra dims in the mask (e.g. (B,1) → (B,))
-                if mask.ndim > 1:
-                    mask = mask.view(mask.shape[0], -1).any(dim=1)
-
-                if not mask.any():
-                    continue
-
-                diff2 = (pred_std[mask] - target_std[mask]) ** 2
-                mse_coeff = diff2.mean().item()
-
-                name = id_to_name.get(sig_id, f"id={sig_id}")
-                logger.info(f"[DEBUG] coeff-space MSE [{name}]: {mse_coeff:.6f}")
-
-    # 2) id-keyed → name-keyed (torch)
-    y_true_t = {
-        id_to_name[sid]: tens for sid, tens in y_true_id.items() if sid in id_to_name
-    }
-    y_mask_t = {
-        id_to_name[sid]: tens for sid, tens in y_mask_id.items() if sid in id_to_name
-    }
-    y_pred_std_t = {
-        id_to_name[sid]: tens
-        for sid, tens in y_pred_std_id.items()
-        if sid in id_to_name
-    }
-
-    # 3) torch → NumPy (CPU)
-    y_true_std = {k: v.detach().cpu().numpy() for k, v in y_true_t.items()}
-    y_mask = {k: v.detach().cpu().numpy().astype(bool) for k, v in y_mask_t.items()}
-    y_pred_std = {k: v.detach().cpu().numpy() for k, v in y_pred_std_t.items()}
-
-    # 4) Decode + destandardise predictions
-    y_pred_native = decode_and_destandardize(
-        y_pred_std=y_pred_std,
-        y_true_std=y_true_std,
-        stats=stats,
-        codecs=codecs,
-    )
-
-    # 5) Destandardise ground truth
-    y_true_native: Dict[str, np.ndarray] = {}
-    for name, arr in y_true_std.items():
-        if name not in stats:
-            # No stats → leave as-standardised (should be rare)
-            y_true_native[name] = arr
-            continue
-
-        y_true_native[name] = _apply_stats(
-            arr, mean=stats[name]["mean"], std=stats[name]["std"]
-        )
-
-    if debug:
-        for name in y_pred_native:
-            yt = y_true_native[name]
-            yp = y_pred_native[name]
-            logger.info(
-                f"[DEBUG] {name}: "
-                f"true min/max=({yt.min():.3f}, {yt.max():.3f}), "
-                f"pred min/max=({yp.min():.3f}, {yp.max():.3f})"
-            )
-
-    return y_true_native, y_pred_native, y_mask, shot_ids, window_indices
-
 
 # ============================================================================
 # METRICS
