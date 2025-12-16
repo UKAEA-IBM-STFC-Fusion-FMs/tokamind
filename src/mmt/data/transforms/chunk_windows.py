@@ -1,6 +1,70 @@
+"""
+ChunkWindowsTransform
+=====================
+
+Chunk input and actuator signals from a single *baseline window* into fixed-length
+segments (“chunks”).
+
+This transform is designed to run inside the baseline `TaskModelTransformWrapper`
+as part of the model-specific transform chain. It receives one window dict at a
+time and appends a `window["chunks"]` structure used downstream (SelectValidWindows,
+TrimChunks, EmbedChunks, BuildTokens, ...).
+
+Design: TS-first (timestamps / samples)
+---------------------------------------
+All operational logic is performed in *timestamp indices* (samples):
+
+  - window span is validated using dict_metadata[signal]["ts_length"]
+  - signal sampling grid step is dict_metadata[signal]["ts_stride"] (typically 1)
+  - chunk boundaries are computed and sliced in samples
+
+Time (seconds) is derived *only* for metadata/logging:
+
+  chunk_start_time_sec = chunk_start_sample * dt
+
+Required dict_metadata fields (no fallback)
+-------------------------------------------
+For every signal name that appears under window["input"] or window["actuator"],
+dict_metadata must include:
+
+  - dt: float
+  - ts_length: int
+  - ts_stride: int
+
+Additionally, for window time origin computation we require, for at least one
+input signal present in the window:
+
+  - sec_length: float  (input window span in seconds)
+
+Assumptions (intentionally simple)
+----------------------------------
+Within each role group ("input" / "actuator"), all present signals share:
+
+  - the same dt
+  - the same ts_length
+  - the same ts_stride
+
+If not, the transform raises a ValueError (no fallback, no implicit resampling).
+
+Chunk dict schema
+-----------------
+Each produced chunk has:
+
+  {
+    "role": "input" | "actuator",
+    "chunk_index_in_window": int,
+    "chunk_start_sample": int,     # sample index on the role grid (absolute-like)
+    "chunk_start_time": float,     # absolute time (sec)
+    "chunk_size_samples": int,
+    "signals": {signal_name: np.ndarray[..., T_chunk], ...},
+  }
+
+`shot_id` and `window_index` are handled upstream by the wrapper.
+"""
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import logging
@@ -10,167 +74,193 @@ logger = logging.getLogger("mmt.Chunking")
 
 class ChunkWindowsTransform:
     """
-    Chunk input and actuator signals from a single baseline window into fixed-length segments.
+    Chunk input and actuator signals from a single baseline window into segments.
 
-    This transform is designed to run INSIDE TaskModelTransformWrapper's model_transform,
-    so it sees one "raw" baseline window at a time, e.g.:
-
-        window = {
-            "input":   { var_name: {"time": ..., "values": ...}, ... },
-            "actuator":{ var_name: {"time": ..., "values": ...}, ... },
-            "output":  { var_name: {"time": ..., "values": ...}, ... },
-            "t_cut":        float,   # absolute time of the window cut (s)
-            "input_length": float,   # input window length (s)
-        }
-
-    It will:
-
-      - chunk ONLY "input" and "actuator" along the time axis,
-      - leave "output" as-is (no chunking),
-      - attach a new field:
-
-            window["chunks"] = {
-                "input":    [chunk_dict, ...],
-                "actuator": [chunk_dict, ...],
-            }
-
-        where each chunk_dict has:
-
-            {
-                "role": "input" | "actuator",
-                "chunk_index_in_window": int,
-                "chunk_index_global": int,      # == chunk_start_sample (global sample index)
-                "chunk_start_sample": int,      # global sample index on the shot timeline
-                "chunk_start_time": float,      # seconds
-                "chunk_size_samples": int,      # number of time samples in this chunk
-                "signals": { var_name: np.ndarray[..., T_chunk], ... },
-            }
-
-    NOTE: shot_id and window_index are added OUTSIDE the transform by
-          TaskModelTransformWrapper in its final yield.
+    User-facing parameters are provided in seconds, but all slicing is performed
+    in timestamp indices (samples) using metadata dt and ts_* fields.
     """
 
     def __init__(
         self,
+        *,
+        dict_metadata: Dict[str, Any],
         chunk_length_sec: float,
         stride_sec: Optional[float] = None,
     ) -> None:
         if chunk_length_sec <= 0:
             raise ValueError("chunk_length_sec must be > 0")
 
+        self.dict_metadata = dict_metadata
         self.chunk_length_sec = float(chunk_length_sec)
-        # If stride_sec is None → no overlap, stride == chunk_length
         self.stride_sec = (
             float(stride_sec) if stride_sec is not None else float(chunk_length_sec)
         )
 
+        if self.stride_sec <= 0:
+            raise ValueError("stride_sec must be > 0")
+
     # ------------------------------------------------------------------ helpers
 
     @staticmethod
-    def _time_axis_length(group: Optional[Dict[str, Any]]) -> Optional[int]:
-        """
-        Infer the length T of the time axis from one signal in the group.
-
-        Convention: **time is the last axis**.
-          - 1D: (T,)
-          - 2D: (C, T)
-          - 3D: (H, W, T)
-        """
-        if not group:
-            return None
-
-        for entry in group.values():
-            if not isinstance(entry, dict):
-                continue
-            vals = entry.get("values")
-            if vals is None:
-                continue
-            arr = np.asarray(vals)
-            if arr.ndim >= 1:
-                return arr.shape[-1]  # time dimension
-
-        return None
-
-    @staticmethod
-    def _slice_time(vals: Any, start: int, end: int) -> Optional[np.ndarray]:
-        """
-        Slice along the **last** axis (time) between [start:end].
-        """
+    def _slice_last_axis(vals: Any, start: int, end: int) -> Optional[np.ndarray]:
+        """Slice along the last axis [start:end] in sample indices."""
         if vals is None:
             return None
         arr = np.asarray(vals)
-        T = arr.shape[-1]
-        if T < end:
+        if arr.shape[-1] < end:
             return None
-
-        # Build a slice that keeps all leading dims, slices only last dim
         idx = [slice(None)] * arr.ndim
         idx[-1] = slice(start, end)
         return arr[tuple(idx)]
 
-    def _build_chunks_for_group(
+    def _validate_group_grid(self, group: Dict[str, Any]) -> Tuple[float, int, int]:
+        """
+        Validate that all signals in a role group share the same sampling grid and length.
+
+        Returns
+        -------
+        (dt, ts_length, ts_stride)
+
+        Validation performed (no fallback):
+        - dict_metadata[sig]["dt"], ["ts_length"], ["ts_stride"] must exist
+        - values.shape[-1] must equal ts_length
+        - all signals must match (dt, ts_length, ts_stride)
+        """
+        ref_dt: Optional[float] = None
+        ref_T: Optional[int] = None
+        ref_step: Optional[int] = None
+
+        for sig_name, entry in group.items():
+            if not isinstance(entry, dict) or "values" not in entry:
+                continue
+
+            meta = self.dict_metadata[sig_name]  # no fallback
+            dt = float(meta["dt"])
+            T_expected = int(meta["ts_length"])
+            step = int(meta["ts_stride"])
+
+            if step <= 0:
+                raise ValueError(
+                    f"[ChunkWindowsTransform] dict_metadata[{sig_name!r}]['ts_stride'] must be > 0"
+                )
+
+            arr = np.asarray(entry["values"])
+            T_actual = int(arr.shape[-1])
+            if T_actual != T_expected:
+                raise ValueError(
+                    f"[ChunkWindowsTransform] signal {sig_name!r} has T={T_actual}, "
+                    f"but dict_metadata expects ts_length={T_expected}"
+                )
+
+            if ref_dt is None:
+                ref_dt = dt
+                ref_T = T_expected
+                ref_step = step
+            else:
+                if dt != ref_dt:
+                    raise ValueError(
+                        f"[ChunkWindowsTransform] mixed dt in group: {sig_name} dt={dt} vs ref_dt={ref_dt}"
+                    )
+                if T_expected != ref_T:
+                    raise ValueError(
+                        f"[ChunkWindowsTransform] mixed ts_length in group: {sig_name} ts_length={T_expected} vs ref_T={ref_T}"
+                    )
+                if step != ref_step:
+                    raise ValueError(
+                        f"[ChunkWindowsTransform] mixed ts_stride in group: {sig_name} ts_stride={step} vs ref_step={ref_step}"
+                    )
+
+        if ref_dt is None or ref_T is None or ref_step is None:
+            return 0.0, 0, 0
+
+        return ref_dt, ref_T, ref_step
+
+    @staticmethod
+    def _sec_to_ts_len(sec: float, dt: float) -> int:
+        """
+        Convert seconds -> samples for a length.
+        Use round() to align with historical behavior and reduce loss drift.
+        """
+        return int(round(sec / dt))
+
+    def _chunks_for_group(
         self,
+        *,
         group: Optional[Dict[str, Any]],
         role: str,
-        t0: float,
-        dt: float,
-        chunk_size_samples: int,
-        stride_samples: int,
+        t0_sec: float,
     ) -> List[Dict[str, Any]]:
         """
-        Chunk all signals in a given group ("input" or "actuator").
-
-        Index k along the time axis corresponds to absolute time:
-            t_k = t0 + k * dt
+        Chunk all signals in one role group using ts_* grid.
         """
         if not group:
             return []
 
-        T = self._time_axis_length(group)
-        if T is None or T <= 0:
+        dt, T, ts_step = self._validate_group_grid(group)
+        if T <= 0:
             return []
+
+        # Convert chunk specs (seconds) to samples on this dt grid.
+        chunk_len_ts = self._sec_to_ts_len(self.chunk_length_sec, dt)
+        stride_ts = self._sec_to_ts_len(self.stride_sec, dt)
+
+        if chunk_len_ts <= 0:
+            raise ValueError(
+                f"[ChunkWindowsTransform] chunk_length_sec={self.chunk_length_sec} with dt={dt} gives chunk_len_ts={chunk_len_ts}"
+            )
+        if stride_ts <= 0:
+            raise ValueError(
+                f"[ChunkWindowsTransform] stride_sec={self.stride_sec} with dt={dt} gives stride_ts={stride_ts}"
+            )
+
+        # Enforce that we advance along the actual grid step.
+        # Typical case: ts_step=1 so this is a no-op.
+        if (chunk_len_ts % ts_step) != 0:
+            raise ValueError(
+                f"[ChunkWindowsTransform] chunk_len_ts={chunk_len_ts} not divisible by ts_stride={ts_step} for role={role}"
+            )
+        if (stride_ts % ts_step) != 0:
+            raise ValueError(
+                f"[ChunkWindowsTransform] stride_ts={stride_ts} not divisible by ts_stride={ts_step} for role={role}"
+            )
 
         chunks: List[Dict[str, Any]] = []
         start = 0
-        chunk_index_in_window = 0
+        idx_in_window = 0
 
-        while start + chunk_size_samples <= T:
-            end = start + chunk_size_samples
+        while start + chunk_len_ts <= T:
+            end = start + chunk_len_ts
 
-            signals_chunk: Dict[str, np.ndarray] = {}
-            for var_name, entry in group.items():
+            sigs: Dict[str, np.ndarray] = {}
+            for sig_name, entry in group.items():
                 if not isinstance(entry, dict):
                     continue
                 vals = entry.get("values")
                 if vals is None:
                     continue
-                sub = self._slice_time(vals, start, end)
+                sub = self._slice_last_axis(vals, start, end)
                 if sub is not None:
-                    signals_chunk[var_name] = sub
+                    sigs[sig_name] = sub
 
-            if signals_chunk:
-                # Absolute start time for this chunk
-                chunk_start_time = t0 + start * dt
-
-                # Global sample index on the shot timeline:
-                # map time → sample index at resolution dt
+            if sigs:
+                # Compute absolute-ish sample index from time origin on this dt grid.
+                # This matches the older “global-ish” semantics (time -> sample).
+                chunk_start_time = float(t0_sec + start * dt)
                 chunk_start_sample = int(round(chunk_start_time / dt))
 
                 chunks.append(
                     {
                         "role": role,
-                        "chunk_index_in_window": chunk_index_in_window,
-                        # Keep name for back-compat, but semantics are now "global sample index"
-                        "chunk_index_global": chunk_start_sample,
+                        "chunk_index_in_window": idx_in_window,
                         "chunk_start_sample": chunk_start_sample,
                         "chunk_start_time": chunk_start_time,
-                        "chunk_size_samples": int(chunk_size_samples),
-                        "signals": signals_chunk,
+                        "chunk_size_samples": int(chunk_len_ts),
+                        "signals": sigs,
                     }
                 )
-                chunk_index_in_window += 1
+                idx_in_window += 1
 
-            start += stride_samples
+            start += stride_ts
 
         return chunks
 
@@ -178,82 +268,51 @@ class ChunkWindowsTransform:
 
     def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Apply chunking to a SINGLE baseline window dict.
+        Apply chunking to a single window dict.
 
-        Returns the same window dict with an extra "chunks" field.
+        Required fields:
+          - window["t_cut"] : float (seconds)
+          - window["input"] : dict of signals -> {"values": ...}
+          - window["actuator"] : dict of signals -> {"values": ...} (optional)
+
+        Returns:
+          - same window dict with an added "chunks" field.
         """
-        # Basic sanity checks for required metadata
-        if "t_cut" not in window or "input_length" not in window:
-            logger.debug(
-                "[ChunkingTransform] window missing 't_cut' or 'input_length'; skipping chunking."
+        if "t_cut" not in window:
+            raise KeyError(
+                "[ChunkWindowsTransform] window missing required key 't_cut'"
             )
-            return window
 
         t_cut = float(window["t_cut"])
-        input_length = float(window["input_length"])
+        input_group = window.get("input") or {}
+        act_group = window.get("actuator") or {}
 
-        input_group = window.get("input")
-        act_group = window.get("actuator")
+        if not input_group:
+            raise ValueError("[ChunkWindowsTransform] window has no 'input' signals")
 
-        # Compute dt from INPUT only (baseline guarantees fixed input_length)
-        T_input = self._time_axis_length(input_group)
-        if T_input is None or T_input <= 0:
-            logger.debug(
-                "[ChunkingTransform] could not infer input T; skipping chunking."
-            )
-            return window
+        # Time origin: start of input window span
+        first_input_sig = next(iter(input_group.keys()))
+        input_sec_length = float(
+            self.dict_metadata[first_input_sig]["sec_length"]
+        )  # required
+        t0_sec = t_cut - input_sec_length
 
-        dt = input_length / float(T_input)
-
-        # Convert chunk_length / stride from seconds → samples
-        chunk_size_samples = int(round(self.chunk_length_sec / dt))
-        if chunk_size_samples <= 0:
-            raise ValueError(
-                f"chunk_length_sec={self.chunk_length_sec} with dt={dt} → "
-                f"chunk_size_samples={chunk_size_samples} (must be > 0)"
-            )
-
-        stride_samples = int(round(self.stride_sec / dt))
-        if stride_samples <= 0:
-            raise ValueError(
-                f"stride_sec={self.stride_sec} with dt={dt} → "
-                f"stride_samples={stride_samples} (must be > 0)"
-            )
-
-        # Time origin for index 0 in the window: start of the input span
-        t0 = t_cut - input_length
-
-        chunks_input = self._build_chunks_for_group(
-            input_group,
-            role="input",
-            t0=t0,
-            dt=dt,
-            chunk_size_samples=chunk_size_samples,
-            stride_samples=stride_samples,
+        chunks_input = self._chunks_for_group(
+            group=input_group, role="input", t0_sec=t0_sec
         )
-        chunks_act = self._build_chunks_for_group(
-            act_group,
-            role="actuator",
-            t0=t0,
-            dt=dt,
-            chunk_size_samples=chunk_size_samples,
-            stride_samples=stride_samples,
+        chunks_act = self._chunks_for_group(
+            group=act_group, role="actuator", t0_sec=t0_sec
         )
 
         logger.debug(
-            "window %s (shot %s, t_cut=%s) → %d input chunks, %d actuator chunks",
+            "win=%s shot=%s t_cut=%.6f → %d input chunks, %d actuator chunks",
             window.get("window_index"),
             window.get("shot_id"),
-            f"{t_cut:.6f}",
+            t_cut,
             len(chunks_input),
             len(chunks_act),
         )
 
-        # Attach chunks; keep original input/actuator/output untouched for now
-        window = dict(window)  # shallow copy to avoid side effects if needed
-        window["chunks"] = {
-            "input": chunks_input,
-            "actuator": chunks_act,
-        }
-
-        return window
+        out = dict(window)
+        out["chunks"] = {"input": chunks_input, "actuator": chunks_act}
+        return out

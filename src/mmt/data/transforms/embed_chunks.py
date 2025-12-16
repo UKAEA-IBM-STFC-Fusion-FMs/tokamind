@@ -215,7 +215,7 @@ class EmbedChunksTransform:
         # ------------------------------------------------------------------
         # Debug summary
         # ------------------------------------------------------------------
-        logger.info(
+        logger.debug(
             "win %s (shot %s): "
             "chunks=%d, signal_new_emb=%d, signal_cache_hits=%d, "
             "out_signals=%d, out_new_emb=%d",

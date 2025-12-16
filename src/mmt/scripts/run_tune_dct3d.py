@@ -156,7 +156,7 @@ def main() -> None:
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(
-                chunk_length_sec=cfg_chunks["chunk_length"],
+                dict_metadata=dict_metadata,
                 delta=cfg_task["task_window_segmenter"]["delta"],
                 output_length=cfg_task["task_window_segmenter"]["output_length"],
                 max_chunks=cfg_trim["max_chunks"],

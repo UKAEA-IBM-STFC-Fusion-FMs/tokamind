@@ -404,6 +404,9 @@ def run_one_epoch(
                 f"forward={t2 - t1:.4f}s  "
             )
 
+        # update t before next loading
+        t_before_next = time.perf_counter()
+
     avg_loss = running_loss / max(1, n_batches)
 
     if not train:

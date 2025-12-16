@@ -45,7 +45,7 @@ from mmt.train.loop import train_finetune
 import logging
 
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def parse_args_finetune() -> argparse.Namespace:
@@ -167,7 +167,7 @@ def main() -> None:
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(
-                chunk_length_sec=cfg_chunks["chunk_length"],
+                dict_metadata=dict_metadata,
                 delta=cfg_task["task_window_segmenter"]["delta"],
                 output_length=cfg_task["task_window_segmenter"]["output_length"],
                 max_chunks=cfg_trim["max_chunks"],
@@ -178,9 +178,6 @@ def main() -> None:
                 keep_output_native=keep_output_native,
             ),
             BuildTokensTransform(
-                chunk_length_sec=cfg_chunks["chunk_length"],
-                delta=cfg_task["task_window_segmenter"]["delta"],
-                output_length=cfg_task["task_window_segmenter"]["output_length"],
                 signal_specs=signal_specs,
             ),
         ]

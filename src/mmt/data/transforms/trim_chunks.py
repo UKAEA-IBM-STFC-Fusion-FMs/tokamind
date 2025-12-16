@@ -1,6 +1,31 @@
+"""
+TrimChunksTransform
+===================
+
+Trim chunk histories to a fixed maximum number of chunks and compute
+relative positions with respect to the output reference time.
+
+Design principles
+-----------------
+- TS-first (timestamps / samples): all logic is performed in integer
+  sample indices.
+- PURE transform: no state is kept across windows.
+- No fallback or legacy behavior: required metadata must be present.
+
+This transform assumes that `ChunkWindowsTransform` has already populated
+each chunk with:
+  - chunk_start_sample
+  - chunk_size_samples
+
+and that the window dict contains:
+  - t_cut (seconds)
+  - output signals with known dt via dict_metadata
+"""
+
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+
+from typing import Any, Dict, List
 import logging
 
 logger = logging.getLogger("mmt.TrimChunks")
@@ -8,177 +33,119 @@ logger = logging.getLogger("mmt.TrimChunks")
 
 class TrimChunksTransform:
     """
-    Remove older input+actuator chunks, keeping only the most recent
-    `max_chunks` based on temporal position relative to the output window.
+    Trim chunk histories and compute relative positions (pos) in TS-space.
 
-    This is used BEFORE embedding, to avoid computing embeddings for
-    chunks that will be discarded anyway.
-
-    Expected input (after SelectValidWindows)
-    --------------------------------------------
-        window = {
-            "t_cut": float,
-            "chunks": {
-                "input":    [chunk_dict, ...],
-                "actuator": [chunk_dict, ...],
-            },
-            ...
-        }
-
-    Each chunk_dict must contain:
-        "chunk_start_time": float    # absolute time of chunk start
-
-    Output
-    ------
-    The same window dict, but with chunk lists trimmed:
-
-        window["chunks"]["input"]    = trimmed list
-        window["chunks"]["actuator"] = trimmed list
-
-    Parameters
-    ----------
-    chunk_length_sec : float
-        Duration of each chunk in seconds.
-
-    delta : float
-        Offset between t_cut and output window start.
-
-    output_length : float
-        Duration of the output window.
-
-    max_chunks : int
-        Maximum number of chunks per role (input / actuator) to keep.
-        We retain only chunks whose positive position index satisfies
-        1 ≤ pos ≤ max_chunks, where:
-
-            pos = 1  → chunk ending exactly at t_out_end
-            pos = 2  → one chunk earlier
-            pos = 3  → two chunks earlier
-            ...
-
-        This convention matches BuildTokensTransform.
+    Responsibilities
+    ----------------
+    1) Trim input and actuator chunks to `max_chunks` (keep most recent).
+    2) Compute per-chunk relative position indices with respect to the
+       output reference time (end of output window).
     """
 
     def __init__(
         self,
-        chunk_length_sec: float,
+        *,
+        dict_metadata: Dict[str, Any],
+        max_chunks: int,
         delta: float,
         output_length: float,
-        max_chunks: int,
     ) -> None:
-        self.chunk_length_sec = float(chunk_length_sec)
+        if max_chunks <= 0:
+            raise ValueError("max_chunks must be > 0")
+
+        self.dict_metadata = dict_metadata
+        self.max_chunks = int(max_chunks)
         self.delta = float(delta)
         self.output_length = float(output_length)
 
-        self.max_chunks = int(max_chunks)
-        if self.max_chunks <= 0:
-            raise ValueError("max_chunks must be > 0")
+    # ------------------------------------------------------------------
 
-    # ------------------------------------------------------------------ #
-    def _compute_pos(self, t_out_end: float, t_start: float) -> int:
-        """
-        Compute positive temporal index `pos` for a chunk, using the same
-        convention as BuildTokensTransform.
+    @staticmethod
+    def _sec_to_ts(sec: float, dt: float) -> int:
+        """Convert seconds → samples using round()."""
+        return int(round(sec / dt))
 
-        Let:
-
-            L         = chunk_length_sec
-            chunk_end = t_start + L
-            steps     = round((t_out_end - chunk_end) / L)
-            pos       = steps + 1
-
-        Then:
-
-            • pos = 1 → chunk that ends exactly at t_out_end
-            • pos = 2 → one chunk earlier
-            • pos = 3 → two chunks earlier
-            • ...
-
-        Chunks strictly in the future of t_out_end (if any) will yield
-        pos ≤ 0; these are always discarded by the trimming logic.
-        """
-        if t_start is None:
-            raise ValueError(
-                "TrimChunksTransform: chunk_start_time is None; "
-                "ChunkingTransform must set it."
-            )
-
-        L = self.chunk_length_sec
-        chunk_end = float(t_start) + L
-        steps = round((t_out_end - chunk_end) / L)
-        pos = steps + 1
-        return int(pos)
-
-    # ------------------------------------------------------------------ #
-    def _trim_role(
+    def _trim_and_pos(
         self,
+        *,
         chunks: List[Dict[str, Any]],
-        t_out_end: float,
+        t_out_end_ts: int,
     ) -> List[Dict[str, Any]]:
         """
-        Trim chunks of a given role (input/actuator).
-
-        We keep only chunks whose positive position satisfies:
-
-            1 ≤ pos ≤ max_chunks
-
-        i.e. at most `max_chunks` chunks of most recent history for that
-        role (context or actuator).
+        Trim chunks and compute pos indices in TS-space.
         """
         if not chunks:
-            return chunks
+            return []
 
-        kept: List[Dict[str, Any]] = []
-        for ch in chunks:
-            if "chunk_start_time" not in ch:
-                raise ValueError(
-                    "Chunk missing 'chunk_start_time'. Something is wrong upstream."
-                )
+        # Keep most recent chunks
+        trimmed = chunks[-self.max_chunks :]
 
-            t_start = ch["chunk_start_time"]
-            pos = self._compute_pos(t_out_end, t_start)
+        out: List[Dict[str, Any]] = []
+        for ch in trimmed:
+            start_ts = int(ch["chunk_start_sample"])
+            size_ts = int(ch["chunk_size_samples"])
+            end_ts = start_ts + size_ts
 
-            # Keep only valid "past" chunks up to max_chunks steps back
-            if 1 <= pos <= self.max_chunks:
-                kept.append(ch)
+            # pos = how many chunk-lengths BEFORE output end
+            pos = t_out_end_ts - end_ts
 
-        return kept
+            ch2 = dict(ch)
+            ch2["pos"] = int(pos)
+            out.append(ch2)
 
-    # ------------------------------------------------------------------ #
-    def __call__(self, window: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        return out
+
+    # ------------------------------------------------------------------
+
+    def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Apply trimming to a single window.
+        Apply trimming and position computation to a single window.
         """
-        if window is None:
-            return None
+        if "chunks" not in window:
+            raise KeyError("[TrimChunksTransform] window missing 'chunks'")
+        if "t_cut" not in window:
+            raise KeyError("[TrimChunksTransform] window missing 't_cut'")
 
-        try:
-            t_cut = window["t_cut"]
-        except KeyError:
-            raise ValueError("TrimChunksTransform: window missing 't_cut'")
+        t_cut = float(window["t_cut"])
 
-        # compute t_out_end ONCE
-        t_out_end = float(t_cut) + self.delta + self.output_length
+        # Use any output signal to define dt (they must be consistent)
+        output_group = window.get("output") or {}
+        if not output_group:
+            raise ValueError("[TrimChunksTransform] window has no output signals")
 
-        chunks = window.get("chunks") or {}
-        input_chunks = chunks.get("input", []) or []
-        actuator_chunks = chunks.get("actuator", []) or []
+        first_out_sig = next(iter(output_group.keys()))
+        dt = float(self.dict_metadata[first_out_sig]["dt"])
 
-        trimmed_input = self._trim_role(input_chunks, t_out_end)
-        trimmed_act = self._trim_role(actuator_chunks, t_out_end)
+        # Output reference time (END of output window), in TS
+        t_out_end_sec = t_cut + self.delta + self.output_length
+        t_out_end_ts = self._sec_to_ts(t_out_end_sec, dt)
+
+        chunks_in = window["chunks"].get("input", [])
+        chunks_act = window["chunks"].get("actuator", [])
+
+        trimmed_in = self._trim_and_pos(
+            chunks=chunks_in,
+            t_out_end_ts=t_out_end_ts,
+        )
+        trimmed_act = self._trim_and_pos(
+            chunks=chunks_act,
+            t_out_end_ts=t_out_end_ts,
+        )
 
         logger.debug(
             "win %s (shot %s) | input %d→%d, actuator %d→%d | max=%d",
             window.get("window_index"),
             window.get("shot_id"),
-            len(input_chunks),
-            len(trimmed_input),
-            len(actuator_chunks),
+            len(chunks_in),
+            len(trimmed_in),
+            len(chunks_act),
             len(trimmed_act),
             self.max_chunks,
         )
 
-        window["chunks"]["input"] = trimmed_input
-        window["chunks"]["actuator"] = trimmed_act
-
-        return window
+        out = dict(window)
+        out["chunks"] = {
+            "input": trimmed_in,
+            "actuator": trimmed_act,
+        }
+        return out

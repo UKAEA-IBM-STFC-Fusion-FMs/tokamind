@@ -69,10 +69,36 @@ per_signal_overrides:
       encoder_kwargs:
         keep_h: 10
         keep_w: 1
-        keep_t: 50
+        keep_t: 4
     pf_active-solenoid_current:
       encoder_name: dct3d
       encoder_kwargs:
         keep_h: 1
         keep_w: 1
-        keep_t: 6
+        keep_t: 2
+  actuator:
+    pf_active-coil_voltage:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 4
+        keep_w: 1
+        keep_t: 8
+    summary-power_nbi:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 1
+        keep_w: 1
+        keep_t: 4
+  input:
+    pf_active-coil_current:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 10
+        keep_w: 1
+        keep_t: 4
+    pf_active-solenoid_current:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 1
+        keep_w: 1
+        keep_t: 2

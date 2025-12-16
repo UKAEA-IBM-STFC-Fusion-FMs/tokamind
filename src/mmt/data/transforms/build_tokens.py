@@ -2,30 +2,35 @@
 BuildTokensTransform
 ====================
 
-This module converts the output of EmbedChunksTransform into the
-final per-token representation consumed by the MMT model and collate.
+Convert embedded chunks into the final per-token representation consumed by
+the MMT model and collate.
 
-This updated implementation is **deterministic**: it enforces a stable
-ordering of tokens across all windows, shots, and workers, eliminating
-the misalignment between token embeddings and token metadata that caused
-dimension mismatches inside TokenEncoder.
+Contract (must match downstream collate/train)
+----------------------------------------------
+This transform writes the following fields to `window`:
 
-Main features:
---------------
-• Deterministic ordering of chunks and signals within chunks
-• Embeddings (`emb_chunks`) and metadata (`id`, `pos`, `mod`, `role`, `name`)
-  are always aligned index-by-index
-• No assumptions about upstream dict ordering
-• No accidental reordering due to signal masking / cache behaviour
-• Context (input) tokens come first, then actuator tokens
-• Output embeddings are untouched (still handled as window-level vectors)
+    window["emb_chunks"]   = emb_list                       (List[np.ndarray])
+    window["pos"]          = pos                            (np.ndarray int32)
+    window["id"]           = np.asarray(sig_list, int32)    (np.ndarray)
+    window["signal_name"]  = np.asarray(name_list, object)  (np.ndarray)
+    window["mod"]          = np.asarray(mod_list, int16)    (np.ndarray)
+    window["role"]         = np.asarray(role_list, int8)    (np.ndarray)
 
-The transform **does not truncate** history or modify chunk structure:
-it only builds a flattened token sequence and computes their temporal
-positions.
+    window["output_emb"]   = output_emb                     (Dict[int, np.ndarray])
+    window["output_shapes"]= output_shapes                  (Dict[int, tuple])
+    window["output_names"] = output_names                   (Dict[int, str])
+
+TS-first / simplified logic
+---------------------------
+- Positions are NOT computed from time anymore.
+- Each chunk is expected to carry an integer `pos` computed upstream by
+  `TrimChunksTransform`.
+- This transform is responsible only for deterministic ordering and
+  aligning embeddings with metadata.
 """
 
 from __future__ import annotations
+
 
 from typing import Any, Dict, List, Optional
 import logging
@@ -35,82 +40,39 @@ from mmt.data.signal_spec import SignalSpecRegistry
 
 logger = logging.getLogger("mmt.BuildTokens")
 
-# Token roles (shared across transforms and model)
 ROLE_CONTEXT = 0
 ROLE_ACTUATOR = 1
-ROLE_OUTPUT = 2  # for the learned Y-token (not created here)
+ROLE_OUTPUT = 2  # reserved (not created here)
 
 
 class BuildTokensTransform:
     """
     Construct a deterministic, aligned token sequence for a window.
 
-    Purpose
-    -------
-    Convert the embedded chunks from `EmbedChunksTransform` into a list of
-    token embeddings (`emb_chunks`) and aligned metadata arrays:
-        id, pos, mod, role, signal_name.
-
-    This transform ensures **stable ordering**, which is essential for
-    consistency across windows. All nondeterministic elements from Python
-    dictionaries (signal masking order, iteration order, cache effect, etc.)
-    are removed.
-
-    Input (per window)
+    Input requirements
     ------------------
-    A window dict containing:
-        "t_cut": float
-        "chunks": {
-            "input":    [chunk_dict, ...],
-            "actuator": [chunk_dict, ...],
-        }
-        Each chunk_dict contains:
-            "chunk_start_time" : float
-            "embeddings"       : { signal_id: np.ndarray(D,) }
-            "orig_shapes"      : { signal_id: tuple(...) }
+    Each chunk in window["chunks"][role] must contain:
+      - "pos"        : int (already computed upstream)
+      - "chunk_start_sample" : int (used for deterministic chunk ordering)
+      - "embeddings" : Dict[int, np.ndarray] mapping signal_id → embedding
 
-        window["embedded_output"]        : { signal_id: np.ndarray(D_out,) }
-        window["embedded_output_shapes"] : { signal_id: orig_shape }
+    window must contain:
+      - "embedded_output"        : Dict[int, np.ndarray]
+      - "embedded_output_shapes" : Dict[int, tuple]
 
-    Output fields added to the window
-    ---------------------------------
-        window["emb_chunks"]   : List[np.ndarray]
-        window["pos"]          : np.ndarray(L,)
-        window["id"]           : np.ndarray(L,)
-        window["mod"]          : np.ndarray(L,)
-        window["role"]         : np.ndarray(L,)
-        window["signal_name"]  : np.ndarray(L,)
-
-        window["output_emb"]
-        window["output_shapes"]
-        window["output_names"]
-
-    Deterministic ordering rules
-    ----------------------------
-    1. Context (input) tokens first, then actuator tokens
-    2. Within each role:
-        • chunks sorted by chunk_start_time
-        • signals within each chunk sorted by signal_id
-    3. No dependence on Python dict insertion order
+    Output
+    ------
+    Writes the exact arrays/dicts expected by collate/train (see module header).
     """
 
-    def __init__(
-        self,
-        chunk_length_sec: float,
-        delta: float,
-        output_length: float,
-        signal_specs: SignalSpecRegistry,
-    ) -> None:
-        self.chunk_length_sec = float(chunk_length_sec)
-        self.delta = float(delta)
-        self.output_length = float(output_length)
+    def __init__(self, signal_specs: SignalSpecRegistry) -> None:
         self.signal_specs = signal_specs
 
-        # Build modality_id table
+        # Stable modality_id table
         modalities = signal_specs.modalities  # sorted by registry
         self._modality_to_id = {m: i for i, m in enumerate(modalities)}
 
-        # Map physical signal_id → modality_id
+        # signal_id -> modality_id
         self._signal_id_to_mod_id: Dict[int, int] = {}
         for spec in signal_specs.specs:
             if spec.modality not in self._modality_to_id:
@@ -119,45 +81,24 @@ class BuildTokensTransform:
                 spec.modality
             ]
 
-    # ------------------------------------------------------------------ helpers
-
-    def _compute_pos_ids(self, t_cut: float, chunk_times: List[float]) -> np.ndarray:
-        """
-        Compute temporal positions for tokens.
-
-        pos = number of chunk-length steps before the output window end,
-              starting from 1 (pos=1 means the chunk ends exactly at output end).
-        """
-        t_out_end = t_cut + self.delta + self.output_length
-        L = self.chunk_length_sec
-
-        pos_ids = []
-        for t_start in chunk_times:
-            chunk_end = t_start + L
-            steps = round((t_out_end - chunk_end) / L)
-            pos_ids.append(steps + 1)
-
-        return np.asarray(pos_ids, dtype=np.int32)
-
     # ------------------------------------------------------------------ main API
 
     def __call__(self, window: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if window is None:
             return None
-        if "t_cut" not in window or window["t_cut"] is None:
-            raise ValueError("BuildTokensTransform: missing t_cut")
 
-        t_cut = float(window["t_cut"])
+        chunks_dict = window.get("chunks") or {}
+        input_chunks = chunks_dict.get("input", []) or []
+        act_chunks = chunks_dict.get("actuator", []) or []
 
-        input_chunks = (window.get("chunks", {}) or {}).get("input", []) or []
-        act_chunks = (window.get("chunks", {}) or {}).get("actuator", []) or []
-
-        # Sort chunks deterministically
+        # Deterministic ordering:
+        # - chunks sorted by chunk_start_sample (TS-first, integer, no float drift)
+        # - signals within chunk sorted by signal_id
         input_chunks_sorted = sorted(
-            input_chunks, key=lambda in_ch: float(in_ch["chunk_start_time"])
+            input_chunks, key=lambda ch: int(ch["chunk_start_sample"])
         )
         act_chunks_sorted = sorted(
-            act_chunks, key=lambda act_ch: float(act_ch["chunk_start_time"])
+            act_chunks, key=lambda ch: int(ch["chunk_start_sample"])
         )
 
         emb_list: List[np.ndarray] = []
@@ -165,32 +106,31 @@ class BuildTokensTransform:
         name_list: List[str] = []
         role_list: List[int] = []
         mod_list: List[int] = []
-        t_list: List[float] = []
+        pos_list: List[int] = []
 
-        # ------------------------------------------------------------------
+        # -------------------------
         # 1) CONTEXT TOKENS (INPUT)
-        # ------------------------------------------------------------------
+        # -------------------------
         for ch in input_chunks_sorted:
-            t_start = float(ch["chunk_start_time"])
+            pos = int(ch["pos"])
             emb_map = ch.get("embeddings") or {}
 
-            # Deterministic ordering: sorted by signal_id
             for sig_id in sorted(emb_map.keys()):
                 emb = emb_map[sig_id]
                 spec = self.signal_specs.get_by_id(sig_id)
 
                 emb_list.append(emb)
-                sig_list.append(sig_id)
+                sig_list.append(int(sig_id))
                 name_list.append(spec.name)
                 role_list.append(ROLE_CONTEXT)
-                mod_list.append(self._signal_id_to_mod_id[sig_id])
-                t_list.append(t_start)
+                mod_list.append(int(self._signal_id_to_mod_id[sig_id]))
+                pos_list.append(pos)
 
-        # ------------------------------------------------------------------
+        # -------------------------
         # 2) ACTUATOR TOKENS
-        # ------------------------------------------------------------------
+        # -------------------------
         for ch in act_chunks_sorted:
-            t_start = float(ch["chunk_start_time"])
+            pos = int(ch["pos"])
             emb_map = ch.get("embeddings") or {}
 
             for sig_id in sorted(emb_map.keys()):
@@ -198,40 +138,36 @@ class BuildTokensTransform:
                 spec = self.signal_specs.get_by_id(sig_id)
 
                 emb_list.append(emb)
-                sig_list.append(sig_id)
+                sig_list.append(int(sig_id))
                 name_list.append(spec.name)
                 role_list.append(ROLE_ACTUATOR)
-                mod_list.append(self._signal_id_to_mod_id[sig_id])
-                t_list.append(t_start)
+                mod_list.append(int(self._signal_id_to_mod_id[sig_id]))
+                pos_list.append(pos)
 
-        # ------------------------------------------------------------------
-        # 3) POSITIONS (aligned with embedding order)
-        # ------------------------------------------------------------------
-        pos = self._compute_pos_ids(t_cut, t_list)
+        pos = np.asarray(pos_list, dtype=np.int32)
 
-        # ------------------------------------------------------------------
-        # 4) output
-        # ------------------------------------------------------------------
-        output_emb = {}
-        output_shapes = {}
-        output_names = {}
+        # -------------------------
+        # 3) OUTPUTS (window-level)
+        # -------------------------
+        output_emb: Dict[int, np.ndarray] = {}
+        output_shapes: Dict[int, Any] = {}
+        output_names: Dict[int, str] = {}
 
         embedded_output = window.get("embedded_output") or {}
         output_shapes_all = window.get("embedded_output_shapes") or {}
 
         for sig_id, emb in embedded_output.items():
-            spec = self.signal_specs.get_by_id(sig_id)
-            output_emb[sig_id] = emb
-            output_names[sig_id] = spec.name
+            spec = self.signal_specs.get_by_id(int(sig_id))
+            output_emb[int(sig_id)] = emb
+            output_names[int(sig_id)] = spec.name
 
-            if sig_id in output_shapes_all:
-                output_shapes[sig_id] = output_shapes_all[sig_id]
-            else:
+            if int(sig_id) not in output_shapes_all:
                 raise KeyError(f"Missing output shape for signal_id={sig_id}")
+            output_shapes[int(sig_id)] = output_shapes_all[int(sig_id)]
 
-        # ------------------------------------------------------------------
-        # 5) Write back into window
-        # ------------------------------------------------------------------
+        # -------------------------
+        # 4) WRITE BACK (contract)
+        # -------------------------
         window["emb_chunks"] = emb_list
         window["pos"] = pos
         window["id"] = np.asarray(sig_list, dtype=np.int32)
@@ -250,8 +186,8 @@ class BuildTokensTransform:
             len(emb_list),
             sum(r == ROLE_CONTEXT for r in role_list),
             sum(r == ROLE_ACTUATOR for r in role_list),
-            pos.min() if len(pos) else None,
-            pos.max() if len(pos) else None,
+            int(pos.min()) if pos.size else None,
+            int(pos.max()) if pos.size else None,
         )
 
         return window
