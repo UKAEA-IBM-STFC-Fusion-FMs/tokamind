@@ -33,7 +33,7 @@ def setup_logging(
     logger_name: str = "mmt",
     level: str = "INFO",
     log_to_file: bool = True,
-    filename: str = "out.log",
+    filename: str | None = "out.log",
     console: bool = True,
 ) -> py_logging.Logger:
     """
@@ -52,7 +52,7 @@ def setup_logging(
     log_to_file :
         If True, add a FileHandler pointing to `output_dir / filename`.
     filename :
-        Name of the log file (default: "out.log").
+        Name of the log file. If None, file logging is disabled.
     console:
         True to print logs
     Returns
@@ -82,7 +82,7 @@ def setup_logging(
         logger.addHandler(console_handler)
 
     # Optional file handler
-    if log_to_file:
+    if log_to_file and filename is not None:
         output_dir = Path(run_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         file_path = output_dir / filename

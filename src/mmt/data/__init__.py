@@ -19,6 +19,7 @@ from .transforms.trim_chunks import TrimChunksTransform
 from .transforms.select_valid_windows import SelectValidWindowsTransform
 from .transforms.embed_chunks import EmbedChunksTransform
 from .transforms.build_tokens import BuildTokensTransform
+from .transforms.tune_dct3d import TuneDCT3DTransform
 from .transforms.compose import ComposeTransforms
 
 
@@ -45,6 +46,7 @@ __all__ = [
     "SelectValidWindowsTransform",
     "EmbedChunksTransform",
     "BuildTokensTransform",
+    "TuneDCT3DTransform",
     "ComposeTransforms",
     "MMTCollate",
     "SignalSpec",

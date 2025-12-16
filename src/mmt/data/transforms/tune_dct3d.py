@@ -2,231 +2,269 @@
 TuneDCT3DTransform
 ==================
 
-Terminal transform used to tune DCT3D embedding parameters.
+Tune DCT3D truncation parameters (keep_h, keep_w, keep_t) per (role, signal).
 
-This transform:
-- observes window-level data (after Chunk → SelectValidWindows → TrimChunks),
-- evaluates multiple DCT3D parameter combinations per signal and role,
-- accumulates native-space reconstruction errors,
-- does NOT forward any data downstream.
+This is a pass-through transform designed to be inserted in the model_transform
+chain after TrimChunksTransform. It observes each kept window, accumulates
+per-window RMSE for each candidate configuration, and later selects the smallest
+effective configuration under a per-role threshold.
 
-It is intended to be used only by the tune_dct3d script.
+Objective
+---------
+For each window:
+    rmse_win = sqrt(mean((x_hat - x)^2))
+
+Aggregate per (role, signal, cfg) with equal weight per window:
+    score(cfg) = mean_windows(rmse_win)
+
+Selection
+---------
+Candidates are ranked by effective dimension:
+
+    D_eff = min(keep_h, H) * min(keep_w, W) * min(keep_t, T)
+
+where native shapes map to (H, W, T) using the same convention as DCT3D:
+  (T,)    -> values_shape=()      -> H=1, W=1
+  (C, T)  -> values_shape=(C,)    -> H=C, W=1
+  (H,W,T) -> values_shape=(H, W)  -> H=H, W=W
+
+Then for each (role, signal):
+  - pick the first cfg with score(cfg) <= threshold[role]
+  - if none, pick cfg with minimum score(cfg)
+
+Expected window format
+----------------------
+This transform expects the same "signal entry" format used in the preprocessing
+pipeline:
+
+    window[role][name] == {"values": np.ndarray or array_like}
+
+No fallback formats are supported on purpose.
 """
 
 from __future__ import annotations
 
 from itertools import product
-from typing import Any, Dict, Iterable, List, Tuple
-
-import numpy as np
+from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 import logging
+import numpy as np
+
+from mmt.data.signal_spec import SignalSpecRegistry
+from mmt.data.embeddings.dct3d_codec import DCT3DCodec
+from mmt.data.embeddings.codec_utils import infer_hw_from_values_shape
 
 logger = logging.getLogger("mmt.TuneDCT3D")
 
 
+def _effective_dim(native_shape: Tuple[int, ...], cfg: Tuple[int, int, int]) -> int:
+    """
+    Effective latent dimension for native shape and keep config.
+    native_shape must be (T,), (C,T), or (H,W,T).
+    """
+    if len(native_shape) not in (1, 2, 3):
+        raise ValueError(f"Unsupported native_shape={native_shape!r}")
+
+    values_shape = tuple(native_shape[:-1])  # exclude time axis
+    H, W = infer_hw_from_values_shape(values_shape)
+    T = int(native_shape[-1])
+
+    keep_h, keep_w, keep_t = cfg
+    return min(keep_h, H) * min(keep_w, W) * min(keep_t, T)
+
+
 class TuneDCT3DTransform:
     """
-    Terminal transform that accumulates reconstruction errors for different
-    DCT3D configurations.
+    Tune DCT3D truncation parameters (keep_h, keep_w, keep_t) per signal.
 
-    Notes
+    This is a **pass-through, stateful transform** designed to run inside
+    `ComposeTransforms`, typically after `TrimChunksTransform`. It observes
+    each kept window, evaluates multiple DCT3D configurations for every
+    (role, signal), and accumulates reconstruction error statistics.
+
+    Input
     -----
-    - This transform has side effects only.
-    - It always returns `None`.
-    - The caller is responsible for stopping iteration once budgets are reached.
+    A single window dict with native (non-embedded) signal values:
+
+        window = {
+            "input":    { signal_name: np.ndarray, ... },
+            "actuator": { signal_name: np.ndarray, ... },
+            "output":   { signal_name: np.ndarray, ... },
+            ...
+        }
+
+    Arrays are expected to have shape:
+        (T,), (C, T), or (H, W, T), with time on the last axis.
+
+    Behaviour
+    ---------
+    For each window and each signal:
+      • apply all candidate DCT3D keep configurations,
+      • compute per-window RMSE between original and reconstructed signal,
+      • aggregate RMSE with equal weight per window.
+
+    The transform does **not** modify or drop windows; it returns the input
+    window unchanged.
+
+    Output
+    ------
+    The window dict, unchanged (pass-through).
+
+    Final tuning results are retrieved by calling `select_best()`, which
+    returns the selected DCT3D configuration per (role, signal) based on
+    per-role error thresholds and minimal effective latent dimension.
     """
 
     def __init__(
         self,
         *,
-        signal_specs,
-        codecs,
+        signal_specs: SignalSpecRegistry,
         keep_h: Iterable[int],
         keep_w: Iterable[int],
         keep_t: Iterable[int],
-        thresholds: Dict[str, float],
+        thresholds: Mapping[str, float],
         max_coeffs: int | None = None,
-    ):
-        """
-        Parameters
-        ----------
-        signal_specs
-            Output of build_signal_specs(); used to determine signals, roles,
-            modalities, and native shapes.
-
-        codecs
-            Dict[name, codec] built from signal_specs.
-
-        keep_h / keep_w / keep_t
-            Candidate truncation values for DCT3D.
-
-        thresholds
-            Role-specific RMSE thresholds, e.g.:
-              { "input": 0.02, "actuator": 0.05, "output": 0.01 }
-
-        max_coeffs
-            Optional hard limit on keep_h * keep_w * keep_t. Combinations above
-            this value are skipped.
-        """
+    ) -> None:
         self.signal_specs = signal_specs
-        self.codecs = codecs
-        self.thresholds = thresholds
-        self.max_coeffs = max_coeffs
+        self.thresholds = {k: float(v) for k, v in thresholds.items()}
 
-        # ------------------------------------------------------------
-        # Build ordered candidate list (smallest first)
-        # ------------------------------------------------------------
-        candidates: List[Tuple[int, int, int]] = []
+        # candidate keep configs
+        self.candidates: List[Tuple[int, int, int]] = []
         for h, w, t in product(keep_h, keep_w, keep_t):
-            n_coeffs = h * w * t
-            if max_coeffs is not None and n_coeffs > max_coeffs:
+            h, w, t = int(h), int(w), int(t)
+            if h <= 0 or w <= 0 or t <= 0:
                 continue
-            candidates.append((h, w, t))
-
-        # Sort by compactness (primary objective)
-        self.candidates = sorted(candidates, key=lambda x: x[0] * x[1] * x[2])
+            if max_coeffs is not None and (h * w * t) > int(max_coeffs):
+                continue
+            self.candidates.append((h, w, t))
 
         if not self.candidates:
-            raise ValueError("No valid DCT3D candidate configurations found.")
+            raise ValueError("TuneDCT3D: no candidate configurations found")
 
-        # ------------------------------------------------------------
-        # Accumulators:
-        #   stats[role][signal_name][(h,w,t)] = [sum_sq_error, count]
-        # ------------------------------------------------------------
+        # one codec per candidate
+        self._codecs: Dict[Tuple[int, int, int], DCT3DCodec] = {
+            cfg: DCT3DCodec(cfg[0], cfg[1], cfg[2]) for cfg in self.candidates
+        }
+
+        # stats[role][name][cfg] = [sum_rmse, n_windows]
         self.stats: Dict[str, Dict[str, Dict[Tuple[int, int, int], List[float]]]] = {}
+        self.rep_shape: Dict[Tuple[str, str], Tuple[int, ...]] = {}
 
-        for spec in self.signal_specs.values():
-            role = spec.role
-            name = spec.name
-
-            self.stats.setdefault(role, {})
-            self.stats[role].setdefault(name, {})
-
+        # pre-create slots for all specs (ignore original encoder_name on purpose)
+        for spec in self.signal_specs.specs:
+            role, name = spec.role, spec.name
+            self.stats.setdefault(role, {}).setdefault(name, {})
             for cfg in self.candidates:
                 self.stats[role][name][cfg] = [0.0, 0.0]
 
-        logger.info(
-            "Initialized TuneDCT3DTransform with %d candidate configs",
-            len(self.candidates),
-        )
+        logger.info("TuneDCT3D initialized | candidates=%d", len(self.candidates))
 
-    # ------------------------------------------------------------------
-    # Transform API
-    # ------------------------------------------------------------------
-
-    def __call__(self, window: Dict[str, Any]) -> None:
-        """
-        Observe a single window and accumulate reconstruction errors.
-
-        Parameters
-        ----------
-        window
-            Dict emitted by TrimChunksTransform. Expected to contain:
-              - window["input"], window["actuator"], window["output"]
-              - each maps signal_name -> native NumPy array
-        """
+    def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
         for role in ("input", "actuator", "output"):
-            if role not in window:
+            group = window.get(role)
+            if not isinstance(group, dict):
                 continue
 
-            data_by_signal = window[role]
-            if not isinstance(data_by_signal, dict):
-                continue
-
-            for name, native_arr in data_by_signal.items():
-                if name not in self.codecs:
+            for name, entry in group.items():
+                if self.signal_specs.get(role, name) is None:
                     continue
 
-                codec = self.codecs[name]
-                spec = self.signal_specs[name]
-
-                # native_arr shape: (...), batch dim already collapsed
-                native_arr = np.asarray(native_arr)
-
-                for h, w, t in self.candidates:
-                    # Encode → decode for this configuration
-                    coeffs = codec.encode(
-                        native_arr,
-                        keep_h=h,
-                        keep_w=w,
-                        keep_t=t,
+                if not isinstance(entry, dict) or "values" not in entry:
+                    raise TypeError(
+                        f"TuneDCT3D expected window[{role}][{name}] to be a dict with key 'values'"
                     )
-                    recon = codec.decode(coeffs, native_arr.shape)
 
-                    # RMSE in native space
-                    diff = recon - native_arr
-                    rmse = float(np.sqrt(np.mean(diff**2)))
+                x = np.asarray(entry["values"])
+                if x.size == 0 or x.ndim not in (1, 2, 3):
+                    continue
 
-                    acc = self.stats[role][name][(h, w, t)]
-                    acc[0] += rmse**2
-                    acc[1] += 1
+                # Skip non-finite windows (prevents rmse=nan poisoning)
+                if not np.isfinite(x).all():
+                    continue
 
-    # ------------------------------------------------------------------
-    # Selection logic
-    # ------------------------------------------------------------------
+                self.rep_shape.setdefault((role, name), tuple(x.shape))
+
+                for cfg in self.candidates:
+                    codec = self._codecs[cfg]
+                    z = codec.encode(x)
+                    x_hat = codec.decode(z, original_shape=x.shape)
+
+                    # Also skip if codec produces non-finite output (rare, but safe)
+                    if not np.isfinite(x_hat).all():
+                        continue
+
+                    diff = (x_hat - x).astype(np.float64, copy=False)
+                    rmse = float(np.sqrt(np.mean(diff * diff)))
+
+                    acc = self.stats[role][name][cfg]
+                    acc[0] += rmse
+                    acc[1] += 1.0
+
+        return window
 
     def select_best(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """
-        Select the best configuration per (role, signal).
-
-        Strategy
-        --------
-        - Iterate candidates in increasing size order
-        - Pick the first configuration whose mean RMSE <= threshold
-        - If none satisfies the threshold, pick the configuration with
-          minimum mean RMSE
-
-        Returns
-        -------
-        result : dict
-            Nested dict:
-              result[role][signal_name] = {
-                  "keep_h": int,
-                  "keep_w": int,
-                  "keep_t": int,
-                  "rmse": float,
-                  "num_coeffs": int,
-              }
+        Return per-(role, signal) selected keep config and score.
+        Only includes signals that were actually observed (rep_shape exists).
         """
-        result: Dict[str, Dict[str, Dict[str, Any]]] = {}
+        out: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
-        for role, signals in self.stats.items():
-            role_threshold = self.thresholds.get(role, None)
-            if role_threshold is None:
-                raise KeyError(f"No RMSE threshold defined for role={role!r}")
+        for role, by_sig in self.stats.items():
+            if role not in self.thresholds:
+                raise KeyError(f"TuneDCT3D missing threshold for role={role!r}")
+            thr = float(self.thresholds[role])
 
-            result.setdefault(role, {})
+            for name, by_cfg in by_sig.items():
+                shape = self.rep_shape.get((role, name))
+                if shape is None:
+                    continue
 
-            for name, cfg_stats in signals.items():
-                best_cfg = None
-                best_rmse = float("inf")
+                ranked = sorted(
+                    self.candidates, key=lambda c: (_effective_dim(shape, c), c)
+                )
 
-                # First pass: smallest config under threshold
-                for h, w, t in self.candidates:
-                    sum_sq, count = cfg_stats[(h, w, t)]
-                    if count == 0:
-                        continue
+                # Compute score = mean RMSE over windows
+                scores: Dict[Tuple[int, int, int], float] = {}
+                for cfg in ranked:
+                    s, n = by_cfg[cfg]
+                    if n == 0:
+                        scores[cfg] = float("inf")
+                    else:
+                        scores[cfg] = float(s / n)
 
-                    mean_rmse = np.sqrt(sum_sq / count)
-                    if mean_rmse <= role_threshold:
-                        best_cfg = (h, w, t, mean_rmse)
+                # Choose smallest under threshold (ignore inf/nan)
+                chosen = None
+                for cfg in ranked:
+                    v = scores[cfg]
+                    if np.isfinite(v) and v <= thr:
+                        chosen = cfg
                         break
 
-                    if mean_rmse < best_rmse:
-                        best_rmse = mean_rmse
-                        best_cfg = (h, w, t, mean_rmse)
+                if chosen is None:
+                    chosen = min(ranked, key=lambda config: scores[config])
 
-                if best_cfg is None:
-                    raise RuntimeError(f"No statistics collected for {role}:{name}")
+                # Also compute effective keep_* (clipped by shape)
+                values_shape = tuple(shape[:-1])
+                H, W = infer_hw_from_values_shape(values_shape)
+                T = int(shape[-1])
+                eff_keep_h = min(int(chosen[0]), H)
+                eff_keep_w = min(int(chosen[1]), W)
+                eff_keep_t = min(int(chosen[2]), T)
 
-                h, w, t, rmse = best_cfg
-                result[role][name] = {
-                    "keep_h": h,
-                    "keep_w": w,
-                    "keep_t": t,
-                    "rmse": float(rmse),
-                    "num_coeffs": int(h * w * t),
+                out.setdefault(role, {})[name] = {
+                    # requested keep (from search space)
+                    "keep_h": int(chosen[0]),
+                    "keep_w": int(chosen[1]),
+                    "keep_t": int(chosen[2]),
+                    # effective keep (actually used given the signal shape)
+                    "eff_keep_h": int(eff_keep_h),
+                    "eff_keep_w": int(eff_keep_w),
+                    "eff_keep_t": int(eff_keep_t),
+                    "rmse_mean_windows": float(scores[chosen]),
+                    "threshold": float(thr),
+                    "effective_dim": int(_effective_dim(shape, chosen)),
+                    "rep_shape": shape,
+                    "n_windows": int(by_cfg[chosen][1]),
                 }
 
-        return result
+        return out

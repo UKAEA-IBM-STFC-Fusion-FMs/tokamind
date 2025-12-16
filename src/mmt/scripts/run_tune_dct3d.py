@@ -4,6 +4,11 @@ import argparse
 import torch
 import torch.multiprocessing as mp
 
+import copy
+import yaml
+from pathlib import Path
+
+import numpy as np
 
 from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
@@ -12,25 +17,22 @@ from scripts.pipelines.utils.preprocessing_utils import (
 from mmt.utils.config import (
     build_baseline_task_config,
     load_experiment_config,
-    validate_train_config,
 )
 from mmt.utils import (
     set_seed,
     setup_logging,
     initialize_mmt_datasets,
-    initialize_mmt_dataloaders,
 )
 
 from mmt.data import (
     build_signal_role_modality_map,
     build_signal_specs,
-    build_codecs,
     ChunkWindowsTransform,
     SelectValidWindowsTransform,
     TrimChunksTransform,
+    TuneDCT3DTransform,
     ComposeTransforms,
     WindowStreamedDataset,
-    MMTCollate,
 )
 
 
@@ -81,7 +83,9 @@ def main() -> None:
     # ------------------------------------------------------------------
     args = parse_args_tune_dct3d()
     cfg_mmt = load_experiment_config(args.phase_config)
-    validate_train_config(cfg_mmt.raw)
+
+    if "tune_dct3d" not in cfg_mmt.raw:
+        raise KeyError("Missing 'tune_dct3d' section in config.")
 
     # Small sub-configs for readability
     cfg_prep = cfg_mmt.preprocess
@@ -89,20 +93,7 @@ def main() -> None:
     cfg_trim = cfg_prep["trim_chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
 
-    cfg_data = cfg_mmt.data
-    cfg_model = cfg_mmt.model
-    cfg_loader = cfg_mmt.loader
-    cfg_collate = cfg_mmt.collate
-    cfg_train = cfg_mmt.train
-
-    enable_cache = cfg_data["cache"].get("enable", False)
-    num_workers_cache = cfg_data["cache"].get("num_workers", 0)
-    keep_output_native = cfg_data.get("keep_output_native", False)
-
-    cfg_backbone = cfg_model["backbone"]
-    cfg_modality_heads = cfg_model["modality_heads"]
-    cfg_output_adapters = cfg_model["output_adapters"]
-    max_positions = cfg_trim["max_chunks"]
+    cfg_tune = cfg_mmt.raw["tune_dct3d"]
 
     # Baseline task config (with overrides such as subset_of_shots)
     cfg_task = build_baseline_task_config(cfg_mmt)
@@ -115,12 +106,12 @@ def main() -> None:
     logger = setup_logging(
         cfg_mmt.paths["run_dir"],
         logger_name="mmt",
-        filename="finetune.log",
+        filename=None,
         console=True,
     )
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
 
-    logger = logging.getLogger("mmt.Task")
+    logger = logging.getLogger("mmt.TuneDCT3D")
     logger.info(f"task = {cfg_mmt.task} | phase = {cfg_mmt.phase} | device = {device}")
 
     # ------------------------------------------------------------------
@@ -138,18 +129,27 @@ def main() -> None:
         dict_metadata=dict_metadata,
         chunk_length_sec=cfg_chunks["chunk_length"],
     )
-    codecs = build_codecs(signal_specs)
 
     # ------------------------------------------------------------------
     # Model-specific transform chain (shot -> windows)
     # ------------------------------------------------------------------
+    tune_transform = TuneDCT3DTransform(
+        signal_specs=signal_specs,
+        keep_h=cfg_tune["search_space"]["keep_h"],
+        keep_w=cfg_tune["search_space"]["keep_w"],
+        keep_t=cfg_tune["search_space"]["keep_t"],
+        thresholds=cfg_tune["objective"]["thresholds"],
+    )
+
     mmt_transform_map = ComposeTransforms(
         [
             ChunkWindowsTransform(
+                dict_metadata=dict_metadata,
                 chunk_length_sec=cfg_chunks["chunk_length"],
                 stride_sec=cfg_chunks["stride"],
             ),
             SelectValidWindowsTransform(
+                dict_metadata=dict_metadata,
                 min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_valid_win["min_valid_chunks"],
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],
@@ -161,7 +161,7 @@ def main() -> None:
                 output_length=cfg_task["task_window_segmenter"]["output_length"],
                 max_chunks=cfg_trim["max_chunks"],
             ),
-            # TODO: we will add the new transform here
+            tune_transform,
         ]
     )
 
@@ -176,6 +176,23 @@ def main() -> None:
         verbose=True,
     )
 
+    # random shot selection
+    # Select the dataset and enforce n_shots
+    cfg_sampling = cfg_tune["sampling"]
+    ds_shots_full = datasets_mmt["train"]
+
+    n_shots = cfg_sampling.get("n_shots")
+    if n_shots is not None:
+        rng = np.random.default_rng(cfg_mmt.seed)
+        all_indices = np.arange(len(ds_shots_full))
+        sel_indices = rng.choice(
+            all_indices, size=min(n_shots, len(all_indices)), replace=False
+        )
+        # simple index-based subset
+        ds_shots = [ds_shots_full[i] for i in sel_indices]
+    else:
+        ds_shots = ds_shots_full
+
     if DEBUG_MODE:
         ds = datasets_mmt["train"]
         shot = ds[0]
@@ -186,30 +203,80 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Streaming dataset (window-level)
     # ------------------------------------------------------------------
-    # For tuning, streaming is the default to avoid caching full datasets.
-    # Shuffle shots only if you want a random sample of windows early.
-    shuffle_shots = bool(_get_nested(cfg_mmt.raw, "loader.shuffle", True))
     ds_windows = WindowStreamedDataset(
-        ds_stream,
-        shuffle_shots=shuffle_shots,
+        ds_shots,
+        shuffle_shots=False,
         seed=cfg_mmt.seed,
     )
 
     # ------------------------------------------------------------------
-    # Dataloaders (always window-level batches)
+    # Shot exploration
     # ------------------------------------------------------------------
-    collate_fn = MMTCollate({**cfg_collate, "keep_output_native": keep_output_native})
+    max_windows = cfg_sampling.get("max_windows", None)
 
-    dataloaders_mmt = initialize_mmt_dataloaders(
-        datasets_for_loader,
-        collate_fn,
-        batch_size=cfg_loader["batch_size"],
-        num_workers=cfg_loader["num_workers"],
-        shuffle=cfg_loader["shuffle"],
-        drop_last=cfg_loader["drop_last"],
-        seed=cfg_mmt.seed,
-    )
+    n_windows_total = 0
+    for _window in ds_windows:
+        n_windows_total += 1
+        if max_windows is not None and n_windows_total >= max_windows:
+            break
+
+    logger.info(f"Processed windows: total={n_windows_total}")
+
+    # ------------------------------------------------------------------
+    # Select and print best configs
+    # ------------------------------------------------------------------
+    best = tune_transform.select_best()
+
+    logger.info("Selected configurations:")
+    for role, by_sig in best.items():
+        for name, info in by_sig.items():
+            logger.info(
+                f"[{role}:{name}] "
+                f"shape={info['rep_shape']} "
+                f"keep=({info['eff_keep_h']},{info['eff_keep_w']},{info['eff_keep_t']}) "
+                f"rmse={info['rmse_mean_windows']:.4e} "
+                f"eff_dim={info['effective_dim']}"
+            )
+
+    # ------------------------------------------------------------------
+    # Create a tuned copy of embeddings config
+    # ------------------------------------------------------------------
+    embeddings_tuned = copy.deepcopy(cfg_mmt.embeddings)
+
+    # Ensure per-signal override section exists
+    embeddings_tuned.setdefault("per_signal_overrides", {})
+    for role, by_sig in best.items():
+        embeddings_tuned["per_signal_overrides"].setdefault(role, {})
+
+        for name, info in by_sig.items():
+            # Only override signals that are actually using DCT3D
+            spec = signal_specs.get(role, name)
+            if spec is None or spec.encoder_name != "dct3d":
+                continue
+
+            embeddings_tuned["per_signal_overrides"][role][name] = {
+                "encoder_name": "dct3d",
+                "encoder_kwargs": {
+                    "keep_h": int(info["eff_keep_h"]),
+                    "keep_w": int(info["eff_keep_w"]),
+                    "keep_t": int(info["eff_keep_t"]),
+                },
+            }
+
+    out_path = Path(cfg_mmt.paths["run_dir"]) / "embeddings_tuned.yaml"
+    with open(out_path, "w") as f:
+        yaml.safe_dump(
+            embeddings_tuned,
+            f,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+
+    logger.info(f"Wrote tuned embeddings config to {out_path}")
 
 
 if __name__ == "__main__":
     main()
+
+    # TODO:
+    #  test when n_shots > total shots

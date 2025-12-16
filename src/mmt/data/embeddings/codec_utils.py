@@ -7,7 +7,7 @@ from .dct3d_codec import DCT3DCodec
 from .identity_codec import IdentityCodec
 
 
-def _infer_hw_from_values_shape(values_shape: Tuple[int, ...]) -> Tuple[int, int]:
+def infer_hw_from_values_shape(values_shape: Tuple[int, ...]) -> Tuple[int, int]:
     """
     Map values_shape (excluding time) to (H, W) used by DCT3D.
 
@@ -61,7 +61,7 @@ def compute_embedding_dim_for_encoder(
 
     if encoder_name == "dct3d":
         # DCT3D: work on a (H, W, T) view. H/W depend on values_shape, T on n_samples.
-        H, W = _infer_hw_from_values_shape(values_shape)
+        H, W = infer_hw_from_values_shape(values_shape)
         T = n_samples
 
         keep_h = int(encoder_kwargs.get("keep_h", H))

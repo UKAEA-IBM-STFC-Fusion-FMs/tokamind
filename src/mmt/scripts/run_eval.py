@@ -156,10 +156,12 @@ def main() -> None:
     mmt_transform_map = ComposeTransforms(
         [
             ChunkWindowsTransform(
+                dict_metadata=dict_metadata,
                 chunk_length_sec=cfg_chunks["chunk_length"],
                 stride_sec=cfg_chunks["stride"],
             ),
             SelectValidWindowsTransform(
+                dict_metadata=dict_metadata,
                 min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_valid_win["min_valid_chunks"],
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],

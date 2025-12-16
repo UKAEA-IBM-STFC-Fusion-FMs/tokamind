@@ -16,7 +16,7 @@ collate:
 
 data:
   cache:
-    enable: true
+    enable: false
     num_workers: 2
   keep_output_native: false
 

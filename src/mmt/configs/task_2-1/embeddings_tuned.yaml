@@ -1,0 +1,78 @@
+defaults:
+  input:
+    timeseries:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 1
+        keep_w: 1
+        keep_t: 10
+    profile:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 5
+        keep_w: 1
+        keep_t: 10
+    video:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 16
+        keep_w: 16
+        keep_t: 5
+  actuator:
+    timeseries:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 1
+        keep_w: 1
+        keep_t: 10
+    profile:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 5
+        keep_w: 1
+        keep_t: 10
+    video:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 16
+        keep_w: 16
+        keep_t: 5
+  output:
+    timeseries:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 1
+        keep_w: 1
+        keep_t: 5
+    profile:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 10
+        keep_w: 1
+        keep_t: 5
+    video:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 8
+        keep_w: 8
+        keep_t: 5
+per_signal_overrides:
+  output:
+    equilibrium-psi:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 16
+        keep_w: 16
+        keep_t: 5
+    pf_active-coil_current:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 10
+        keep_w: 1
+        keep_t: 50
+    pf_active-solenoid_current:
+      encoder_name: dct3d
+      encoder_kwargs:
+        keep_h: 1
+        keep_w: 1
+        keep_t: 6
