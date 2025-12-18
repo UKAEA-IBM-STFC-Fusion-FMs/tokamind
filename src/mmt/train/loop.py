@@ -55,7 +55,7 @@ from __future__ import annotations
 import logging
 import math
 import os
-from typing import Dict, Any
+from typing import Dict, Any, cast
 
 import torch
 
@@ -102,7 +102,6 @@ def train_finetune(
     model : MultiModalTransformer
     train_loader, val_loader : DataLoader
         DataLoaders returned by initialize_mmt_dataloaders()
-        Each loader has attribute `.is_streaming`.
     run_dir : str
         Directory used for checkpoints and logs.
     train_cfg : dict
@@ -136,10 +135,9 @@ def train_finetune(
     warmup_frac = float(train_cfg["scheduler"]["warmup_steps_fraction"])
     warmup_frac = float(max(0.0, min(1.0, warmup_frac)))
 
-    # Streaming or cached mode?
-    is_streaming = getattr(train_loader, "is_streaming", False)
-    if is_streaming:
-        train_batches_per_epoch = int(loader_cfg["streaming"]["batches_per_epoch"])
+    bpe = loader_cfg.get("batches_per_epoch", None)
+    if bpe is not None:
+        train_batches_per_epoch = int(cast(Any, bpe))
     else:
         train_batches_per_epoch = len(train_loader)
 
@@ -301,7 +299,7 @@ def train_finetune(
                 grad_accum_steps=grad_accum_steps,
                 train=True,
                 global_step=global_step,
-                max_batches=train_batches_per_epoch if is_streaming else None,
+                max_batches=train_batches_per_epoch,
             )
 
             # ---------------------------- VALIDATION -----------------------

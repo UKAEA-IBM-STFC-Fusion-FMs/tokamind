@@ -10,8 +10,7 @@ the MMT v0 specification:
   • automatic inheritance of lr/wd from backbone,
   • freeze → force lr=0 and wd=0 (with warnings),
   • model_init.load_parts normalized (defaults to True),
-  • dataset loader rules (streamed vs cached),
-  • basic sanity checks (num_workers >= 1).
+  • dataset loader rules: if we do not cache, we need to define batches_per_epoch
 
 Any missing or inconsistent entry raises a clear KeyError/ValueError
 before training starts.
@@ -164,25 +163,22 @@ def _validate_stage_consistency(stage_cfg: Dict[str, Any]) -> None:
 
 def _validate_loader(cfg: Dict[str, Any]) -> None:
     loader_cfg = cfg.get("loader", {})
+    phase = cfg.get("phase", None)
 
-    # num_workers must be >=1
-    nw = loader_cfg.get("num_workers", 1)
-    if not isinstance(nw, int) or nw < 1:
-        raise ValueError("loader.num_workers must be an integer >= 1.")
+    data_cfg = cfg.get("data", {})
+    cache_cfg = data_cfg.get("cache") or {}
+    cache_enable = bool(cache_cfg.get("enable", False))
 
-    # Check mutually exclusive loader modes
-    streamed = loader_cfg.get("streaming", False)
-    cached = loader_cfg.get("cached", False)
+    bpe = loader_cfg.get("batches_per_epoch", None)
 
-    if streamed and cached:
-        raise ValueError("loader.streaming and loader.cached cannot both be true.")
-
-    if not streamed and not cached:
-        warnings.warn(
-            "[MMT config] Neither streaming nor cached dataset mode selected; "
-            "defaulting to cached=False, streaming=False may degrade performance.",
-            stacklevel=2,
-        )
+    # Training rule:
+    # If cache is disabled (=> streaming windows), an epoch length must be defined.
+    if phase in ("pretrain", "finetune"):
+        if not cache_enable and bpe is None:
+            raise ValueError(
+                "When data.cache.enable=false (streaming), "
+                "loader.batches_per_epoch must be set (int >= 1)."
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -219,7 +215,6 @@ def validate_train_config(cfg: Dict[str, Any]) -> None:
         (lr/wd inheritance, freeze→force-zero rules),
       • validation of model_init.load_parts,
       • validation of dataset loader rules (streamed vs cached),
-      • basic sanity checks (num_workers >= 1).
 
     Parameters
     ----------
@@ -287,14 +282,14 @@ def validate_eval_config(cfg: Dict[str, Any]) -> None:
       (these apply only to training).
     - No model_init.load_parts
       (evaluation ALWAYS loads all four model blocks).
-    - We still validate loader.num_workers.
+    - We still validate loader
     - We enforce data.keep_output_native = True for metrics + traces.
     - We DO NOT enforce any streaming/cached logic here.
       Dataset mode is controlled exclusively via data.cache.enable.
     """
 
     # ---------------------------------------------------------
-    # 1. Basic loader validation (num_workers >= 1, etc.)
+    # 1. Basic loader validation
     # ---------------------------------------------------------
     _validate_loader(cfg)
 

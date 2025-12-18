@@ -1,20 +1,18 @@
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import random
 import torch
 
-# Token roles (same as in BuildTokensTransform)
-ROLE_CONTEXT = 0
-ROLE_ACTUATOR = 1
-ROLE_OUTPUT = 2
-
-# Explicit PAD semantics for token-level fields
-PAD_ID = -1  # never a real signal_id
-PAD_ROLE = -1  # no semantic role
-PAD_MOD = -1  # no modality
-PAD_POS = 0  # arbitrary, unused by model for PAD
+from mmt.constants import (
+    ROLE_CONTEXT,
+    ROLE_ACTUATOR,
+    PAD_ID,
+    PAD_ROLE,
+    PAD_MOD,
+    PAD_POS,
+)
 
 
 class MMTCollate:
@@ -139,6 +137,9 @@ class MMTCollate:
         self.drop_act_overrides = cfg_collate.get("p_drop_actuators_overrides", {})
         self.drop_outputs_overrides = cfg_collate.get("p_drop_outputs_overrides", {})
 
+        # Reusable empty embedding for padded slots
+        self._empty_emb = np.empty((0,), dtype=np.float32)
+
     # ------------------------------------------------------------------ #
     def __call__(self, batch: List[Any]) -> Dict[str, Any]:
         """
@@ -156,13 +157,12 @@ class MMTCollate:
         # 0. Sanity-check + filter Nones → flat list of window dicts
         # --------------------------------------------------------------- #
         flat_windows: List[Dict[str, Any]] = []
-
         for item in batch:
             if item is None:
                 continue
             if not isinstance(item, dict):
                 raise TypeError(
-                    "MMTCollate now expects each batch element to be a single "
+                    "MMTCollate expects each batch element to be a single "
                     f"window dict, got {type(item)} instead."
                 )
             flat_windows.append(item)
@@ -174,33 +174,34 @@ class MMTCollate:
         # --------------------------------------------------------------- #
         # 1. Extract per-window token arrays + output metadata
         # --------------------------------------------------------------- #
-        emb_lists = []
-        pos_lists = []
-        id_lists = []
-        mod_lists = []
-        role_lists = []
-        name_lists = []
+        emb_lists: List[List[np.ndarray]] = []
+        pos_lists: List[np.ndarray] = []
+        id_lists: List[np.ndarray] = []
+        mod_lists: List[np.ndarray] = []
+        role_lists: List[np.ndarray] = []
+        name_lists: List[List[str]] = []
 
-        out_dicts = []
-        out_shapes_dicts = []
-        out_names_dicts = []
+        out_dicts: List[Dict[int, Any]] = []
+        out_shapes_dicts: List[Dict[int, Any]] = []
 
-        all_target_ids = set()
+        all_target_ids: set[int] = set()
         id_to_output_name: Dict[int, str] = {}
 
         for w in flat_windows:
+            # Keep embeddings ragged (list-of-arrays)
             emb_lists.append(w["emb_chunks"])
-            pos_lists.append(w["pos"])
-            id_lists.append(w["id"])
-            mod_lists.append(w["mod"])
-            role_lists.append(w["role"])
-            name_lists.append(w["signal_name"])
+
+            # Force signed dtypes (prevents any accidental uint wrap)
+            pos_lists.append(np.asarray(w["pos"], dtype=np.int32))
+            id_lists.append(np.asarray(w["id"], dtype=np.int32))
+            mod_lists.append(np.asarray(w["mod"], dtype=np.int16))
+            role_lists.append(np.asarray(w["role"], dtype=np.int8))
+            name_lists.append(list(w["signal_name"]))
 
             out_dicts.append(w["output_emb"])
             out_shapes_dicts.append(w["output_shapes"])
-            output_names = w.get("output_names", {})
-            out_names_dicts.append(output_names)
 
+            output_names = w.get("output_names", {})
             all_target_ids.update(w["output_emb"].keys())
 
             for sid, sname in output_names.items():
@@ -218,20 +219,18 @@ class MMTCollate:
         lengths = [len(e) for e in emb_lists]
         L_max = max(lengths)
 
-        # NOTE: we now initialise with explicit PAD values so that padded
-        # tokens are never mistaken for real signals.
         pos_batch = np.full((B, L_max), PAD_POS, dtype=np.int32)
         id_batch = np.full((B, L_max), PAD_ID, dtype=np.int32)
         mod_batch = np.full((B, L_max), PAD_MOD, dtype=np.int16)
         role_batch = np.full((B, L_max), PAD_ROLE, dtype=np.int8)
-        padding_mask = np.zeros((B, L_max), dtype=np.int8)
 
+        padding_mask = np.zeros((B, L_max), dtype=np.int8)
         input_mask = np.ones((B, L_max), dtype=np.int8)
         actuator_mask = np.ones((B, L_max), dtype=np.int8)
 
         # Ragged embeddings kept as Python nested lists of np.ndarrays
         emb_batch: List[List[np.ndarray]] = [
-            [np.empty((0,), dtype=np.float32) for _ in range(L_max)] for _ in range(B)
+            [self._empty_emb for _ in range(L_max)] for _ in range(B)
         ]
         name_batch: List[List[str]] = [[""] * L_max for _ in range(B)]
 
@@ -240,12 +239,12 @@ class MMTCollate:
         # --------------------------------------------------------------- #
         for i in range(B):
             Li = lengths[i]
-
             pos_batch[i, :Li] = pos_lists[i]
             id_batch[i, :Li] = id_lists[i]
             mod_batch[i, :Li] = mod_lists[i]
             role_batch[i, :Li] = role_lists[i]
 
+            # Ragged fill
             for t in range(Li):
                 emb_batch[i][t] = emb_lists[i][t]
                 name_batch[i][t] = name_lists[i][t]
@@ -253,78 +252,111 @@ class MMTCollate:
             padding_mask[i, :Li] = 1
 
         # --------------------------------------------------------------- #
+        # Helper: drop a token (zero embedding + PAD metadata + role mask)
+        # --------------------------------------------------------------- #
+        def _drop_token(i: int, t: int, *, kind: str) -> None:
+            if kind == "input":
+                input_mask[i, t] = 0
+            elif kind == "actuator":
+                actuator_mask[i, t] = 0
+            else:
+                raise ValueError(f"Unknown drop kind: {kind!r}")
+
+            emb_batch[i][t] = np.zeros(
+                emb_batch[i][t].shape, dtype=emb_batch[i][t].dtype
+            )
+            id_batch[i, t] = PAD_ID
+            mod_batch[i, t] = PAD_MOD
+            role_batch[i, t] = PAD_ROLE
+            pos_batch[i, t] = PAD_POS
+
+        # --------------------------------------------------------------- #
         # 4. Input dropout (per-token)
         # --------------------------------------------------------------- #
-        p_drop_in = self.cfg.get("p_drop_inputs", 0.0)
-
+        p_drop_in = float(self.cfg.get("p_drop_inputs", 0.0))
         for i in range(B):
-            for t in range(lengths[i]):
-                if role_batch[i, t] == ROLE_CONTEXT:
-                    sig_name = name_batch[i][t]
-                    p = self.drop_inputs_overrides.get(sig_name, p_drop_in)
-                    if random.random() < p:
-                        input_mask[i, t] = 0
-                        emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
+            Li = lengths[i]
+            if Li == 0:
+                continue
+
+            idxs = np.where(role_batch[i, :Li] == ROLE_CONTEXT)[0]
+            for t in idxs:
+                sig_name = name_batch[i][t]
+                p = float(self.drop_inputs_overrides.get(sig_name, p_drop_in))
+                if random.random() < p:
+                    _drop_token(i, int(t), kind="input")
 
         # --------------------------------------------------------------- #
         # 5. Actuator dropout (per-token)
         # --------------------------------------------------------------- #
-        p_drop_act = self.cfg.get("p_drop_actuators", 0.0)
-
+        p_drop_act = float(self.cfg.get("p_drop_actuators", 0.0))
         for i in range(B):
-            for t in range(lengths[i]):
-                if role_batch[i, t] == ROLE_ACTUATOR:
-                    sig_name = name_batch[i][t]
-                    p = self.drop_act_overrides.get(sig_name, p_drop_act)
-                    if random.random() < p:
-                        actuator_mask[i, t] = 0
-                        emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
+            Li = lengths[i]
+            if Li == 0:
+                continue
+
+            idxs = np.where(role_batch[i, :Li] == ROLE_ACTUATOR)[0]
+            for t in idxs:
+                sig_name = name_batch[i][t]
+                p = float(self.drop_act_overrides.get(sig_name, p_drop_act))
+                if random.random() < p:
+                    _drop_token(i, int(t), kind="actuator")
 
         # --------------------------------------------------------------- #
         # 6. Chunk dropout (per-pos group)
         # --------------------------------------------------------------- #
-        p_drop_inputs_chunks = self.cfg.get("p_drop_inputs_chunks", 0.0)
-        p_drop_act_chunks = self.cfg.get("p_drop_actuators_chunks", 0.0)
+        p_drop_inputs_chunks = float(self.cfg.get("p_drop_inputs_chunks", 0.0))
+        p_drop_actuators_chunks = float(self.cfg.get("p_drop_actuators_chunks", 0.0))
 
-        for i in range(B):
-            Li = lengths[i]
-            unique_pos = set(pos_batch[i, :Li])
-
-            for pval in unique_pos:
-                idxs = np.where(pos_batch[i, :Li] == pval)[0]
-                if len(idxs) == 0:
+        if (p_drop_inputs_chunks > 0.0) or (p_drop_actuators_chunks > 0.0):
+            for i in range(B):
+                Li = lengths[i]
+                if Li == 0:
                     continue
 
-                # input chunks
-                if any(role_batch[i, t] == ROLE_CONTEXT for t in idxs):
-                    if random.random() < p_drop_inputs_chunks:
+                # Group token indices by pos (stable, avoids repeated np.where)
+                pos_i = pos_batch[i, :Li]
+                order = np.argsort(pos_i)
+                pos_sorted = pos_i[order]
+                split = np.where(np.diff(pos_sorted) != 0)[0] + 1
+                groups = np.split(order, split)
+
+                for idxs in groups:
+                    if idxs.size == 0:
+                        continue
+
+                    roles = role_batch[i, idxs]
+
+                    # Input chunks
+                    if (ROLE_CONTEXT in roles) and (
+                        random.random() < p_drop_inputs_chunks
+                    ):
                         for t in idxs:
                             if role_batch[i, t] == ROLE_CONTEXT:
-                                input_mask[i, t] = 0
-                                emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
+                                _drop_token(i, int(t), kind="input")
 
-                # actuator chunks
-                if any(role_batch[i, t] == ROLE_ACTUATOR for t in idxs):
-                    if random.random() < p_drop_act_chunks:
+                    # Actuator chunks
+                    if (ROLE_ACTUATOR in roles) and (
+                        random.random() < p_drop_actuators_chunks
+                    ):
                         for t in idxs:
                             if role_batch[i, t] == ROLE_ACTUATOR:
-                                actuator_mask[i, t] = 0
-                                emb_batch[i][t] = np.zeros_like(emb_batch[i][t])
+                                _drop_token(i, int(t), kind="actuator")
 
         # --------------------------------------------------------------- #
         # 7. Output embeddings + dropout (still NumPy here)
         # --------------------------------------------------------------- #
-        p_drop_outputs = self.cfg.get("p_drop_outputs", 0.0)
+        p_drop_outputs = float(self.cfg.get("p_drop_outputs", 0.0))
 
         output_emb_batch: Dict[int, List[np.ndarray]] = {}
         output_mask_batch_np: Dict[int, np.ndarray] = {}
 
         for sig_id in sorted(all_target_ids):
-            out_name = id_to_output_name[sig_id]
+            out_name = id_to_output_name.get(sig_id, str(sig_id))
 
-            raw_list: List[np.ndarray | None] = []
+            raw_list: List[Optional[np.ndarray]] = []
             mask = np.ones((B,), dtype=np.int8)
-            ref_shape = None
+            ref_shape: Optional[Tuple[int, ...]] = None
 
             # First pass: collect embeddings and remember a reference shape
             for i in range(B):
@@ -338,10 +370,11 @@ class MMTCollate:
                     if ref_shape is None:
                         ref_shape = arr.shape
 
-            # Sanity: given how all_target_ids is built, this should always hold.
-            assert ref_shape is not None, (
-                "MMTCollate invariant broken: no emb for sig_id."
-            )
+            # Given how all_target_ids is built, this should always hold.
+            if ref_shape is None:
+                raise AssertionError(
+                    "MMTCollate invariant broken: no output embedding found for sig_id."
+                )
 
             # Second pass: fill missing with zeros of the right shape
             emb_list: List[np.ndarray] = []
@@ -350,9 +383,9 @@ class MMTCollate:
                     arr = np.zeros(ref_shape, dtype=np.float32)
                 emb_list.append(arr)
 
-            # Per-output dropout
+            # Per-output dropout (mask only, embedding left as-is / zeros)
             for i in range(B):
-                p = self.drop_outputs_overrides.get(out_name, p_drop_outputs)
+                p = float(self.drop_outputs_overrides.get(out_name, p_drop_outputs))
                 if random.random() < p:
                     mask[i] = 0
 
@@ -364,8 +397,16 @@ class MMTCollate:
         # --------------------------------------------------------------- #
         output_native_batch_np: Dict[int, np.ndarray] = {}
         if self.keep_output_native:
+
+            def _find_shape(sig_id: int) -> Any:
+                # Prefer the shape from the same index; else fallback scan
+                for sd in out_shapes_dicts:
+                    if sig_id in sd:
+                        return sd[sig_id]
+                return None
+
             for sig_id in sorted(all_target_ids):
-                out_name = id_to_output_name[sig_id]
+                out_name = id_to_output_name.get(sig_id, str(sig_id))
                 per_sig_vals: List[np.ndarray] = []
 
                 for i in range(B):
@@ -380,16 +421,7 @@ class MMTCollate:
                         val = out_info
 
                     if val is None:
-                        # Use shapes dict to reconstruct shape
-                        shape = None
-                        shapes_dict = out_shapes_dicts[i]
-                        if sig_id in shapes_dict:
-                            shape = shapes_dict[sig_id]
-                        else:
-                            for sd in out_shapes_dicts:
-                                if sig_id in sd:
-                                    shape = sd[sig_id]
-                                    break
+                        shape = _find_shape(sig_id)
                         if shape is None:
                             raise ValueError(
                                 f"Missing shape for output signal_id={sig_id} "
@@ -406,7 +438,6 @@ class MMTCollate:
         # --------------------------------------------------------------- #
         # 9. Convert everything to torch.Tensor
         # --------------------------------------------------------------- #
-        # Token-level metadata
         pos_t = torch.from_numpy(pos_batch).long()
         id_t = torch.from_numpy(id_batch).long()
         mod_t = torch.from_numpy(mod_batch.astype(np.int64))
@@ -463,7 +494,7 @@ class MMTCollate:
         if self.keep_output_native:
             batch_out["output_native"] = output_native_t
 
-        # Adding shot id and window index to batch
+        # Adding shot id and window index to batch (kept from your version)
         first = flat_windows[0]
         if "shot_id" in first:
             batch_out["shot_id"] = [w["shot_id"] for w in flat_windows]

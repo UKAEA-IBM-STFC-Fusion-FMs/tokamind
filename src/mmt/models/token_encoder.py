@@ -73,10 +73,6 @@ class TokenEncoder(nn.Module):
       cast to the correct device automatically in forward().
     """
 
-    ROLE_INPUT = 0
-    ROLE_ACTUATOR = 1
-    ROLE_OUTPUT = 2
-
     def __init__(
         self,
         d_model: int,

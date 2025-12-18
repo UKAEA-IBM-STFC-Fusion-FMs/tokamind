@@ -47,30 +47,30 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
     """
     Move all tensor components of the collated batch to the given device.
 
-    Expected structure (from MMTCollate) after this function:
-      - "emb"            : List[List[Tensor]]
-      - "pos", "id", "mod", "role" : LongTensor (B, L)
-      - "padding_mask"   : BoolTensor (B, L)
-      - "input_mask",
-        "actuator_mask"  : BoolTensor (B, L)
-      - "output_emb"    : Dict[int, Tensor]        # (B, K) per output
-      - "output_mask"   : Dict[int, BoolTensor(B,)]
-
-      - optional:
-        "output_native"  : Dict[int, Tensor]
-
-    For backward-compatibility it also accepts:
-      - "output_emb"    : Dict[int, List[Tensor]]
-                           and converts each list → stacked Tensor(B, K).
-
-    Non-tensor entries (e.g. "signal_name") are left untouched.
+    Notes
+    -----
+    • On MPS we force synchronous copies (non_blocking=False). This avoids
+      rare metadata corruption observed with num_workers=0.
+    • On CUDA we use non_blocking=True only when the source tensor is CPU
+      pinned memory (otherwise it provides no benefit).
     """
     if device.type == "cpu":
-        # DataLoader already yields CPU tensors; nothing to do
         return batch
 
     def _to(tens: Tensor) -> Tensor:
-        return tens.to(device, non_blocking=True)
+        if tens.device == device:
+            return tens
+
+        if device.type == "mps":
+            return tens.to(device, non_blocking=False)
+
+        if device.type == "cuda":
+            # non_blocking only helps for CPU->CUDA when source is pinned
+            nb = (tens.device.type == "cpu") and tens.is_pinned()
+            return tens.to(device, non_blocking=nb)
+
+        # fallback (e.g. xpu / other)
+        return tens.to(device, non_blocking=False)
 
     # Core token tensors
     for key in (
@@ -89,7 +89,7 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
     # Ragged embeddings: List[List[Tensor]]
     emb = batch.get("emb", None)
     if isinstance(emb, list):
-        for i, row in enumerate(emb):
+        for row in emb:
             if isinstance(row, list):
                 for j, t in enumerate(row):
                     if isinstance(t, Tensor):
@@ -102,17 +102,14 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
         new_oe: Dict[Hashable, Tensor] = {}
         for k, v in output_emb.items():
             if isinstance(v, Tensor):
-                # Already dense (B, K)
                 new_oe[k] = _to(v)
             elif isinstance(v, list):
-                # Legacy: list[Tensor] length B, each (K,)
                 if not v:
                     continue
-                # Ensure everything is Tensor and stack along batch dim
                 stacked = torch.stack(
                     [t if isinstance(t, Tensor) else torch.as_tensor(t) for t in v],
                     dim=0,
-                )  # (B, K)
+                )
                 new_oe[k] = _to(stacked)
             else:
                 raise TypeError(

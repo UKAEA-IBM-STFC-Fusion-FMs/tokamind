@@ -246,10 +246,6 @@ def initialize_mmt_dataloaders(
 
     """
 
-    # ----------------------------------------------------------------------
-    # Guard: num_workers must be >= 1
-    # ----------------------------------------------------------------------
-
     if verbose:
         print("\n\n---------- MMT DATASET & DATALOADER INITIALIZATION ----------\n")
 

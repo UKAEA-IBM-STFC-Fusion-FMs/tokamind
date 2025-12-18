@@ -5,13 +5,13 @@ eval_id: eval_test
 
 # Required: which trained run to evaluate
 model_init:
-  model_dir: "runs/test_trained/"
+  model_dir: "runs/test_train/"
 
 
 data:
   cache:
     enable: true
-    num_workers: 10
+    num_workers: 4
   keep_output_native: true
 
 
@@ -20,24 +20,23 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec:
+    window_stride_sec: 0.005
 
 
 loader:
   batch_size: 1024
   num_workers: 1
   drop_last: false
-  streaming:
-    batches_per_epoch: null   # ignored in evaluation
+  batches_per_epoch: null   # ignored in evaluation
 
 
 eval:
   # list of inputs/actuators/outputs you want to drop for evaluation
   # null: evaluate the full model
   drop:
-    inputs: ["pf_active-coil_current"]
+    inputs: # ["pf_active-coil_current"]
     actuators:
-    outputs: ["pf_active-solenoid_current"]
+    outputs: # ["pf_active-solenoid_current"]
 
   metrics:
     enable: true

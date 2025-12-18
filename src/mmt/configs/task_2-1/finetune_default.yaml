@@ -16,7 +16,7 @@ collate:
 
 data:
   cache:
-    enable: false
+    enable: true
     num_workers: 2
   keep_output_native: false
 
@@ -29,11 +29,10 @@ preprocess:
 
 loader:
   batch_size: 100
-  num_workers: 0
+  num_workers: 1
   shuffle: true
   drop_last: false
-  streaming:
-    batches_per_epoch: 10  # REQUIRED when train with cache: enable: false, document in config guide
+  batches_per_epoch:    # REQUIRED when train with cache: enable: false, document in config guide
 
 # How to initialise the model's weights for this run.
 #

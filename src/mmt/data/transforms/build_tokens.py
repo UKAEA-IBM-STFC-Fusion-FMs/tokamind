@@ -33,16 +33,18 @@ from __future__ import annotations
 
 
 from typing import Any, Dict, List, Optional
-import logging
 import numpy as np
 
 from mmt.data.signal_spec import SignalSpecRegistry
 
-logger = logging.getLogger("mmt.BuildTokens")
+from mmt.constants import (
+    ROLE_CONTEXT,
+    ROLE_ACTUATOR,
+)
 
-ROLE_CONTEXT = 0
-ROLE_ACTUATOR = 1
-ROLE_OUTPUT = 2  # reserved (not created here)
+import logging
+
+logger = logging.getLogger("mmt.BuildTokens")
 
 
 class BuildTokensTransform:

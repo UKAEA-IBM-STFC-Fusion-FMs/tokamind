@@ -96,6 +96,7 @@ class EmbedChunksTransform:
         self.keep_output_native = bool(keep_output_native)
 
         # Deterministic cache: (shot_id, role, signal_id, chunk_start_sample)
+        # NOTE: This cache is internal state, but it does not mutate input windows/chunks.
         self._cache: Dict[Tuple[Any, str, int, int], np.ndarray] = {}
         self._orig_shapes: Dict[Tuple[Any, str, int, int], Tuple[int, ...]] = {}
 
@@ -129,18 +130,28 @@ class EmbedChunksTransform:
         n_out_signals = 0
         n_out_emb_new = 0
 
+        # We'll build a new window dict to avoid mutating shared structures.
+        out_window = dict(window)
+
         # ------------------------------------------------------------------
-        # Embed chunk-level signals
+        # Embed chunk-level signals (pure: copy chunks before adding fields)
         # ------------------------------------------------------------------
+        new_chunks: Dict[str, Any] = {}
         for role in ("input", "actuator"):
             role_chunks = chunks_dict.get(role) or []
             n_chunks_total += len(role_chunks)
 
+            new_role_chunks = []
             for ch in role_chunks:
-                signals = ch.get("signals") or {}
+                # Copy the chunk dict (do not mutate `ch` in place).
+                ch2 = dict(ch)
 
-                emb_map = ch.setdefault("embeddings", {})
-                shape_map = ch.setdefault("orig_shapes", {})
+                signals = ch.get("signals") or {}
+                # We will not mutate the original signals dict; produce a new one.
+                # After embedding, we set signals to None in the copied chunk to reduce memory.
+                # (This matches historical behavior without touching the original chunk.)
+                emb_map: Dict[int, np.ndarray] = {}
+                shape_map: Dict[int, Tuple[int, ...]] = {}
 
                 # Determine chunk start
                 chunk_start = ch.get("chunk_start_sample")
@@ -172,45 +183,71 @@ class EmbedChunksTransform:
                         self._orig_shapes[key] = arr.shape
                         n_signal_emb_new += 1
 
-                    emb_map[spec.signal_id] = emb
-                    shape_map[spec.signal_id] = arr.shape
+                    emb_map[int(spec.signal_id)] = emb
+                    shape_map[int(spec.signal_id)] = tuple(arr.shape)
 
-                # Remove raw values to reduce memory
-                ch["signals"] = None
+                # Attach embedding fields to copied chunk
+                ch2["embeddings"] = emb_map
+                ch2["orig_shapes"] = shape_map
+
+                # Remove raw values to reduce memory (on the copy only)
+                ch2["signals"] = None
+
+                new_role_chunks.append(ch2)
+
+            new_chunks[role] = new_role_chunks
+
+        # Preserve any other roles/keys under "chunks" if present
+        for k, v in (chunks_dict or {}).items():
+            if k not in new_chunks:
+                new_chunks[k] = v
+
+        out_window["chunks"] = new_chunks
 
         # ------------------------------------------------------------------
-        # Embed output-level signals
+        # Embed output-level signals (pure: copy output dict/entries before editing)
         # ------------------------------------------------------------------
         outputs = window.get("output") or {}
-        emb_out = {}
-        shape_out = {}
+        new_outputs: Dict[str, Any] = (
+            dict(outputs) if isinstance(outputs, dict) else outputs
+        )
 
-        for name, info in outputs.items():
-            if not isinstance(info, dict):
-                continue
+        emb_out: Dict[int, np.ndarray] = {}
+        shape_out: Dict[int, Any] = {}
 
-            values = info.get("values")
-            if values is None:
-                continue
+        if isinstance(outputs, dict):
+            for name, info in outputs.items():
+                if not isinstance(info, dict):
+                    # Keep as-is (or normalize) without mutating original.
+                    continue
 
-            spec = self._get_spec("output", name)
-            codec = self._get_codec(spec.signal_id)
+                values = info.get("values")
+                if values is None:
+                    continue
 
-            arr = np.asarray(values)
-            emb = codec.encode(arr)
+                spec = self._get_spec("output", name)
+                codec = self._get_codec(spec.signal_id)
 
-            emb_out[spec.signal_id] = emb
-            shape_out[spec.signal_id] = arr.shape
+                arr = np.asarray(values)
+                emb = codec.encode(arr)
 
-            n_out_signals += 1
-            n_out_emb_new += 1  # outputs are not cached
+                emb_out[int(spec.signal_id)] = emb
+                shape_out[int(spec.signal_id)] = tuple(arr.shape)
 
-            if not self.keep_output_native:
-                info["values"] = None
+                n_out_signals += 1
+                n_out_emb_new += 1  # outputs are not cached
+
+                if not self.keep_output_native:
+                    # Copy entry dict before stripping values
+                    info2 = dict(info)
+                    info2["values"] = None
+                    new_outputs[name] = info2
+
+        out_window["output"] = new_outputs
 
         if emb_out:
-            window["embedded_output"] = emb_out
-            window["embedded_output_shapes"] = shape_out
+            out_window["embedded_output"] = emb_out
+            out_window["embedded_output_shapes"] = shape_out
 
         # ------------------------------------------------------------------
         # Debug summary
@@ -228,4 +265,4 @@ class EmbedChunksTransform:
             n_out_emb_new,
         )
 
-        return window
+        return out_window

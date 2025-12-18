@@ -181,6 +181,8 @@ class WindowStreamedDataset(IterableDataset):
         This method never materialises all windows at once; it yields them
         lazily, one by one.
         """
+        # WindowStreamedDataset.__iter__
+
         for idx_shot in self._iter_shot_indices():
             try:
                 item = self.shot_dataset[idx_shot]
@@ -193,27 +195,23 @@ class WindowStreamedDataset(IterableDataset):
             if item is None:
                 continue
 
-            # Single-window case: directly yield the dict
+            # Allow single-window dict for robustness (cheap, avoids iter(dict) bug)
             if isinstance(item, dict):
                 yield item
                 continue
 
-            # General case: iterable of windows
+            # Strict: must be iterable of window dicts
             try:
-                for w in item:
-                    if w is None:
-                        continue
+                it = iter(item)
+            except TypeError as e:
+                raise TypeError(
+                    f"[WindowStreamedDataset] Expected iterable of window dicts (or a dict/None), "
+                    f"got {type(item)} for shot index {idx_shot}"
+                ) from e
+
+            for w in it:
+                if w is not None:
                     yield w
-            except TypeError:
-                # item is not iterable – this is likely a bug in the upstream
-                # dataset; we log it to help debugging.
-                logger.error(
-                    "[WindowStreamedDataset] Expected dict or iterable of dicts, "
-                    "got type %s for shot index %d",
-                    type(item),
-                    idx_shot,
-                )
-                continue
 
     def __len__(self) -> int:
         """

@@ -13,6 +13,19 @@ Responsibilities
 - Compute native-space MSE metrics per window and per output.
 - Optionally save temporally ordered traces for selected shots.
 
+Notes on dataset exhaustiveness
+------------------------------
+This module evaluates by iterating `for batch in dataloader:` until the
+dataloader is exhausted. Therefore:
+
+- `WindowCachedDataset` is finite (map-style), so exhausting the dataloader covers
+  all cached windows.
+
+- `WindowStreamedDataset` is also finite for one pass because it iterates over a
+  finite range of shot indices and yields their windows. Additionally,
+  `initialize_mmt_dataloaders` forces `shuffle=False` for `IterableDataset`, so you
+  won’t “miss” data due to DataLoader shuffle.
+
 Public API
 ----------
 - evaluate_metrics(...)
@@ -54,25 +67,30 @@ def evaluate_metrics(
     id_to_name: Dict[int, str],
     run_dir: Path,
     debug: bool = False,
-) -> Dict[str, float]:
+) -> Dict[str, Dict[str, float]]:
     """
-    Compute per-window native-space MSE for all outputs of the task.
+    Compute per-window native-space error metrics for all outputs of the task.
 
     Writes:
-      <run_dir>/metrics/metrics_full.csv   (per-shot, per-window, per-output)
-      <run_dir>/metrics/metrics_summary.csv (per-output average MSE)
-    """
+      <run_dir>/metrics/metrics_full.csv     (per-shot, per-window, per-output)
+      <run_dir>/metrics/metrics_summary.csv  (per-output averages)
 
+    metrics_full columns:
+      shot_id, window_id, feature_name, RMSE, MSE, MAE
+    """
     metrics_dir = Path(run_dir) / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
+    # Full CSV (per window)
     csv_full = metrics_dir / "metrics_full.csv"
     f_full = csv_full.open("w", newline="")
     wr = csv.writer(f_full)
-    wr.writerow(["shot_id", "window_idx", "output", "mse"])
+    wr.writerow(["shot_id", "window_id", "feature_name", "RMSE", "MSE", "MAE"])
 
-    # Accumulate mean over windows per output
-    accum = {name: [0.0, 0.0] for name in stats.keys()}
+    # accum[feature] = [sum_rmse, sum_mse, sum_mae, count]
+    accum: Dict[str, list[float]] = {
+        name: [0.0, 0.0, 0.0, 0.0] for name in stats.keys()
+    }
 
     with torch.no_grad():
         for batch in dataloader:
@@ -83,42 +101,58 @@ def evaluate_metrics(
                 stats=stats,
                 codecs=codecs,
                 id_to_name=id_to_name,
-                debug=debug,  # or True if you want the min/max prints
+                debug=debug,
             )
 
             B = len(shot_ids)
 
             for b in range(B):
-                sid = int(shot_ids[b])
-                widx = int(window_indices[b])  # true window index from baseline
+                shot_id = int(shot_ids[b])
+                window_id = int(window_indices[b])  # baseline window index
 
-                for out_name in stats.keys():
-                    mask_b = bool(y_mask[out_name][b])
-                    if not mask_b:
+                for out in stats.keys():
+                    ok = bool(y_mask[out][b])
+                    if not ok:
+                        rmse_b = float("nan")
                         mse_b = float("nan")
+                        mae_b = float("nan")
                     else:
-                        true_b = y_true[out_name][b]
-                        pred_b = y_pred[out_name][b]
-                        diff2 = (pred_b - true_b) ** 2
-                        mse_b = float(diff2.mean())
-                        accum[out_name][0] += mse_b
-                        accum[out_name][1] += 1
+                        true_b = y_true[out][b]
+                        pred_b = y_pred[out][b]
+                        diff = pred_b - true_b
 
-                    wr.writerow([sid, widx, out_name, mse_b])
+                        mse_b = float(np.mean(diff * diff))
+                        rmse_b = float(np.sqrt(mse_b))
+                        mae_b = float(np.mean(np.abs(diff)))
+
+                        accum[out][0] += rmse_b
+                        accum[out][1] += mse_b
+                        accum[out][2] += mae_b
+                        accum[out][3] += 1.0
+
+                    wr.writerow([shot_id, window_id, out, rmse_b, mse_b, mae_b])
 
     f_full.close()
 
     # Summary CSV
     csv_sum = metrics_dir / "metrics_summary.csv"
-    summary: Dict[str, float] = {}
+    summary: Dict[str, Dict[str, float]] = {}
     with csv_sum.open("w", newline="") as f:
         wr = csv.writer(f)
-        wr.writerow(["output", "mse"])
+        wr.writerow(["feature_name", "RMSE", "MSE", "MAE"])
 
-        for out_name, (sum_mse, count) in accum.items():
-            mse = sum_mse / count if count > 0 else float("nan")
-            summary[out_name] = mse
-            wr.writerow([out_name, mse])
+        for out, (sum_rmse, sum_mse, sum_mae, count) in accum.items():
+            if count > 0:
+                mean_rmse = sum_rmse / count
+                mean_mse = sum_mse / count
+                mean_mae = sum_mae / count
+            else:
+                mean_rmse = float("nan")
+                mean_mse = float("nan")
+                mean_mae = float("nan")
+
+            summary[out] = {"rmse": mean_rmse, "mse": mean_mse, "mae": mean_mae}
+            wr.writerow([out, mean_rmse, mean_mse, mean_mae])
 
     return summary
 

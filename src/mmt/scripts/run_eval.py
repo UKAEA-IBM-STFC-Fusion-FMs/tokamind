@@ -138,7 +138,11 @@ def main() -> None:
     datasets_train_val_test, dict_metadata = initialize_datasets_and_metadata_for_task(
         cfg_task
     )
-    signal_stats = dict_metadata.get("signal_stats", {})
+    signal_stats = {
+        name: meta
+        for name, meta in dict_metadata.items()
+        if isinstance(meta, dict) and ("mean" in meta) and ("std" in meta)
+    }
 
     # Build signals_by_role from baseline config + metadata and signal specs
     signals_role_modality_map = build_signal_role_modality_map(cfg_task, dict_metadata)

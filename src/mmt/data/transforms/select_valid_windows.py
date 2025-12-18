@@ -164,7 +164,7 @@ class SelectValidWindowsTransform:
                 return None
 
         # --------------------------------------------------------------
-        # 1) Chunk-level validation
+        # 1) Chunk-level validation (PURE: copy before masking)
         # --------------------------------------------------------------
         chunks = window.get("chunks") or {}
         valid_chunks_by_sig = {
@@ -172,16 +172,28 @@ class SelectValidWindowsTransform:
             "actuator": defaultdict(int),
         }
 
+        new_chunks = dict(chunks)
+
         for role in ("input", "actuator"):
+            new_role_chunks = []
+
             for ch in chunks.get(role, []) or []:
+                ch2 = dict(ch)  # copy chunk dict
                 sigs = ch.get("signals") or {}
-                for name, val in list(sigs.items()):
+
+                sigs2: Dict[str, Any] = {}
+                for name, val in sigs.items():
                     mask, cleaned = self._mask_if_bad(val)
                     if mask:
-                        sigs[name] = None
+                        sigs2[name] = None
                     else:
-                        sigs[name] = cleaned
+                        sigs2[name] = cleaned
                         valid_chunks_by_sig[role][name] += 1
+
+                ch2["signals"] = sigs2
+                new_role_chunks.append(ch2)
+
+            new_chunks[role] = new_role_chunks
 
         valid_x_signals = set()
         for role in ("input", "actuator"):
@@ -192,21 +204,24 @@ class SelectValidWindowsTransform:
         n_inputs_actuators = len(valid_x_signals)
 
         # --------------------------------------------------------------
-        # 2) Output-level validation
+        # 2) Output-level validation (PURE: copy before masking)
         # --------------------------------------------------------------
         output = window.get("output") or {}
+        output2: Dict[str, Any] = {}
         n_outputs_valid = 0
 
-        for name, entry in list(output.items()):
+        for name, entry in output.items():
             if not isinstance(entry, dict):
                 mask, cleaned = self._mask_if_bad(entry)
-                output[name] = {"values": None if mask else cleaned}
+                output2[name] = {"values": None if mask else cleaned}
                 if not mask:
                     n_outputs_valid += 1
                 continue
 
+            entry2 = dict(entry)
             mask, cleaned = self._mask_if_bad(entry.get("values"))
-            entry["values"] = None if mask else cleaned
+            entry2["values"] = None if mask else cleaned
+            output2[name] = entry2
             if not mask:
                 n_outputs_valid += 1
 
@@ -232,4 +247,11 @@ class SelectValidWindowsTransform:
             "KEEP" if keep else "DROP",
         )
 
-        return window if keep else None
+        if not keep:
+            return None
+
+        # Return a masked COPY (PURE)
+        out = dict(window)
+        out["chunks"] = new_chunks
+        out["output"] = output2
+        return out
