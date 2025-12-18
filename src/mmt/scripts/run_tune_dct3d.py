@@ -149,16 +149,12 @@ def main() -> None:
                 stride_sec=cfg_chunks["stride"],
             ),
             SelectValidWindowsTransform(
-                dict_metadata=dict_metadata,
                 min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_valid_win["min_valid_chunks"],
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(
-                dict_metadata=dict_metadata,
-                delta=cfg_task["task_window_segmenter"]["delta"],
-                output_length=cfg_task["task_window_segmenter"]["output_length"],
                 max_chunks=cfg_trim["max_chunks"],
             ),
             tune_transform,
@@ -193,12 +189,13 @@ def main() -> None:
     else:
         ds_shots = ds_shots_full
 
-    if DEBUG_MODE:
-        ds = datasets_mmt["train"]
-        shot = ds[0]
-        for _ in shot:
-            # apply only the transforms you want to debug
-            continue
+    logger.info(
+        "ds_shots_full=%d, requested n_shots=%s, selected=%d, sel_indices=%s",
+        len(ds_shots_full),
+        str(n_shots),
+        len(ds_shots),
+        np.array(sel_indices).tolist() if n_shots is not None else None,
+    )
 
     # ------------------------------------------------------------------
     # Streaming dataset (window-level)
@@ -277,6 +274,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
-    # TODO:
-    #  test when n_shots > total shots

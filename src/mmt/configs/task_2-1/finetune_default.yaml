@@ -29,7 +29,7 @@ preprocess:
 
 loader:
   batch_size: 100
-  num_workers: 1
+  num_workers: 0
   shuffle: true
   drop_last: false
   batches_per_epoch:    # REQUIRED when train with cache: enable: false, document in config guide
@@ -53,7 +53,7 @@ loader:
 #   modality_heads:  modality-level heads G_mod
 #   output_adapters: per-output adapters ψ
 model_init:
-  model_dir: "runs/test_trained"           # e.g. "runs/run_id"
+  model_dir: "runs/test_train"           # e.g. "runs/run_id"
   load_parts:
     token_encoder: true
     backbone: true

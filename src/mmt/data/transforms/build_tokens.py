@@ -20,29 +20,25 @@ This transform writes the following fields to `window`:
     window["output_shapes"]= output_shapes                  (Dict[int, tuple])
     window["output_names"] = output_names                   (Dict[int, str])
 
-TS-first / simplified logic
----------------------------
-- Positions are NOT computed from time anymore.
+Simplified logic (v0)
+--------------------
+- Positions are NOT computed from time here.
 - Each chunk is expected to carry an integer `pos` computed upstream by
   `TrimChunksTransform`.
-- This transform is responsible only for deterministic ordering and
-  aligning embeddings with metadata.
+- Deterministic ordering is done by (pos, chunk_index_in_window), then signal_id.
 """
 
 from __future__ import annotations
 
-
 from typing import Any, Dict, List, Optional
 import numpy as np
+import logging
 
 from mmt.data.signal_spec import SignalSpecRegistry
-
 from mmt.constants import (
     ROLE_CONTEXT,
     ROLE_ACTUATOR,
 )
-
-import logging
 
 logger = logging.getLogger("mmt.BuildTokens")
 
@@ -54,9 +50,9 @@ class BuildTokensTransform:
     Input requirements
     ------------------
     Each chunk in window["chunks"][role] must contain:
-      - "pos"        : int (already computed upstream)
-      - "chunk_start_sample" : int (used for deterministic chunk ordering)
-      - "embeddings" : Dict[int, np.ndarray] mapping signal_id → embedding
+      - "pos"                 : int (computed upstream)
+      - "chunk_index_in_window": int (deterministic tie-breaker)
+      - "embeddings"          : Dict[int, np.ndarray] mapping signal_id → embedding
 
     window must contain:
       - "embedded_output"        : Dict[int, np.ndarray]
@@ -93,15 +89,22 @@ class BuildTokensTransform:
         input_chunks = chunks_dict.get("input", []) or []
         act_chunks = chunks_dict.get("actuator", []) or []
 
+        def _chunk_sort_key(ch: Dict[str, Any]) -> tuple[int, int]:
+            if "pos" not in ch:
+                raise KeyError(
+                    "BuildTokensTransform requires chunk['pos'] (computed upstream)"
+                )
+            if "chunk_index_in_window" not in ch:
+                raise KeyError(
+                    "BuildTokensTransform requires chunk['chunk_index_in_window']"
+                )
+            return (int(ch["pos"]), int(ch["chunk_index_in_window"]))
+
         # Deterministic ordering:
-        # - chunks sorted by chunk_start_sample (TS-first, integer, no float drift)
+        # - chunks sorted by (pos, chunk_index_in_window) -> closest-to-output first
         # - signals within chunk sorted by signal_id
-        input_chunks_sorted = sorted(
-            input_chunks, key=lambda ch: int(ch["chunk_start_sample"])
-        )
-        act_chunks_sorted = sorted(
-            act_chunks, key=lambda ch: int(ch["chunk_start_sample"])
-        )
+        input_chunks_sorted = sorted(input_chunks, key=_chunk_sort_key)
+        act_chunks_sorted = sorted(act_chunks, key=_chunk_sort_key)
 
         emb_list: List[np.ndarray] = []
         sig_list: List[int] = []

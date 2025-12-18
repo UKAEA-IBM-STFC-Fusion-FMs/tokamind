@@ -165,16 +165,12 @@ def main() -> None:
                 stride_sec=cfg_chunks["stride"],
             ),
             SelectValidWindowsTransform(
-                dict_metadata=dict_metadata,
                 min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_valid_win["min_valid_chunks"],
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(
-                dict_metadata=dict_metadata,
-                delta=cfg_task["task_window_segmenter"]["delta"],
-                output_length=cfg_task["task_window_segmenter"]["output_length"],
                 max_chunks=cfg_trim["max_chunks"],
             ),
             EmbedChunksTransform(

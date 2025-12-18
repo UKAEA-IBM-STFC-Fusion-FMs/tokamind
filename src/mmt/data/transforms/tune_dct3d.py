@@ -5,14 +5,14 @@ TuneDCT3DTransform
 Tune DCT3D truncation parameters (keep_h, keep_w, keep_t) per (role, signal).
 
 This is a pass-through transform designed to be inserted in the model_transform
-chain after TrimChunksTransform. It observes each kept window, accumulates
-per-window RMSE for each candidate configuration, and later selects the smallest
-effective configuration under a per-role threshold.
+chain after TrimChunksTransform and before EmbedChunksTransform. It observes each
+kept window, accumulates per-window RMSE for each candidate configuration, and
+later selects the smallest effective configuration under a per-role threshold.
 
 Objective
 ---------
 For each window:
-    rmse_win = sqrt(mean((x_hat - x)^2))
+    rmse_win = mean_over_chunks( sqrt(mean_over_finite((x_hat - x)^2)) )
 
 Aggregate per (role, signal, cfg) with equal weight per window:
     score(cfg) = mean_windows(rmse_win)
@@ -32,12 +32,10 @@ Then for each (role, signal):
   - pick the first cfg with score(cfg) <= threshold[role]
   - if none, pick cfg with minimum score(cfg)
 
-Expected window format
-----------------------
-This transform expects the same "signal entry" format used in the preprocessing
-pipeline:
-
-    window[role][name] == {"values": np.ndarray or array_like}
+Expected window format (v0)
+---------------------------
+- input/actuator are read from window["chunks"][role][i]["signals"][name]
+- output is read from window["output"][name]["values"]
 
 No fallback formats are supported on purpose.
 """
@@ -46,6 +44,7 @@ from __future__ import annotations
 
 from itertools import product
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
+from collections import defaultdict
 
 import logging
 import numpy as np
@@ -74,47 +73,6 @@ def _effective_dim(native_shape: Tuple[int, ...], cfg: Tuple[int, int, int]) -> 
 
 
 class TuneDCT3DTransform:
-    """
-    Tune DCT3D truncation parameters (keep_h, keep_w, keep_t) per signal.
-
-    This is a **pass-through, stateful transform** designed to run inside
-    `ComposeTransforms`, typically after `TrimChunksTransform`. It observes
-    each kept window, evaluates multiple DCT3D configurations for every
-    (role, signal), and accumulates reconstruction error statistics.
-
-    Input
-    -----
-    A single window dict with native (non-embedded) signal values:
-
-        window = {
-            "input":    { signal_name: np.ndarray, ... },
-            "actuator": { signal_name: np.ndarray, ... },
-            "output":   { signal_name: np.ndarray, ... },
-            ...
-        }
-
-    Arrays are expected to have shape:
-        (T,), (C, T), or (H, W, T), with time on the last axis.
-
-    Behaviour
-    ---------
-    For each window and each signal:
-      • apply all candidate DCT3D keep configurations,
-      • compute per-window RMSE between original and reconstructed signal,
-      • aggregate RMSE with equal weight per window.
-
-    The transform does **not** modify or drop windows; it returns the input
-    window unchanged.
-
-    Output
-    ------
-    The window dict, unchanged (pass-through).
-
-    Final tuning results are retrieved by calling `select_best()`, which
-    returns the selected DCT3D configuration per (role, signal) based on
-    per-role error thresholds and minimal effective latent dimension.
-    """
-
     def __init__(
         self,
         *,
@@ -159,54 +117,130 @@ class TuneDCT3DTransform:
 
         logger.info("TuneDCT3D initialized | candidates=%d", len(self.candidates))
 
+    def _rmse_on_finite(self, x: np.ndarray, x_hat: np.ndarray) -> float | None:
+        """
+        RMSE computed only over finite entries of x.
+        Returns None if there are no finite entries.
+        """
+        finite = np.isfinite(x)
+        if not finite.any():
+            return None
+
+        # Compare against x_clean (finite entries unchanged; non-finite replaced with 0)
+        x_clean = np.where(finite, x, 0.0)
+
+        diff = (x_hat - x_clean).astype(np.float64, copy=False)
+        diff_f = diff[finite]
+        if diff_f.size == 0:
+            return None
+
+        return float(np.sqrt(np.mean(diff_f * diff_f)))
+
     def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
-        for role in ("input", "actuator", "output"):
-            group = window.get(role)
-            if not isinstance(group, dict):
-                continue
+        if "chunks" not in window:
+            raise KeyError(
+                "TuneDCT3D expects window['chunks'] (run after ChunkWindows/TrimChunks)"
+            )
 
-            for name, entry in group.items():
-                if self.signal_specs.get(role, name) is None:
+        # Per-window accumulators so each window counts once (mean over chunks).
+        # win_sum[role][name][cfg] = sum_rmse_over_chunks
+        # win_n[role][name][cfg]   = n_chunks_used
+        win_sum: Dict[str, Dict[str, Dict[Tuple[int, int, int], float]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(float))
+        )
+        win_n: Dict[str, Dict[str, Dict[Tuple[int, int, int], int]]] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(int))
+        )
+
+        # 1) input/actuator: read from chunks
+        chunks = window.get("chunks") or {}
+        for role in ("input", "actuator"):
+            role_chunks = chunks.get(role) or []
+            for ch in role_chunks:
+                sigs = ch.get("signals") or {}
+                for name, values in sigs.items():
+                    if values is None:
+                        continue
+                    if self.signal_specs.get(role, name) is None:
+                        continue
+
+                    x = np.asarray(values)
+                    if x.size == 0 or x.ndim not in (1, 2, 3):
+                        continue
+
+                    # store representative shape for effective_dim ranking
+                    self.rep_shape.setdefault((role, name), tuple(x.shape))
+
+                    finite = np.isfinite(x)
+                    if not finite.any():
+                        continue
+                    x_clean = np.where(finite, x, 0.0)
+
+                    for cfg in self.candidates:
+                        codec = self._codecs[cfg]
+                        z = codec.encode(x_clean)
+                        x_hat = codec.decode(z, original_shape=x_clean.shape)
+
+                        rmse = self._rmse_on_finite(x, x_hat)
+                        if rmse is None or not np.isfinite(rmse):
+                            continue
+
+                        win_sum[role][name][cfg] += rmse
+                        win_n[role][name][cfg] += 1
+
+        # 2) outputs: read from window["output"][name]["values"]
+        out_group = window.get("output")
+        if isinstance(out_group, dict):
+            for name, entry in out_group.items():
+                if self.signal_specs.get("output", name) is None:
                     continue
-
                 if not isinstance(entry, dict) or "values" not in entry:
                     raise TypeError(
-                        f"TuneDCT3D expected window[{role}][{name}] to be a dict with key 'values'"
+                        f"TuneDCT3D expected window['output'][{name!r}] to be a dict with key 'values'"
                     )
+                values = entry["values"]
+                if values is None:
+                    continue
 
-                x = np.asarray(entry["values"])
+                x = np.asarray(values)
                 if x.size == 0 or x.ndim not in (1, 2, 3):
                     continue
 
-                # Skip non-finite windows (prevents rmse=nan poisoning)
-                if not np.isfinite(x).all():
-                    continue
+                self.rep_shape.setdefault(("output", name), tuple(x.shape))
 
-                self.rep_shape.setdefault((role, name), tuple(x.shape))
+                finite = np.isfinite(x)
+                if not finite.any():
+                    continue
+                x_clean = np.where(finite, x, 0.0)
 
                 for cfg in self.candidates:
                     codec = self._codecs[cfg]
-                    z = codec.encode(x)
-                    x_hat = codec.decode(z, original_shape=x.shape)
+                    z = codec.encode(x_clean)
+                    x_hat = codec.decode(z, original_shape=x_clean.shape)
 
-                    # Also skip if codec produces non-finite output (rare, but safe)
-                    if not np.isfinite(x_hat).all():
+                    rmse = self._rmse_on_finite(x, x_hat)
+                    if rmse is None or not np.isfinite(rmse):
                         continue
 
-                    diff = (x_hat - x).astype(np.float64, copy=False)
-                    rmse = float(np.sqrt(np.mean(diff * diff)))
+                    win_sum["output"][name][cfg] += rmse
+                    win_n["output"][name][cfg] += 1
+
+        # 3) Commit: per-window mean over chunks, then accumulate per-window
+        for role, by_sig in win_sum.items():
+            for name, by_cfg in by_sig.items():
+                for cfg, s in by_cfg.items():
+                    n = win_n[role][name][cfg]
+                    if n <= 0:
+                        continue
+                    rmse_win = float(s / n)
 
                     acc = self.stats[role][name][cfg]
-                    acc[0] += rmse
+                    acc[0] += rmse_win
                     acc[1] += 1.0
 
         return window
 
     def select_best(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
-        """
-        Return per-(role, signal) selected keep config and score.
-        Only includes signals that were actually observed (rep_shape exists).
-        """
         out: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
         for role, by_sig in self.stats.items():
@@ -223,43 +257,31 @@ class TuneDCT3DTransform:
                     self.candidates, key=lambda c: (_effective_dim(shape, c), c)
                 )
 
-                # Compute score = mean RMSE over windows
                 scores: Dict[Tuple[int, int, int], float] = {}
                 for cfg in ranked:
                     s, n = by_cfg[cfg]
-                    if n == 0:
-                        scores[cfg] = float("inf")
-                    else:
-                        scores[cfg] = float(s / n)
+                    scores[cfg] = float("inf") if n == 0 else float(s / n)
 
-                # Choose smallest under threshold (ignore inf/nan)
                 chosen = None
                 for cfg in ranked:
                     v = scores[cfg]
                     if np.isfinite(v) and v <= thr:
                         chosen = cfg
                         break
-
                 if chosen is None:
                     chosen = min(ranked, key=lambda config: scores[config])
 
-                # Also compute effective keep_* (clipped by shape)
                 values_shape = tuple(shape[:-1])
                 H, W = infer_hw_from_values_shape(values_shape)
                 T = int(shape[-1])
-                eff_keep_h = min(int(chosen[0]), H)
-                eff_keep_w = min(int(chosen[1]), W)
-                eff_keep_t = min(int(chosen[2]), T)
 
                 out.setdefault(role, {})[name] = {
-                    # requested keep (from search space)
                     "keep_h": int(chosen[0]),
                     "keep_w": int(chosen[1]),
                     "keep_t": int(chosen[2]),
-                    # effective keep (actually used given the signal shape)
-                    "eff_keep_h": int(eff_keep_h),
-                    "eff_keep_w": int(eff_keep_w),
-                    "eff_keep_t": int(eff_keep_t),
+                    "eff_keep_h": int(min(int(chosen[0]), H)),
+                    "eff_keep_w": int(min(int(chosen[1]), W)),
+                    "eff_keep_t": int(min(int(chosen[2]), T)),
                     "rmse_mean_windows": float(scores[chosen]),
                     "threshold": float(thr),
                     "effective_dim": int(_effective_dim(shape, chosen)),

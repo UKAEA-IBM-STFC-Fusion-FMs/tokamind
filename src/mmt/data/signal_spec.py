@@ -214,7 +214,7 @@ def build_signal_specs(
         for name in sorted(signals_by_role[role].keys()):
             modality = signals_by_role[role][name]
 
-            meta = dict_metadata.get(name)
+            meta = dict_metadata[role].get(name)
             if meta is None:
                 raise KeyError(f"Signal {name!r} missing in dict_metadata")
 
@@ -313,24 +313,24 @@ def infer_modality(values_shape: Tuple[int, ...]) -> str:
 
 def build_signal_role_modality_map(
     cfg_task: Mapping[str, Any],
-    dict_metadata: Mapping[str, Mapping[str, Any]],
+    dict_metadata: Mapping[str, Any],
 ) -> Dict[str, Dict[str, str]]:
     """
     Build the signals_by_role mapping from the task configuration and metadata.
 
-    Expected task config structure:
-        sources_and_signals:
-            input_name:    [[source, signal], ...]
-            actuator_name: [[source, signal], ...]
-            output_name:   [[source, signal], ...]
-
-    Returns:
+    dict_metadata is expected to be:
         {
-          "input":    { "<name>": "<modality>", ... },
-          "actuator": { ... },
-          "output":   { ... }
+          "sec_stride": float,
+          "input":    { "<name>": {...}, ... },
+          "actuator": { "<name>": {...}, ... },
+          "output":   { "<name>": {...}, ... },
         }
     """
+    # v0: no backwards compatibility
+    for role in ("input", "actuator", "output"):
+        if role not in dict_metadata:
+            raise KeyError(f"dict_metadata missing role layer {role!r}")
+
     ss_cfg = cfg_task.get("sources_and_signals", {})
     signals_by_role: Dict[str, Dict[str, str]] = {}
 
@@ -344,11 +344,12 @@ def build_signal_role_modality_map(
         pairs = ss_cfg.get(key) or []
         role_map: Dict[str, str] = {}
 
+        role_meta = dict_metadata[role]
         for source, signal in pairs:
             name = f"{source}-{signal}"  # canonical name
-            meta = dict_metadata.get(name)
+            meta = role_meta.get(name)
             if meta is None:
-                raise KeyError(f"Signal {name!r} missing in dict_metadata")
+                raise KeyError(f"Signal {name!r} missing in dict_metadata[{role!r}]")
 
             val_shape = tuple(meta.get("values_shape", ()))
             modality = infer_modality(val_shape)

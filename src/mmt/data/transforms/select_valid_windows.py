@@ -2,21 +2,11 @@
 SelectValidWindowsTransform
 ===========================
 
-Pure window-level filtering and subsampling transform for the MMT pipeline.
+Window-level filtering + optional subsampling for the MMT preprocessing pipeline.
 
-This transform operates on a *single window dict* and decides whether the
-window should be kept or dropped based on:
-
-  - chunk-level validity of input and actuator signals
-  - window-level validity of output signals
-  - optional, stateless window subsampling
-
-Design principles
------------------
-- PURE: stateless and deterministic (safe for cached/streamed datasets and multiprocessing).
-- No reliance on deprecated fields such as `window["stride"]`.
-- TS-first: subsampling decisions are made in *timestamps / samples* using `dt`
-  from `dict_metadata`.
+This transform operates on a *single window dict* and returns either:
+  - a (shallow) masked copy of the window if it should be kept, or
+  - None if it should be dropped.
 
 Expected pipeline position
 --------------------------
@@ -25,11 +15,37 @@ Expected pipeline position
             → TrimChunksTransform
                 → EmbedChunksTransform
                     → BuildTokensTransform
+
+Window subsampling (minimum spacing)
+----------------------------------------------
+If `window_stride_sec` is set, the transform keeps windows such that the time
+between consecutive *kept* windows for the same shot is at least
+`window_stride_sec`:
+
+    keep window i if (t_cut_i - t_cut_last_kept) >= window_stride_sec
+
+Notes:
+- This logic is per-shot and requires minimal internal state (last kept t_cut).
+- The stride rule is applied *after* validity checks; only kept windows update
+  the last-kept state.
+
+Validity
+--------
+- Chunk-level: input/actuator chunk values are masked (set to None) if invalid
+  (NaN/inf/empty) according to `accept_na`.
+- Signals: input/actuator signals count as valid if they have at least
+  `min_valid_chunks` valid chunks.
+- Outputs: output signals count as valid if their values are valid (after masking).
+
+Returns
+-------
+- window dict (masked copy) if thresholds are met and optional stride constraint passes
+- None otherwise
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict
+from typing import Any, Dict, Hashable, Tuple
 from collections import defaultdict
 import logging
 
@@ -40,65 +56,56 @@ logger = logging.getLogger("mmt.SelectValidWindows")
 
 class SelectValidWindowsTransform:
     """
-    Pure window-level filter and subsampler for the MMT preprocessing pipeline.
+    Window-level filter and optional per-shot subsampler.
 
-    The transform is **pure and stateless**:
-    - no retained memory across windows,
-    - no dependence on call order,
-    - safe with cached datasets, streamed datasets, multiprocessing, and multiple
-      dataset splits (train / val / test).
+    Input
+    -----
+    window: dict containing at least:
+      - "shot_id"
+      - "window_index"
+      - "t_cut"
+      - "chunks": {"input": [...], "actuator": [...]}
+      - "output": {name: {"values": ...}, ...}
 
-    Window subsampling (TS-first)
-    -----------------------------
-    If `window_stride_sec` is set, we subsample windows deterministically using
-    `window_index`, interpreted as an index on the *base dt grid*.
-
-    Let `dt` be taken from `dict_metadata[sig]["dt"]` (for any signal in the window).
-    Then:
-
-        window_stride_ts = round(window_stride_sec / dt)
-
-    A window is kept iff:
-
-        window_index % window_stride_ts == 0
-
-    This avoids any dependence on `sec_stride` and prevents unit-mismatch bugs
-    when the generator operates in timestamp space.
-
-    Validity
-    --------
-    - Chunks: invalid values are masked (None) based on NaN/inf/empty and `accept_na`.
-    - Signals: input/actuator signals count as valid if they have at least
-      `min_valid_chunks` valid chunks.
-    - Outputs: output signals count as valid if their values are valid (after masking).
-
-    Returns the window dict (possibly masked) if thresholds are met; otherwise None.
+    Output
+    ------
+    - Returns a masked copy of `window` if kept
+    - Returns None if dropped
     """
 
     def __init__(
         self,
         *,
-        dict_metadata: Dict[str, Any],
         min_valid_inputs_actuators: int = 1,
         min_valid_chunks: int = 1,
         min_valid_outputs: int = 1,
         accept_na: bool = False,
         window_stride_sec: float | None = None,
     ) -> None:
-        self.dict_metadata = dict_metadata
         self.min_valid_inputs_actuators = int(min_valid_inputs_actuators)
         self.min_valid_chunks = int(min_valid_chunks)
         self.min_valid_outputs = int(min_valid_outputs)
+
         self.accept_na = bool(accept_na)
         self.window_stride_sec = (
             float(window_stride_sec) if window_stride_sec is not None else None
         )
+        if self.window_stride_sec is not None and self.window_stride_sec <= 0:
+            raise ValueError("window_stride_sec must be > 0")
+
+        # shot_key -> (last_kept_t_cut, last_kept_window_index)
+        self._last_kept_by_shot: Dict[Hashable, Tuple[float | None, int | None]] = {}
 
     # ------------------------------------------------------------------
     # helpers
     # ------------------------------------------------------------------
 
     def _mask_if_bad(self, values):
+        """
+        Returns (mask: bool, cleaned: ndarray|None)
+        - mask=True means treat as invalid → set to None
+        - accept_na controls whether partial NaNs are allowed
+        """
         if values is None:
             return True, None
 
@@ -117,19 +124,49 @@ class SelectValidWindowsTransform:
 
         return False, arr
 
-    def _pick_any_signal_name(self, window: Dict[str, Any]) -> str:
-        for role in ("input", "actuator", "output"):
-            group = window.get(role) or {}
-            if isinstance(group, dict) and group:
-                return next(iter(group.keys()))
-        raise ValueError(
-            "[SelectValidWindows] window_stride_sec set but no signals found in window."
-        )
+    def _passes_window_stride(self, shot_id: Any, w_idx: Any, t_cut: Any) -> bool:
+        """
+        Keep iff distance from last kept t_cut (same shot) >= window_stride_sec.
+        """
+        if self.window_stride_sec is None:
+            return True
 
-    @staticmethod
-    def _sec_to_ts_len(sec: float, dt: float) -> int:
-        """Convert seconds -> samples using round() for stability."""
-        return int(round(sec / dt))
+        if shot_id is None:
+            raise ValueError(
+                "[SelectValidWindows] missing shot_id while window_stride_sec is set"
+            )
+        if t_cut is None:
+            raise ValueError(
+                "[SelectValidWindows] missing t_cut while window_stride_sec is set"
+            )
+
+        key = shot_id
+        last_t_cut, last_w_idx = self._last_kept_by_shot.get(key, (None, None))
+
+        # If window indices go backwards (new epoch / reset), reset state for that shot
+        if (
+            last_w_idx is not None
+            and w_idx is not None
+            and int(w_idx) <= int(last_w_idx)
+        ):
+            self._last_kept_by_shot.pop(key, None)
+            last_t_cut, last_w_idx = None, None
+
+        if last_t_cut is None:
+            return True
+
+        dt = float(t_cut) - float(last_t_cut)
+        return dt >= (self.window_stride_sec - 1e-12)
+
+    def _commit_window_stride(self, shot_id: Any, w_idx: Any, t_cut: Any) -> None:
+        if self.window_stride_sec is None:
+            return
+        if shot_id is None or t_cut is None:
+            return
+        self._last_kept_by_shot[shot_id] = (
+            float(t_cut),
+            int(w_idx) if w_idx is not None else None,
+        )
 
     # ------------------------------------------------------------------
     # main API
@@ -141,30 +178,10 @@ class SelectValidWindowsTransform:
 
         w_idx = window.get("window_index")
         shot_id = window.get("shot_id")
+        t_cut = window.get("t_cut")
 
         # --------------------------------------------------------------
-        # 0) Stateless window subsampling (TS-first)
-        # --------------------------------------------------------------
-        if self.window_stride_sec is not None:
-            if w_idx is None:
-                raise ValueError(
-                    "[SelectValidWindows] window_stride_sec is set but window_index is None."
-                )
-
-            sig = self._pick_any_signal_name(window)
-            dt = float(self.dict_metadata[sig]["dt"])
-            if dt <= 0:
-                raise ValueError(
-                    f"[SelectValidWindows] dict_metadata[{sig}]['dt'] must be > 0"
-                )
-
-            window_stride_ts = max(1, self._sec_to_ts_len(self.window_stride_sec, dt))
-
-            if (int(w_idx) % window_stride_ts) != 0:
-                return None
-
-        # --------------------------------------------------------------
-        # 1) Chunk-level validation (PURE: copy before masking)
+        # 1) Chunk-level validation (copy before masking)
         # --------------------------------------------------------------
         chunks = window.get("chunks") or {}
         valid_chunks_by_sig = {
@@ -176,9 +193,8 @@ class SelectValidWindowsTransform:
 
         for role in ("input", "actuator"):
             new_role_chunks = []
-
-            for ch in chunks.get(role, []) or []:
-                ch2 = dict(ch)  # copy chunk dict
+            for ch in chunks.get(role) or []:
+                ch2 = dict(ch)
                 sigs = ch.get("signals") or {}
 
                 sigs2: Dict[str, Any] = {}
@@ -204,7 +220,7 @@ class SelectValidWindowsTransform:
         n_inputs_actuators = len(valid_x_signals)
 
         # --------------------------------------------------------------
-        # 2) Output-level validation (PURE: copy before masking)
+        # 2) Output-level validation (copy before masking)
         # --------------------------------------------------------------
         output = window.get("output") or {}
         output2: Dict[str, Any] = {}
@@ -226,7 +242,7 @@ class SelectValidWindowsTransform:
                 n_outputs_valid += 1
 
         # --------------------------------------------------------------
-        # 3) Final decision
+        # 3) Validity decision
         # --------------------------------------------------------------
         keep = True
         if n_inputs_actuators < self.min_valid_inputs_actuators:
@@ -234,23 +250,35 @@ class SelectValidWindowsTransform:
         if n_outputs_valid < self.min_valid_outputs:
             keep = False
 
+        # --------------------------------------------------------------
+        # 4) Optional subsampling — only among kept windows
+        # --------------------------------------------------------------
+        if keep and not self._passes_window_stride(shot_id, w_idx, t_cut):
+            keep = False
+
         logger.debug(
-            "win=%s shot=%s: "
-            "valid_inputs_actuators=%d, valid_outputs=%d "
-            "(min_x=%d, min_y=%d) → %s",
+            "win %s (shot %s) | valid_inputs_actuators=%d, valid_outputs=%d "
+            "(min_x=%d, min_y=%d, min_chunks=%d, stride=%s) → %s",
             w_idx,
             shot_id,
             n_inputs_actuators,
             n_outputs_valid,
             self.min_valid_inputs_actuators,
             self.min_valid_outputs,
+            self.min_valid_chunks,
+            "none"
+            if self.window_stride_sec is None
+            else f"{self.window_stride_sec:.6f}s",
             "KEEP" if keep else "DROP",
         )
 
         if not keep:
             return None
 
-        # Return a masked COPY (PURE)
+        # Commit stride state only on KEEP
+        self._commit_window_stride(shot_id, w_idx, t_cut)
+
+        # Return a masked copy
         out = dict(window)
         out["chunks"] = new_chunks
         out["output"] = output2
