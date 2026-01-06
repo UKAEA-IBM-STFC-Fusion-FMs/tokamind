@@ -1,7 +1,7 @@
 task: "task_2-1"
 
-baseline_config: "scripts/pipelines/configs/configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"
-#baseline_config: "scripts/pipelines/configs/configs_task/task_1_reconstruction/config_task_1-2.yaml"
+task_config: "scripts/pipelines/configs/configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"
+#task_config: "scripts/pipelines/configs/configs_task/task_1_reconstruction/config_task_1-2.yaml"
 
 seed: 54
 

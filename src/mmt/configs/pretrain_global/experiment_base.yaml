@@ -1,0 +1,42 @@
+task: "pretrain_task_inputs_actuators_to_inputs_outputs"
+
+task_config: "mmt/configs/pretrain_global/pretrain_task_inputs_actuators_to_inputs_outputs.yaml"
+
+seed: 54
+
+data:
+  local: false         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: 4   # None / null → uses all shots;
+
+preprocess:
+  chunk:
+    chunk_length: 0.005          # 5 ms per chunk (placeholder)
+    stride: null                 # null => non-overlapping chunks
+
+  trim_chunks:
+     max_chunks: 50     # maximum number of chunks in the history
+
+model:
+  backbone:
+    d_model: 128  # 256
+    n_layers: 2   # 4
+    n_heads: 2    # 8
+    dim_ff: 256   # 1024
+    dropout: 0.1
+    activation: "relu"
+
+  modality_heads:
+    timeseries:
+      hidden: 128
+      out_dim: 128
+    profile:
+      hidden: 128
+      out_dim: 128
+    video:
+      hidden: 192
+      out_dim: 128
+
+  output_adapters:
+    hidden_default: 0
+    hidden_overrides:
+      equilibrium-psi: 32

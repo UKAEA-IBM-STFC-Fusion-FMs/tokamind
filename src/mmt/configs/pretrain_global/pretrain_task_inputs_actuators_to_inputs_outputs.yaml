@@ -1,0 +1,150 @@
+# Pretraining task: Denoising with broad targets without inflating the token vocabulary.
+# RECOMMENDED
+# Inputs are ALL benchmark inputs + ALL actuators; targets are ALL inputs + ALL outputs.
+# Advantages: trains all output heads (including equilibrium-only outputs) and also reconstructs input-only sensors,
+# while keeping the input/token set small (no equilibrium-only outputs as tokens). Recommended starting point.
+#
+# Windowing: instantaneous reconstruction (output window overlaps input window).
+# We set input_length=output_length=0.050s and delta=-0.050s, so targets align to the same history window.
+# (Edit these three numbers if you want 25ms instead of 50ms, etc.)
+
+subset_of_shots: null
+local: false
+task_name: pretrain_task_inputs_actuators_to_inputs_outputs
+
+sources_and_signals:
+  input_name: &input_keys
+    - - equilibrium
+      - lcfs_r
+#    - - interferometer
+#      - n_e_line
+#    - - magnetics
+#      - b_field_pol_probe_ccbv_field
+#    - - magnetics
+#      - b_field_pol_probe_obr_field
+#    - - magnetics
+#      - b_field_pol_probe_obv_field
+#    - - magnetics
+#      - b_field_pol_probe_omv_voltage
+#    - - magnetics
+#      - b_field_tor_probe_cc_field
+#    - - magnetics
+#      - b_field_tor_probe_saddle_voltage
+#    - - magnetics
+#      - flux_loop_flux
+#    - - pf_active
+#      - coil_current
+#    - - pf_active
+#      - solenoid_current
+#    - - soft_x_rays
+#      - horizontal_cam_lower
+#    - - soft_x_rays
+#      - horizontal_cam_upper
+#    - - spectrometer_visible
+#      - filter_spectrometer_dalpha_voltage
+#    - - summary
+#      - ip
+#    - - thomson_scattering
+#      - n_e
+    - - thomson_scattering
+      - t_e
+
+  actuator_name: &actuator_keys
+    - - equilibrium
+      - lcfs_r
+#    - - gas_injection
+#      - total_injected
+    - - pf_active
+      - coil_voltage
+    - - pulse_schedule
+      - i_plasma
+    - - pulse_schedule
+      - n_e_line
+    - - summary
+      - power_nbi
+
+  output_name: &output_keys
+#    - - equilibrium
+#      - beta_normal
+#    - - equilibrium
+#      - beta_pol
+#    - - equilibrium
+#      - beta_tor
+#    - - equilibrium
+#      - bphi_rmag
+#    - - equilibrium
+#      - bvac_rmag
+#    - - equilibrium
+#      - elongation
+#    - - equilibrium
+#      - elongation_axis
+#    - - equilibrium
+#      - lcfs_r
+#    - - equilibrium
+#      - lcfs_z
+#    - - equilibrium
+#      - magnetic_axis_r
+#    - - equilibrium
+#      - magnetic_axis_z
+#    - - equilibrium
+#      - minor_radius
+#    - - equilibrium
+#      - psi
+#    - - equilibrium
+#      - q95
+#    - - equilibrium
+#      - triangularity_lower
+#    - - equilibrium
+#      - triangularity_upper
+#    - - equilibrium
+#      - x_point_r
+#    - - equilibrium
+#      - x_point_z
+#    - - interferometer
+#      - n_e_line
+#    - - magnetics
+#      - b_field_pol_probe_ccbv_field
+#    - - magnetics
+#      - b_field_pol_probe_obr_field
+#    - - magnetics
+#      - b_field_pol_probe_obv_field
+#    - - magnetics
+#      - b_field_pol_probe_omv_voltage
+#    - - magnetics
+#      - b_field_tor_probe_cc_field
+#    - - magnetics
+#      - b_field_tor_probe_saddle_voltage
+#    - - magnetics
+#      - flux_loop_flux
+#    - - pf_active
+#      - coil_current
+#    - - pf_active
+#      - solenoid_current
+#    - - soft_x_rays
+#      - horizontal_cam_lower
+#    - - soft_x_rays
+#      - horizontal_cam_upper
+#    - - spectrometer_visible
+#      - filter_spectrometer_dalpha_voltage
+    - - summary
+      - ip
+    - - thomson_scattering
+      - n_e
+    - - thomson_scattering
+      - t_e
+
+standardscaling_setting:
+  mean_path: /../metadata/2025-09-22_stdscaling/flattened_dict_mean_shot.pkl
+  std_path: /../metadata/2025-09-22_stdscaling/flattened_dict_std_shot.pkl
+
+task_window_segmenter:
+  input_keys: *input_keys
+  actuator_keys: *actuator_keys
+  output_keys: *output_keys
+  input_length: 0.050
+  output_length: 0.050
+  delta: -0.050
+  verbose: false
+
+paths:
+  data_split_csv_path: ../metadata/2025-05-12/data_splits.csv

@@ -1,5 +1,5 @@
-experiment_base: mmt/configs/task_2-1/experiment_base.yaml
-embedding_config: mmt/configs/task_2-1/embeddings_default.yaml
+experiment_base: "mmt/configs/task_2-1/experiment_base.yaml"
+embedding_config: "mmt/configs/task_2-1/embeddings_default.yaml"
 phase: finetune
 run_id: test
 
@@ -17,7 +17,7 @@ collate:
 data:
   cache:
     enable: true
-    num_workers: 2
+    num_workers: 4
   keep_output_native: false
 
 preprocess:
@@ -26,6 +26,9 @@ preprocess:
     min_valid_outputs: 1
     min_valid_chunks: 1
     window_stride_sec: 0.005
+
+# "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
+#  Multi-workers rarely help when each item is already precomputed and Python-heavy."
 
 loader:
   batch_size: 100
@@ -37,23 +40,30 @@ loader:
 # How to initialise the model's weights for this run.
 #
 # - If model_dir is null    → train from scratch.
-# - If model_dir is a path  → init from that previous run using overlap loading.
+# - If model_dir is a path  → warm-start from that previous run using overlap loading.
 #
-#   *Overlap loading* means we only copy parameters whose keys AND shapes
-#   match between the checkpoint and the current model; everything else
-#   keeps its current initialisation. This allows you to:
+#   *Overlap loading* means we only copy parameters whose keys AND shapes match
+#   between the checkpoint and the current model; everything else keeps its
+#   current initialisation. This allows you to:
 #   - add/remove outputs,
 #   - add/remove modalities,
-#   - change shapes in some submodules
+#   - change some submodule shapes
 #   between pretrain and finetune.
 #
-# load_parts controls which large blocks we reuse.
-# true: only the intersection between model_init signals and model_new signals is kept
-#   backbone:        token encoder + transformer trunk
-#   modality_heads:  modality-level heads G_mod
-#   output_adapters: per-output adapters ψ
+# Use model_init (not resume) when you want a NEW run_dir but still reuse weights with:
+#   - different masking rates / different pretrain_task.yaml variant,
+#   - staged pretraining  without inheriting optimizer state,
+#   - switching  batch size / LR schedule while keeping weights.
+#
+# load_parts controls which large blocks we reuse; typically keep these True.
+# (Even when True, only the compatible intersection is loaded via key+shape match.)
+#
+#   token_encoder:    per-signal projection layers
+#   backbone:         transformer trunk
+#   modality_heads:   modality-level heads
+#   output_adapters:  per-output adapters
 model_init:
-  model_dir: "runs/test_train"           # e.g. "runs/run_id"
+  model_dir:   # "runs/test_train"           # e.g. "runs/run_id"
   load_parts:
     token_encoder: true
     backbone: true

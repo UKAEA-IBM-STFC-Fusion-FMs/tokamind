@@ -15,7 +15,7 @@ from scripts.pipelines.utils.preprocessing_utils import (
 )
 
 from mmt.utils.config import (
-    build_baseline_task_config,
+    build_task_config,
     load_experiment_config,
 )
 from mmt.utils import (
@@ -96,7 +96,7 @@ def main() -> None:
     cfg_tune = cfg_mmt.raw["tune_dct3d"]
 
     # Baseline task config (with overrides such as subset_of_shots)
-    cfg_task = build_baseline_task_config(cfg_mmt)
+    cfg_task = build_task_config(cfg_mmt)
 
     # ------------------------------------------------------------------
     # Seed + logging

@@ -12,7 +12,7 @@ from scripts.pipelines.utils.preprocessing_utils import (
 )
 
 from mmt.utils.config import (
-    build_baseline_task_config,
+    build_task_config,
     load_experiment_config,
     validate_eval_config,
 )
@@ -114,7 +114,7 @@ def main() -> None:
     max_positions = cfg_trim["max_chunks"]
 
     # Baseline task config (with overrides such as subset_of_shots)
-    cfg_task = build_baseline_task_config(cfg_mmt)
+    cfg_task = build_task_config(cfg_mmt)
 
     # ------------------------------------------------------------------
     # Seed + logging

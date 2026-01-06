@@ -13,7 +13,7 @@ from scripts.pipelines.utils.preprocessing_utils import (
 )
 
 from mmt.utils.config import (
-    build_baseline_task_config,
+    build_task_config,
     load_experiment_config,
     validate_train_config,
 )
@@ -45,7 +45,7 @@ from mmt.train.loop import train_finetune
 import logging
 
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def parse_args_finetune() -> argparse.Namespace:
@@ -114,7 +114,7 @@ def main() -> None:
     max_positions = cfg_trim["max_chunks"]
 
     # Baseline task config (with overrides such as subset_of_shots)
-    cfg_task = build_baseline_task_config(cfg_mmt)
+    cfg_task = build_task_config(cfg_mmt)
 
     # ------------------------------------------------------------------
     # Seed + logging
@@ -267,7 +267,7 @@ def main() -> None:
     # Optional warm-start from previous run
     # ------------------------------------------------------------------
     # TODO: modify it --> finetune we MUST DO WARMSTARM AND SPECIFY model_init
-    model_init_cfg = cfg_mmt.get("model_init", None)
+    model_init_cfg = cfg_mmt.raw.get("model_init", None)
     if model_init_cfg is not None:
         run_init = model_init_cfg.get("model_dir", None)
         load_parts = model_init_cfg.get("load_parts", None)

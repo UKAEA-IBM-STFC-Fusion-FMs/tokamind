@@ -15,7 +15,7 @@ For each task (e.g. `task_2-1`) we use three logical layers:
 
    - Defines:
      - task id (`task`)
-     - link to the **baseline FAIRMAST task config** (`baseline_config`), i.e. the YAML file from the separate baseline repository that defines the raw task (inputs, outputs, windowing, etc.)
+     - link to the **baseline FAIRMAST task config** (`task_config`), i.e. the YAML file from the separate baseline repository that defines the raw task (inputs, outputs, windowing, etc.)
      - global settings (`global.seed`)
      - data options (`data.local`, `data.subset_of_shots`)
      - preprocess settings (`preprocess.valid_windows`, `preprocess.chunking`, `preprocess.cache`)

@@ -188,11 +188,28 @@ def _validate_loader(cfg: Dict[str, Any]) -> None:
 
 
 def _normalize_load_parts(cfg: Dict[str, Any]) -> None:
-    mi = cfg.get("model_init", {})
-    lp = mi.get("load_parts")
+    """
+    Normalize cfg.model_init.load_parts.
+
+    - If model_init is missing/null: do nothing (train from scratch).
+    - If model_init exists:
+        * If load_parts is missing: default to all True.
+        * If load_parts exists: fill missing blocks with True.
+    """
+    mi = cfg.get("model_init", None)
+    if mi is None:
+        return
+
+    if not isinstance(mi, dict):
+        raise TypeError("model_init must be a dict or null.")
+
+    lp = mi.get("load_parts", None)
 
     if lp is None:
-        raise KeyError("model_init.load_parts must be defined in MMT v0.")
+        lp = {}
+        mi["load_parts"] = lp
+    elif not isinstance(lp, dict):
+        raise TypeError("model_init.load_parts must be a dict.")
 
     # Fill missing entries with True
     for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
@@ -207,14 +224,15 @@ def _normalize_load_parts(cfg: Dict[str, Any]) -> None:
 
 def validate_train_config(cfg: Dict[str, Any]) -> None:
     """
-    Validate the full experiment configuration.
+    Validate the full experiment configuration for training phases (pretrain/finetune).
 
     This function performs:
       • validation of the global training block,
       • validation and normalization of all training stages
         (lr/wd inheritance, freeze→force-zero rules),
-      • validation of model_init.load_parts,
+      • validation/normalization of model_init.load_parts (if model_init is provided),
       • validation of dataset loader rules (streamed vs cached),
+      • guardrail: train.resume is mutually exclusive with model_init.
 
     Parameters
     ----------
@@ -223,33 +241,42 @@ def validate_train_config(cfg: Dict[str, Any]) -> None:
 
     Raises
     ------
-    KeyError or ValueError
+    KeyError / ValueError / TypeError
         If any required entry is missing or inconsistent.
     """
-
     # -----------------------------
     # Validate global train fields
     # -----------------------------
     for path, _t in REQUIRED_TRAIN_FIELDS:
         _get_nested(cfg, path)
 
+    # Mutual exclusion: resume (same run_dir) vs warm-start (other run_dir)
+    if cfg["train"]["resume"] is True and cfg.get("model_init", None) is not None:
+        raise ValueError(
+            "Inconsistent config: train.resume=true is incompatible with model_init. "
+            "Use resume to continue the same run_dir, or set resume=false and use "
+            "model_init.model_dir to warm-start from a different run."
+        )
+
     stages = cfg["train"]["stages"]
+    if not isinstance(stages, list) or len(stages) == 0:
+        raise ValueError("train.stages must be a non-empty list for training phases.")
 
     # -----------------------------
     # Validate and normalize stages
     # -----------------------------
-    for stage in stages:
+    for i, stage in enumerate(stages):
         # Ensure required fields exist
         for path, _t in REQUIRED_STAGE_FIELDS:
             _get_nested(stage, path)
 
-            # check on grad_accum_steps: must be > 0
-            gas = stage["scheduler"]["grad_accum_steps"]
-            if not isinstance(gas, int) or gas < 1:
-                raise ValueError(
-                    "Inconsistent config: scheduler.grad_accum_steps must be an integer >= 1 "
-                    f"(got {gas})."
-                )
+        # Check grad_accum_steps once per stage (not once per required field)
+        gas = stage["scheduler"]["grad_accum_steps"]
+        if not isinstance(gas, int) or gas < 1:
+            raise ValueError(
+                "Inconsistent config: scheduler.grad_accum_steps must be an integer >= 1 "
+                f"(got {gas}) in train.stages[{i}]."
+            )
 
         # 1) Inherit lr/wd from backbone
         _apply_lr_wd_inheritance(stage)
@@ -261,7 +288,7 @@ def validate_train_config(cfg: Dict[str, Any]) -> None:
         _validate_stage_consistency(stage)
 
     # -----------------------------
-    # Validate model_init.load_parts
+    # Normalize model_init.load_parts (only if model_init is provided)
     # -----------------------------
     _normalize_load_parts(cfg)
 

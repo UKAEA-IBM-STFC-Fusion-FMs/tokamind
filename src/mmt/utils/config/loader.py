@@ -16,7 +16,7 @@ Given a *phase config path*, the loader performs:
   2) Load phase config, base config, and embeddings config.
   3) Deep-merge dictionaries in the order:
          experiment_base ← embeddings ← phase_config
-  4) Resolve FAIRMAST baseline_config path inside the installed baseline package.
+  4) Resolve FAIRMAST task_config path inside the installed baseline package.
   5) Resolve model_init.model_dir to an absolute path when present.
   6) Compute paths (run_dir, etc.) depending on the phase.
 
@@ -109,19 +109,19 @@ def _resolve_from_repo_root(path_str: str) -> Path:
     return (repo_root / p).resolve()
 
 
-def _resolve_baseline_config(baseline_config_str: str) -> Path:
+def _resolve_task_config(task_config_str: str) -> Path:
     """
     Resolve a FAIRMAST baseline config path inside the installed baseline package.
 
     Convention example:
-      baseline_config: "scripts/pipelines/configs/.../config_task_2-1.yaml"
+      task_config: "scripts/pipelines/configs/.../config_task_2-1.yaml"
 
     The first component is treated as the installed Python package name
     (e.g. "scripts"). The rest is resolved inside that package.
     """
-    parts = Path(baseline_config_str).parts
+    parts = Path(task_config_str).parts
     if not parts:
-        raise ValueError("baseline_config is empty")
+        raise ValueError("task_config is empty")
 
     pkg_name = parts[0]
     rel_inside_pkg = Path(*parts[1:])
@@ -249,12 +249,29 @@ class ExperimentConfig:
 
 def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     """
-    Load and merge experiment configuration files.
+    Load and merge an experiment configuration.
+
+    The experiment configuration is defined by three YAML files:
+      1) experiment_base.yaml   (global defaults: task_config, model, preprocess, etc.)
+      2) embeddings_*.yaml      (embedding hyperparameters)
+      3) <phase>_default.yaml   (phase-specific overrides: pretrain/finetune/eval/tune_dct3d)
+
+    Merge precedence is:
+        experiment_base < embeddings < phase_config
+
+    After merging, this loader also:
+      - computes derived paths (run_dir, log_dir, checkpoint_dir, etc.) in a phase-aware way,
+      - resolves `task_config_path` (supports repo-relative paths and baseline-package paths),
+      - resolves `model_init.model_dir` to an absolute repo-root path (when present),
+      - saves the fully merged config to `<run_dir>/config_merged.yaml` for run-based phases
+        (all phases except tune_dct3d).
 
     Parameters
     ----------
     phase_config_path:
-        Path to the phase-specific config file, e.g.:
+        Path to the phase-specific YAML, relative to repo root or absolute.
+        Example:
+          mmt/configs/pretrain_global/pretrain_default.yaml
           mmt/configs/task_2-1/finetune_default.yaml
           mmt/configs/task_2-1/eval_default.yaml
           mmt/configs/task_2-1/tune_dct3d.yaml
@@ -262,7 +279,8 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     Returns
     -------
     ExperimentConfig
-        Dynamic configuration object with merged fields and computed paths.
+        Dynamic config object exposing top-level keys as attributes and also storing
+        the full merged dictionary in `cfg.raw`.
     """
     # --- Resolve & load phase config ---
     phase_config_path = _resolve_from_repo_root(str(phase_config_path))
@@ -280,6 +298,11 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     exp_base_path = _resolve_from_repo_root(str(phase_cfg["experiment_base"]))
     emb_cfg_path = _resolve_from_repo_root(str(phase_cfg["embedding_config"]))
 
+    if not exp_base_path.is_file():
+        raise FileNotFoundError(f"experiment_base not found: {exp_base_path}")
+    if not emb_cfg_path.is_file():
+        raise FileNotFoundError(f"embedding_config not found: {emb_cfg_path}")
+
     base_cfg = _load_yaml(exp_base_path)
     emb_cfg = _load_yaml(emb_cfg_path)
 
@@ -292,11 +315,17 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     # --- Compute paths (phase-aware) ---
     merged["paths"] = _compute_paths(merged, phase_config_path=phase_config_path)
 
-    # --- Resolve baseline config path (inside baseline package) ---
-    if "baseline_config" in merged and merged["baseline_config"]:
-        merged["baseline_config_path"] = str(
-            _resolve_baseline_config(str(merged["baseline_config"]))
-        )
+    # --- Resolve task_config path (supports repo-relative and baseline-package paths) ---
+    if "task_config" in merged and merged["task_config"]:
+        task_cfg_str = str(merged["task_config"])
+
+        # 1) Try repo-root relative path first (e.g. "mmt/configs/pretrain_global/pretrain_task.yaml")
+        candidate = _resolve_from_repo_root(task_cfg_str)
+        if candidate.is_file():
+            merged["task_config_path"] = str(candidate)
+        else:
+            # 2) Fall back to baseline-package resolution
+            merged["task_config_path"] = str(_resolve_task_config(task_cfg_str))
 
     # --- Resolve model_init.model_dir to absolute path (if present) ---
     if isinstance(merged.get("model_init"), dict):
