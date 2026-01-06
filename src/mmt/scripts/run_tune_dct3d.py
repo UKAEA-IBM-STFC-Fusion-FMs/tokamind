@@ -14,6 +14,10 @@ from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
 )
 
+from scripts.pipelines.utils.utils import (
+    initialize_model_dataset,
+)
+
 from mmt.utils.config import (
     build_task_config,
     load_experiment_config,
@@ -21,7 +25,6 @@ from mmt.utils.config import (
 from mmt.utils import (
     set_seed,
     setup_logging,
-    initialize_mmt_datasets,
 )
 
 from mmt.data import (
@@ -117,7 +120,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Baseline datasets + metadata
     # ------------------------------------------------------------------
-    datasets_train_val_test, dict_metadata = initialize_datasets_and_metadata_for_task(
+    datasets_shots_raw, dict_metadata = initialize_datasets_and_metadata_for_task(
         cfg_task
     )
 
@@ -162,49 +165,57 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Model-level datasets (TaskModelTransformWrapper, shot-based)
+    # Shot-level dataset (wrapped) for tuning
     # ------------------------------------------------------------------
-    datasets_mmt = initialize_mmt_datasets(
-        datasets_train_val_test,
-        dict_metadata,
-        cfg_task,
-        model_specific_transform=mmt_transform_map,
-        verbose=True,
-    )
+    datasets_shots_wrapped = {
+        "train": initialize_model_dataset(
+            datasets_shots_raw.get("train"),
+            dict_metadata,
+            cfg_task,
+            model_specific_transform=mmt_transform_map,
+            verbose=False,
+        )
+    }
+    ds_shots_full = datasets_shots_wrapped["train"]
 
-    # random shot selection
-    # Select the dataset and enforce n_shots
+    # ------------------------------------------------------------------
+    # Random shot selection (optional)
+    # ------------------------------------------------------------------
     cfg_sampling = cfg_tune["sampling"]
-    ds_shots_full = datasets_mmt["train"]
-
     n_shots = cfg_sampling.get("n_shots")
+
+    all_indices = np.arange(len(ds_shots_full))
     if n_shots is not None:
         rng = np.random.default_rng(cfg_mmt.seed)
-        all_indices = np.arange(len(ds_shots_full))
         sel_indices = rng.choice(
             all_indices, size=min(n_shots, len(all_indices)), replace=False
         )
-        # simple index-based subset
-        ds_shots = [ds_shots_full[i] for i in sel_indices]
+        ds_shots_selected = [
+            ds_shots_full[i] for i in sel_indices
+        ]  # index-based subset
     else:
-        ds_shots = ds_shots_full
+        sel_indices = all_indices
+        ds_shots_selected = ds_shots_full
 
     logger.info(
         "ds_shots_full=%d, requested n_shots=%s, selected=%d, sel_indices=%s",
         len(ds_shots_full),
         str(n_shots),
-        len(ds_shots),
+        len(ds_shots_selected),
         np.array(sel_indices).tolist() if n_shots is not None else None,
     )
 
     # ------------------------------------------------------------------
-    # Streaming dataset (window-level)
+    # Window-level dataset (streaming)
     # ------------------------------------------------------------------
-    ds_windows = WindowStreamedDataset(
-        ds_shots,
-        shuffle_shots=False,
-        seed=cfg_mmt.seed,
-    )
+    datasets_windows = {
+        "train": WindowStreamedDataset(
+            ds_shots_selected,
+            shuffle_shots=False,
+            seed=cfg_mmt.seed,
+        )
+    }
+    ds_windows = datasets_windows["train"]
 
     # ------------------------------------------------------------------
     # Shot exploration
@@ -240,8 +251,9 @@ def main() -> None:
     # ------------------------------------------------------------------
     embeddings_tuned = copy.deepcopy(cfg_mmt.embeddings)
 
-    # Ensure per-signal override section exists
-    embeddings_tuned.setdefault("per_signal_overrides", {})
+    # Ensure per-signal override section exists (YAML may parse it as None)
+    per_sig = embeddings_tuned.get("per_signal_overrides") or {}
+    embeddings_tuned["per_signal_overrides"] = per_sig
     for role, by_sig in best.items():
         embeddings_tuned["per_signal_overrides"].setdefault(role, {})
 

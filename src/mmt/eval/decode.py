@@ -26,40 +26,49 @@ logger = logging.getLogger("mmt.Eval")
 
 def apply_stats(arr: np.ndarray, mean, std) -> np.ndarray:
     """
-    Invert the standardisation used in the baseline:
+    Undo standardisation:  x = x_std * std + mean
 
-        values_std = (values - mean[..., None]) / std[..., None]
-
-    Here `arr` is batch-first, e.g. (B, C, T, ...) or (B, T, ...).
-    `mean` / `std` can be:
-      - scalar
-      - shape (1,)
-      - shape (C,)
+    Supports different stats formats:
+      - scalar mean/std
+      - per-channel: mean/std shape (C,) for arr shaped (B, C, ...)
+      - spatial/video: mean/std shape (H, W) for arr shaped (B, H, W, T)
+      - exact match: mean/std shape == arr.shape[1:]
     """
     mean = np.asarray(mean)
     std = np.asarray(std)
 
-    # Scalar or effectively scalar
-    if mean.ndim == 0 or (mean.ndim == 1 and mean.shape[0] == 1):
+    # scalar stats (or effectively scalar)
+    if mean.ndim == 0 or mean.size == 1:
         return arr * std + mean
 
-    # Per-channel (C,)
-    if arr.ndim < 2:
+    def _broadcast(stat: np.ndarray) -> np.ndarray:
+        stat = np.asarray(stat)
+
+        # exact match (no batch)
+        if stat.shape == arr.shape[1:]:
+            return stat.reshape((1,) + stat.shape)
+
+        # video/map stats: (H, W) -> (1, H, W, 1) for arr (B, H, W, T)
+        if arr.ndim >= 4 and stat.shape == arr.shape[1:-1]:
+            return stat.reshape((1,) + stat.shape + (1,))
+
+        # per-channel stats: (C,) -> (1, C, 1, 1, ...)
+        if arr.ndim >= 2 and stat.ndim == 1 and stat.shape[0] == arr.shape[1]:
+            shape = [1] * arr.ndim
+            shape[1] = stat.shape[0]
+            return stat.reshape(shape)
+
         raise ValueError(
-            f"Cannot apply per-channel stats: arr.shape={arr.shape}, mean.shape={mean.shape}"
-        )
-    C = arr.shape[1]
-    if mean.shape[0] != C:
-        raise ValueError(
-            f"Incompatible shapes: mean.shape={mean.shape}, arr.shape={arr.shape} "
-            f"(expected mean.shape[0] == arr.shape[1] == {C})"
+            f"Incompatible stats shape: arr.shape={arr.shape}, stat.shape={stat.shape}"
         )
 
-    shape = [1] * arr.ndim
-    shape[1] = C  # (1, C, 1, 1, ...)
-    mean = mean.reshape(shape)
-    std = std.reshape(shape)
-    return arr * std + mean
+    mean_b = _broadcast(mean)
+    std_b = (
+        _broadcast(std)
+        if np.asarray(std).ndim > 0 and np.asarray(std).size > 1
+        else std
+    )
+    return arr * std_b + mean_b
 
 
 # ============================================================================

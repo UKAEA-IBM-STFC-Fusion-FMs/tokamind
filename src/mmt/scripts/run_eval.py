@@ -11,6 +11,10 @@ from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
 )
 
+from scripts.pipelines.utils.utils import (
+    initialize_model_dataset,
+)
+
 from mmt.utils.config import (
     build_task_config,
     load_experiment_config,
@@ -19,7 +23,6 @@ from mmt.utils.config import (
 from mmt.utils import (
     set_seed,
     setup_logging,
-    initialize_mmt_datasets,
     initialize_mmt_dataloaders,
 )
 
@@ -135,14 +138,17 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Baseline datasets + metadata
     # ------------------------------------------------------------------
-    datasets_train_val_test, dict_metadata = initialize_datasets_and_metadata_for_task(
+    datasets_shots_raw, dict_metadata = initialize_datasets_and_metadata_for_task(
         cfg_task
     )
-    signal_stats = {
-        name: meta
-        for name, meta in dict_metadata.items()
-        if isinstance(meta, dict) and ("mean" in meta) and ("std" in meta)
-    }
+    signal_stats = {}
+    for role in ("input", "actuator", "output"):
+        role_meta = dict_metadata.get(role, {})
+        if not isinstance(role_meta, dict):
+            continue
+        for name, meta in role_meta.items():
+            if isinstance(meta, dict) and ("mean" in meta) and ("std" in meta):
+                signal_stats[name] = meta
 
     # Build signals_by_role from baseline config + metadata and signal specs
     signals_role_modality_map = build_signal_role_modality_map(cfg_task, dict_metadata)
@@ -187,17 +193,21 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model-level datasets (TaskModelTransformWrapper, shot-based)
     # ------------------------------------------------------------------
-    datasets_mmt = initialize_mmt_datasets(
-        datasets_train_val_test,
-        dict_metadata,
-        cfg_task,
-        model_specific_transform=mmt_transform_map,
-        verbose=True,
-    )
-    dataset_test = datasets_mmt["test"]
 
-    if DEBUG_MODE:
-        shot = dataset_test[0]
+    datasets_shots_wrapped = {
+        "test": initialize_model_dataset(
+            datasets_shots_raw.get("test"),
+            dict_metadata,
+            cfg_task,
+            model_specific_transform=mmt_transform_map,
+            verbose=True,
+        ),
+    }
+
+    if DEBUG_MODE and datasets_shots_wrapped["test"] is not None:
+        # Trigger one full-shot iteration to exercise the wrapper + transforms.
+        ds = datasets_shots_wrapped["test"]
+        shot = ds[0]
         for _ in shot:
             continue
 
@@ -205,14 +215,14 @@ def main() -> None:
     # Window-level dataset for EVAL (test only)
     # ------------------------------------------------------------------
 
-    datasets_for_loader = {}
+    datasets_windows = {}
 
     if enable_cache:
         logger = logging.getLogger("mmt.Cache")
         logger.info("Starting caching test")
         t0 = time.perf_counter()
-        datasets_for_loader["test"] = WindowCachedDataset.from_streaming(
-            dataset_test,
+        datasets_windows["test"] = WindowCachedDataset.from_streaming(
+            datasets_shots_wrapped["test"],
             num_workers_cache=num_workers_cache,
         )
         t1 = time.perf_counter()
@@ -220,8 +230,8 @@ def main() -> None:
 
     else:
         # Always deterministic for eval
-        datasets_for_loader["test"] = WindowStreamedDataset(
-            dataset_test,
+        datasets_windows["test"] = WindowStreamedDataset(
+            datasets_shots_wrapped["test"],
             shuffle_shots=False,
             seed=cfg_mmt.seed,
         )
@@ -245,7 +255,7 @@ def main() -> None:
     collate_fn = MMTCollate(cfg_collate=collate_cfg)
 
     eval_loader = initialize_mmt_dataloaders(
-        datasets_for_loader,
+        datasets_windows,
         collate_fn,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],
@@ -298,7 +308,12 @@ def main() -> None:
     cfg_traces = cfg_eval.get("traces", {})
 
     # All output specs for this task
-    output_specs = signal_specs.specs_for_role("output")  # List[SignalSpec]
+    drop_outputs_set = set(drop_outputs or [])
+    output_specs = [
+        spec
+        for spec in signal_specs.specs_for_role("output")
+        if spec.name not in drop_outputs_set
+    ]
     id_to_name = {spec.signal_id: spec.name for spec in output_specs}
 
     # Map: output_name -> codec (using signal_id internally)

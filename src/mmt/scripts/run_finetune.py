@@ -12,6 +12,10 @@ from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
 )
 
+from scripts.pipelines.utils.utils import (
+    initialize_model_dataset,
+)
+
 from mmt.utils.config import (
     build_task_config,
     load_experiment_config,
@@ -20,7 +24,6 @@ from mmt.utils.config import (
 from mmt.utils import (
     set_seed,
     setup_logging,
-    initialize_mmt_datasets,
     initialize_mmt_dataloaders,
 )
 
@@ -135,7 +138,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Baseline datasets + metadata
     # ------------------------------------------------------------------
-    datasets_train_val_test, dict_metadata = initialize_datasets_and_metadata_for_task(
+    datasets_shots_raw, dict_metadata = initialize_datasets_and_metadata_for_task(
         cfg_task
     )
 
@@ -182,29 +185,38 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model-level datasets (TaskModelTransformWrapper, shot-based)
     # ------------------------------------------------------------------
-    datasets_mmt = initialize_mmt_datasets(
-        datasets_train_val_test,
-        dict_metadata,
-        cfg_task,
-        model_specific_transform=mmt_transform_map,
-        verbose=True,
-    )
+    datasets_shots_wrapped = {
+        "train": initialize_model_dataset(
+            datasets_shots_raw.get("train"),
+            dict_metadata,
+            cfg_task,
+            model_specific_transform=mmt_transform_map,
+            verbose=True,
+        ),
+        "val": initialize_model_dataset(
+            datasets_shots_raw.get("val"),
+            dict_metadata,
+            cfg_task,
+            model_specific_transform=mmt_transform_map,
+            verbose=False,
+        ),
+    }
 
-    if DEBUG_MODE:
-        ds = datasets_mmt["train"]
+    if DEBUG_MODE and datasets_shots_wrapped["train"] is not None:
+        # Trigger one full-shot iteration to exercise the wrapper + transforms.
+        ds = datasets_shots_wrapped["train"]
         shot = ds[0]
         for _ in shot:
-            # apply only the transforms you want to debug
             continue
 
     # ------------------------------------------------------------------
     # Optionally materialise streaming datasets to RAM (window-level)
     # ------------------------------------------------------------------
-    datasets_for_loader: dict[str, Any] = {}
+    datasets_windows: dict[str, Any] = {}
 
-    for split, ds_stream in datasets_mmt.items():
+    for split, ds_stream in datasets_shots_wrapped.items():
         if ds_stream is None:
-            datasets_for_loader[split] = None
+            datasets_windows[split] = None
             continue
 
         # Decide whether this split should be cached
@@ -228,7 +240,7 @@ def main() -> None:
                 seed=cfg_mmt.seed,
             )
 
-        datasets_for_loader[split] = ds
+        datasets_windows[split] = ds
 
     # ------------------------------------------------------------------
     # Dataloaders (always window-level batches)
@@ -236,7 +248,7 @@ def main() -> None:
     collate_fn = MMTCollate({**cfg_collate, "keep_output_native": keep_output_native})
 
     dataloaders_mmt = initialize_mmt_dataloaders(
-        datasets_for_loader,
+        datasets_windows,
         collate_fn,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],
@@ -266,7 +278,6 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Optional warm-start from previous run
     # ------------------------------------------------------------------
-    # TODO: modify it --> finetune we MUST DO WARMSTARM AND SPECIFY model_init
     model_init_cfg = cfg_mmt.raw.get("model_init", None)
     if model_init_cfg is not None:
         run_init = model_init_cfg.get("model_dir", None)

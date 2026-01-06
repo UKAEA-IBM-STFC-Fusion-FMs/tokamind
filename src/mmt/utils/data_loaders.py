@@ -1,37 +1,40 @@
 """
-MMT dataset and DataLoader initialization utilities.
+MMT DataLoader initialization utilities.
 
-This module defines the MMT-side helpers used to turn baseline shot-level
-datasets into model-ready window-level datasets and PyTorch DataLoaders.
+This module contains MMT-side helpers to build PyTorch DataLoaders for
+window-level datasets produced by the MMT pipeline.
 
-Design principles
------------------
-- The baseline repository remains the source of truth for data semantics:
-  shot structure, window segmentation, metadata, and
-  `TaskModelTransformWrapper`.
-- The MMT repository owns how model-specific transforms are composed and
-  how window-level data is fed to the model (cached vs streamed, shuffling,
-  batching, seeding).
+Scope
+-----
+- This module does NOT build datasets or perform baseline integration.
+  Dataset construction (shot → windows, metadata, etc.) is handled upstream
+  by the entrypoint scripts (run_*.py) and baseline utilities.
+- This module focuses on DataLoader concerns:
+  - cached (map-style) vs streamed (IterableDataset) handling,
+  - deterministic shuffling/seeding,
+  - worker RNG initialization,
+  - consistent defaults (e.g. pin_memory),
+  - tagging loaders with `loader.is_streaming`.
 
-Responsibilities
-----------------
-1) initialize_mmt_datasets(...)
-   Wrap baseline train/val/test datasets with `TaskModelTransformWrapper`,
-   optionally applying a model-specific transform chain
-   (Chunk → SelectValidWindows → Trim → Embed → BuildTokens).
+Key behaviour
+-------------
+- Map-style datasets (cached windows):
+    * DataLoader-level `shuffle=True` is allowed.
+    * A torch.Generator is used for deterministic shuffling when `seed` is provided.
 
-2) initialize_mmt_dataloaders(...)
-   Build window-level PyTorch DataLoaders that correctly handle both
-   map-style datasets (cached windows) and IterableDatasets
-   (streamed windows), with deterministic seeding support.
+- IterableDataset (streamed windows):
+    * DataLoader-level `shuffle` is forced to False (PyTorch restriction).
+    * Any shuffling must be implemented inside the dataset itself.
+    * The returned loader is tagged with `loader.is_streaming = True`.
 
-This module deliberately does not modify or reimplement baseline logic;
-it composes baseline primitives in an MMT-specific way.
+Exports
+-------
+- initialize_mmt_dataloaders
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional
+from typing import Dict, Mapping, Optional
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset, Dataset
@@ -40,107 +43,12 @@ from mmt.utils.seed import make_worker_seed_fn
 
 # We still rely on the baseline TaskModelTransformWrapper to define
 # how a "shot" is turned into an iterable of windows.
-from scripts.pipelines.utils.utils import TaskModelTransformWrapper
 
-__all__ = ["initialize_mmt_datasets", "initialize_mmt_dataloaders"]
-
-
-# ----------------------------------------------------------------------------- #
-# 1. MMT model-level datasets (shot -> windows via TaskModelTransformWrapper)
-# ----------------------------------------------------------------------------- #
-def initialize_mmt_datasets(
-    datasets_train_val_test: Mapping[str, Optional[Dataset]],
-    dict_metadata: Mapping[str, Any],
-    config_task: Mapping[str, Any],
-    model_specific_transform=None,
-    verbose: bool = False,
-) -> Dict[str, Optional[TaskModelTransformWrapper]]:
-    """
-    Wrap baseline datasets with TaskModelTransformWrapper for the MMT pipeline.
-
-    This function is the MMT-side counterpart of the baseline
-    `initialize_model_datasets`, but lives in the MMT repo so that:
-
-      - The baseline repo remains the source of truth for task/data semantics
-        (MastDataset, TaskModelTransformWrapper, metadata).
-      - The MMT repo owns how model-specific transforms are composed and used.
-
-    Parameters
-    ----------
-    datasets_train_val_test :
-        Mapping with keys typically ``"train"``, ``"val"``, ``"test"``,
-        whose values are baseline shot-level datasets (e.g. MastDataset)
-        or ``None``.
-
-    dict_metadata :
-        Metadata dictionary produced by the baseline pipeline, containing
-        per-signal information (dt, shapes, etc.) used by the wrapper.
-
-    config_task :
-        Baseline task configuration dict (usually `cfg_task`) containing
-        the `task_window_segmenter` section (input/actuator/output keys,
-        window lengths, delta, etc.).
-
-    model_specific_transform :
-        Optional callable implementing the MMT model-specific pipeline,
-        typically a `ComposeTransforms([...])` of:
-
-            ChunkWindowsTransform
-            → SelectValidWindowsTransform
-            → TrimChunksTransform
-            → EmbedChunksTransform
-            → BuildTokensTransform
-
-        If None, the raw windows from TaskModelTransformWrapper are returned.
-
-    verbose : bool, default False
-        If True, prints basic information about the wrapped datasets.
-
-    Returns
-    -------
-    dict
-        A dict with the same keys as `datasets_train_val_test`, where each
-        value is a `TaskModelTransformWrapper` (shot-level dataset) or None.
-
-    Notes
-    -----
-    - The resulting datasets are *shot-based*: `__getitem__(idx)` yields a
-      generator or iterable of windows for that shot.
-    - Window-level behaviour (cached vs streamed) is handled downstream
-      by WindowCachedDataset / WindowStreamedDataset.
-    """
-    datasets_mmt: Dict[str, Optional[TaskModelTransformWrapper]] = {
-        "train": None,
-        "val": None,
-        "test": None,
-    }
-
-    for split in ("train", "val", "test"):
-        base_ds = datasets_train_val_test.get(split)
-        if base_ds is None:
-            continue
-
-        # Only the train split respects the `verbose` flag of this function;
-        # val/test are kept quiet to avoid log spam.
-        wrapper_verbose = bool(verbose) if split == "train" else False
-
-        wrapped = TaskModelTransformWrapper(
-            base_ds,
-            dict_metadata,
-            config_task,
-            model_specific_transform,
-            verbose=wrapper_verbose,
-        )
-        datasets_mmt[split] = wrapped
-
-        if verbose:
-            print(f"[MMT] len(mast_{split}_dataset): {len(wrapped)}")
-
-    return datasets_mmt
+__all__ = ["initialize_mmt_dataloaders"]
 
 
 # ----------------------------------------------------------------------------- #
-# 2. DataLoader helpers (window-level, cached/streamed aware)
+# DataLoader helpers (window-level, cached/streamed aware)
 # ----------------------------------------------------------------------------- #
 def _make_data_generator(seed: int) -> torch.Generator:
     """
@@ -156,6 +64,9 @@ def _make_data_generator(seed: int) -> torch.Generator:
     return g
 
 
+# ----------------------------------------------------------------------------- #
+# DataLoader init
+# ----------------------------------------------------------------------------- #
 def initialize_mmt_dataloaders(
     datasets: Mapping[str, Optional[Dataset]],
     collate_fn,
