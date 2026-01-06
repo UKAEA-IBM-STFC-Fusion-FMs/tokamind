@@ -196,17 +196,22 @@ def build_signal_specs(
         - metadata describing dt and spatial shape.
 
     Each (role, name) pair becomes one SignalSpec with a unique ID.
-    Roles do NOT share IDs, even if their names coincide.
+    Roles do NOT share IDs, even if their names coincide. This avoids
+    embedding-dimension collisions between input/actuator/output versions
+    of the same physical variable.
 
-    This avoids embedding-dimension collisions between input/actuator/output
-    versions of the same physical variable.
+    IMPORTANT (v0 length semantics)
+    -------------------------------
+    - input/actuator embeddings are **chunk-level** → compute embedding_dim using
+      `chunk_length_sec`
+    - output embeddings are **window-level**        → compute embedding_dim using
+      `dict_metadata['output'][name]['sec_length']` (i.e., baseline output_length)
     """
-
-    defaults = embeddings_cfg.get("defaults", {})
-    overrides = embeddings_cfg.get("per_signal_overrides", {})
+    # YAML may parse "null" as None -> normalize to {}
+    defaults = embeddings_cfg.get("defaults") or {}
+    overrides = embeddings_cfg.get("per_signal_overrides") or {}
 
     specs: List[SignalSpec] = []
-
     next_id = 0  # Unique ID per (role, name)
 
     # Deterministic ordering: sorted by role, then by name
@@ -216,7 +221,7 @@ def build_signal_specs(
 
             meta = dict_metadata[role].get(name)
             if meta is None:
-                raise KeyError(f"Signal {name!r} missing in dict_metadata")
+                raise KeyError(f"Signal {name!r} missing in dict_metadata[{role!r}]")
 
             values_shape = tuple(meta.get("values_shape", ()))
             dt = float(meta.get("dt"))
@@ -238,7 +243,7 @@ def build_signal_specs(
                 )
 
             # --- Apply per-signal overrides
-            role_overrides = overrides.get(role, {})
+            role_overrides = overrides.get(role) or {}
             sig_override = role_overrides.get(name)
             if isinstance(sig_override, dict):
                 encoder_name = sig_override.get("encoder_name", encoder_name)
@@ -246,13 +251,18 @@ def build_signal_specs(
                     sig_override.get("encoder_kwargs", encoder_kwargs) or {}
                 )
 
+            # --- Embedding length: chunk-level for inputs/actuators, window-level for outputs
+            length_sec = float(chunk_length_sec)
+            if role == "output":
+                length_sec = float(meta.get("sec_length", length_sec))
+
             # --- Compute embedding dimension
             embedding_dim = compute_embedding_dim_for_encoder(
                 encoder_name=encoder_name,
                 encoder_kwargs=encoder_kwargs,
                 values_shape=values_shape,
                 dt=dt,
-                chunk_length_sec=chunk_length_sec,
+                chunk_length_sec=length_sec,
             )
 
             # --- Create the SignalSpec
