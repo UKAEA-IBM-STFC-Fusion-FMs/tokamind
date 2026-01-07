@@ -9,30 +9,41 @@ This module provides:
 
 - materialize_tokenized_split_to_ram():
     A helper that runs the full model-specific transform chain once per
-    window on top of a *streaming* dataset (typically a
-    TaskModelTransformWrapper) and returns a WindowCachedDataset.
+    window on top of a *shot-level* dataset adapter and returns a
+    WindowCachedDataset.
 
 Internally it also defines FlattenedStreamingDataset and a trivial collate
 function used only during the parallel caching step.
 
-The goal is to give a clean separation between:
+The goal is to keep a clean separation between:
 
-- streaming, shot-based datasets (shot -> iterable of windows), and
-- cached, window-based datasets (item -> single window dict),
+- shot-level datasets (shot -> iterable of windows), and
+- cached, window-level datasets (index -> single window dict),
 
 while keeping a symmetric, user-friendly API in the train scripts.
+
+Shot-level adapter contract
+---------------------------
+The `streaming_dataset` passed to materialize_tokenized_split_to_ram() must
+support __len__ and __getitem__. Each __getitem__(idx) must return one of:
+
+  - a single window dict,
+  - an iterable of window dicts (list/tuple/generator),
+  - None (if the shot yields no valid windows).
+
+Each window dict is expected to be compatible with MMTCollate, i.e. it
+contains token fields (embeddings + id/mod/role/pos) and per-output targets
+(output_emb / output_shapes / output_names), as produced by the MMT transforms.
 
 Note on shuffling
 -----------------
 When used with a standard torch.utils.data.DataLoader, shuffling is applied
-at the *window* level (since this is a map-style dataset).  A batch may
+at the *window* level (since this is a map-style dataset). A batch may
 therefore contain windows coming from many different shots.
 
-This differs from WindowStreamedDataset (IterableDataset), where the
-DataLoader `shuffle=True` flag is ignored by PyTorch, and shot-level
-shuffling must be enabled explicitly by passing `shuffle_shots=True` at
-dataset construction time.
-
+This differs from WindowStreamedDataset (IterableDataset), where the DataLoader
+`shuffle=True` flag is ignored by PyTorch and any shuffling must be handled
+inside the dataset (e.g. by enabling shot-level shuffling).
 """
 
 from __future__ import annotations
@@ -167,17 +178,17 @@ class FlattenedStreamingDataset(Dataset):
     Wrap a streaming, shot-based dataset so __getitem__ returns a *list* of
     window dicts instead of a generator.
 
-    Motivation
+       Motivation
     ----------
-    - In the current pipeline, TaskModelTransformWrapper (and similar)
-      return, for each shot index, either:
-        * a generator / iterable of window dicts, or
+    - In the MMT pipeline, a shot-level dataset adapter may return, for each
+      shot index, either:
+        * an iterable of window dicts, or
         * a single window dict, or
         * None (if the shot yields no valid windows).
-    - PyTorch DataLoader with num_workers > 0 **cannot pickle generators**.
+    - PyTorch DataLoader with num_workers > 0 cannot pickle generators.
     - To cache windows in parallel, workers must receive picklable objects.
 
-    This wrapper normalises that behaviour:
+    This wrapper normalises that behaviour into a list of window dicts.
 
     - If ds[idx] is None        -> return [].
     - If ds[idx] is a dict      -> return [dict].
@@ -227,10 +238,10 @@ def materialize_tokenized_split_to_ram(
 
     Parameters
     ----------
-    streaming_dataset:
-        Any dataset-like object that supports __len__ and __getitem__,
-        typically a TaskModelTransformWrapper already wrapped with the
-        model-specific transforms (chunking, embedding, token building).
+        streaming_dataset:
+        Any shot-level dataset adapter (supports __len__ and __getitem__) that
+        already applies the model-specific transforms (chunking, embedding, token building).
+
 
         Each __getitem__(idx) is expected to return:
           - a window dict,

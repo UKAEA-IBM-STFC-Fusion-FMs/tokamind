@@ -16,9 +16,14 @@ Given a *phase config path*, the loader performs:
   2) Load phase config, base config, and embeddings config.
   3) Deep-merge dictionaries in the order:
          experiment_base ← embeddings ← phase_config
-  4) Resolve FAIRMAST task_config path inside the installed baseline package.
-  5) Resolve model_init.model_dir to an absolute path when present.
-  6) Compute paths (run_dir, etc.) depending on the phase.
+  4) Resolve model_init.model_dir to an absolute path when present.
+  5) Compute paths (run_dir, etc.) depending on the phase.
+
+NOTE
+----
+Dataset-specific task config resolution is intentionally NOT handled here.
+It is the responsibility of the dataset integration layer (e.g. scripts_mast/)
+to load and resolve task_config paths.
 
 Phase-specific behavior
 -----------------------
@@ -46,9 +51,8 @@ from __future__ import annotations
 import copy
 import datetime
 from dataclasses import dataclass
-from importlib.resources import files
 from pathlib import Path
-from typing import Any, Dict, cast
+from typing import Any, Dict
 
 import yaml
 
@@ -109,30 +113,6 @@ def _resolve_from_repo_root(path_str: str) -> Path:
     return (repo_root / p).resolve()
 
 
-def _resolve_task_config(task_config_str: str) -> Path:
-    """
-    Resolve a FAIRMAST baseline config path inside the installed baseline package.
-
-    Convention example:
-      task_config: "scripts/pipelines/configs/.../config_task_2-1.yaml"
-
-    The first component is treated as the installed Python package name
-    (e.g. "scripts"). The rest is resolved inside that package.
-    """
-    parts = Path(task_config_str).parts
-    if not parts:
-        raise ValueError("task_config is empty")
-
-    pkg_name = parts[0]
-    rel_inside_pkg = Path(*parts[1:])
-
-    pkg_root = files(pkg_name)
-    # Two-step cast due to imperfect stubs for importlib.resources
-    pkg_root_path = cast(Path, cast(object, pkg_root))
-
-    return (Path(pkg_root_path) / rel_inside_pkg).resolve()
-
-
 # ---------------------------------------------------------------------------
 # Paths computation
 # ---------------------------------------------------------------------------
@@ -179,7 +159,6 @@ def _compute_paths(
         run_id = merged.get("run_id") or f"{task}__{phase}__{timestamp}"
         run_dir = global_runs_root / run_id
         run_dir.mkdir(parents=True, exist_ok=True)
-
         return {
             "repo_root": str(repo_root),
             "runs_root": str(global_runs_root),
@@ -260,36 +239,28 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
         experiment_base < embeddings < phase_config
 
     After merging, this loader also:
-      - computes derived paths (run_dir, log_dir, checkpoint_dir, etc.) in a phase-aware way,
-      - resolves `task_config_path` (supports repo-relative paths and baseline-package paths),
-      - resolves `model_init.model_dir` to an absolute repo-root path (when present),
-      - saves the fully merged config to `<run_dir>/config_merged.yaml` for run-based phases
+      - computes derived paths (run_dir, etc.) in a phase-aware way,
+      - resolves model_init.model_dir to an absolute repo-root path (when present),
+      - saves the fully merged config to <run_dir>/config_merged.yaml for run-based phases
         (all phases except tune_dct3d).
 
     Parameters
     ----------
     phase_config_path:
         Path to the phase-specific YAML, relative to repo root or absolute.
-        Example:
-          mmt/configs/pretrain_global/pretrain_default.yaml
-          mmt/configs/task_2-1/finetune_default.yaml
-          mmt/configs/task_2-1/eval_default.yaml
-          mmt/configs/task_2-1/tune_dct3d.yaml
 
     Returns
     -------
     ExperimentConfig
         Dynamic config object exposing top-level keys as attributes and also storing
-        the full merged dictionary in `cfg.raw`.
+        the full merged dictionary in cfg.raw.
     """
-    # --- Resolve & load phase config ---
     phase_config_path = _resolve_from_repo_root(str(phase_config_path))
     if not phase_config_path.is_file():
         raise FileNotFoundError(f"Phase config not found: {phase_config_path}")
 
     phase_cfg = _load_yaml(phase_config_path)
 
-    # Required keys
     if "experiment_base" not in phase_cfg:
         raise KeyError("Phase config must contain 'experiment_base'.")
     if "embedding_config" not in phase_cfg:
@@ -306,28 +277,14 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
     base_cfg = _load_yaml(exp_base_path)
     emb_cfg = _load_yaml(emb_cfg_path)
 
-    # --- Merge dictionaries ---
     merged: Dict[str, Any] = {}
     merged = _deep_merge(merged, base_cfg)
     merged = _deep_merge(merged, emb_cfg)
     merged = _deep_merge(merged, phase_cfg)
 
-    # --- Compute paths (phase-aware) ---
     merged["paths"] = _compute_paths(merged, phase_config_path=phase_config_path)
 
-    # --- Resolve task_config path (supports repo-relative and baseline-package paths) ---
-    if "task_config" in merged and merged["task_config"]:
-        task_cfg_str = str(merged["task_config"])
-
-        # 1) Try repo-root relative path first (e.g. "mmt/configs/pretrain_global/pretrain_task.yaml")
-        candidate = _resolve_from_repo_root(task_cfg_str)
-        if candidate.is_file():
-            merged["task_config_path"] = str(candidate)
-        else:
-            # 2) Fall back to baseline-package resolution
-            merged["task_config_path"] = str(_resolve_task_config(task_cfg_str))
-
-    # --- Resolve model_init.model_dir to absolute path (if present) ---
+    # Resolve model_init.model_dir to absolute path (if present)
     if isinstance(merged.get("model_init"), dict):
         model_dir = merged["model_init"].get("model_dir", None)
         if model_dir is not None:
@@ -335,13 +292,11 @@ def load_experiment_config(phase_config_path: str | Path) -> ExperimentConfig:
                 _resolve_from_repo_root(str(model_dir))
             )
 
-    # --- Save merged config for run-based phases only ---
-    phase = merged.get("phase")
-    if phase != "tune_dct3d":
+    # Save merged config for run-based phases only
+    if merged.get("phase") != "tune_dct3d":
         run_dir = Path(merged["paths"]["run_dir"])
         run_dir.mkdir(parents=True, exist_ok=True)
-        merged_yaml_out = run_dir / "config_merged.yaml"
-        with merged_yaml_out.open("w") as f:
+        with (run_dir / "config_merged.yaml").open("w") as f:
             yaml.safe_dump(merged, f, sort_keys=False)
 
     return ExperimentConfig(raw=merged)

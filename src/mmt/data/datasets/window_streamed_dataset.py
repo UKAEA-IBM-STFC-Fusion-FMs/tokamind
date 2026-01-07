@@ -4,56 +4,44 @@ Streaming, window-level dataset for the MMT pipeline.
 This module provides:
 
 - WindowStreamedDataset:
-    An `IterableDataset` that wraps a *shot-based* dataset (typically a
-    `TaskModelTransformWrapper` + model-specific transforms) and exposes a
+    An IterableDataset that wraps a *shot-level* dataset adapter and exposes a
     flat stream of **window dicts**, one per iteration.
 
 Motivation
 ----------
-In the current pipeline, the baseline bridge + transforms operate at the
+In the MMT pipeline, dataset adapters and transforms often operate at the
 level of **shots**:
 
-    shot_idx → iterable of window dicts (or a single window dict, or None)
+    shot_idx -> iterable of window dicts (or a single window dict, or None)
 
-For train, however, we want to think purely in terms of *windows*:
+For training, however, we want to think purely in terms of *windows*:
 
-    - `batch_size` is "number of windows per batch"
+    - batch_size is "number of windows per batch"
     - collate operates on List[window_dict]
     - caching and non-caching paths share the same semantics
 
-`WindowStreamedDataset` provides this bridge: it flattens a shot-based
-dataset into an iterable of window-level samples, without materialising
-all windows in memory.
+WindowStreamedDataset provides this bridge: it flattens a shot-level dataset
+into an iterable of window-level samples, without materialising all windows
+in memory.
 
-Usage
------
-Typical usage in a train script:
+Shot-level adapter contract
+---------------------------
+The wrapped `shot_dataset` must support __len__ and __getitem__. Each
+__getitem__(idx) must return one of:
 
-.. code-block:: python
+  - a single window dict,
+  - an iterable of window dicts (list/tuple/generator),
+  - None (if the shot yields no valid windows).
 
-    from mmt.data.datasets.window_streamed_dataset import WindowStreamedDataset
-    from mmt.data.datasets.window_cached_dataset import WindowCachedDataset
-
-    if cfg.cache.enabled:
-        dataset = WindowCachedDataset(...)
-    else:
-        dataset = WindowStreamedDataset(task_model_wrapper, shuffle_shots=True)
-
-    loader = DataLoader(
-        dataset,
-        batch_size=cfg.train.batch_size,   # always: windows per batch
-        collate_fn=MMTCollate(...),
-        num_workers=cfg.train.num_workers,
-    )
+Each yielded item is expected to be a window dict compatible with MMTCollate
+and the model (typically produced by BuildTokensTransform).
 
 Notes
 -----
-- This dataset is *streaming*: it does not store windows in RAM, it only
-  keeps a reference to the underlying shot dataset.
-- Each yielded item is a single window dict as produced by
-  `BuildTokensTransform`.
-- `shot_id` and `window_index` fields are preserved and can be used for
-  evaluation / grouping, but they are treated as metadata.
+- This dataset is streaming: it does not store windows in RAM.
+- DataLoader(shuffle=True) is ignored for IterableDataset by PyTorch.
+  If you want shuffling in streaming mode, enable shot-level shuffling with
+  shuffle_shots=True (window-level shuffling is not performed).
 """
 
 from __future__ import annotations
@@ -79,7 +67,7 @@ class WindowStreamedDataset(IterableDataset):
           - an iterable of window dicts (generator / list / tuple), or
           - None (if the shot yields no valid windows).
 
-        In practice this is usually a `TaskModelTransformWrapper` wrapped
+        In practice this is usually a dataset adapter already wrapped
         with the model-specific transforms:
 
             ChunkWindowsTransform
