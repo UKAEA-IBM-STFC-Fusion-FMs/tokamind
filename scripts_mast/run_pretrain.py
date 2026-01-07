@@ -95,7 +95,7 @@ def main() -> None:
     args = parse_args_pretrain()
     cfg_mmt = load_experiment_config(
         task=args.task,
-        phase="finetune",
+        phase="pretrain",
         configs_root=CONFIGS_ROOT,
     )
     validate_train_config(cfg_mmt.raw)
