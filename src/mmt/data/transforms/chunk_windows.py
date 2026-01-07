@@ -60,7 +60,7 @@ Notes
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Mapping
 import logging
 import numpy as np
 
@@ -71,7 +71,7 @@ class ChunkWindowsTransform:
     def __init__(
         self,
         *,
-        dict_metadata: Dict[str, Any],
+        dict_metadata: Mapping[str, Any],
         chunk_length_sec: float,
         stride_sec: Optional[float] = None,
     ) -> None:

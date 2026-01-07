@@ -1,58 +1,47 @@
 from __future__ import annotations
 
 import argparse
-import torch
-import torch.multiprocessing as mp
+import logging
 
-
-import time
-
-from scripts.pipelines.utils.preprocessing_utils import (
-    initialize_datasets_and_metadata_for_task,
+from scripts.pipeline_tools.initialize_model_dataset import (
+    initialize_model_dataset,
 )
 
-from scripts.pipelines.utils.utils import (
-    initialize_model_dataset,
+from scripts.pipeline_tools.initialize_dataset_and_metadata import (
+    initialize_datasets_and_metadata_for_task,
 )
 
 from scripts_mast.mast_utils import (
     build_task_config,
     build_signals_by_role_from_task_config,
 )
+from scripts_mast.mast_utils.pipeline_helpers import (
+    setup_device_and_mp,
+    extract_signal_stats,
+    build_default_transform,
+    build_window_datasets,
+    make_collate_fn,
+)
 
 from mmt.utils.config import (
     load_experiment_config,
-    validate_eval_config,
+    validate_config,
 )
 from mmt.utils import (
     set_seed,
     setup_logging,
     initialize_mmt_dataloaders,
 )
-
 from mmt.data import (
     build_signal_specs,
     build_codecs,
-    ChunkWindowsTransform,
-    SelectValidWindowsTransform,
-    TrimChunksTransform,
-    EmbedChunksTransform,
-    BuildTokensTransform,
-    ComposeTransforms,
-    WindowStreamedDataset,
-    WindowCachedDataset,
-    MMTCollate,
 )
-
 from mmt.models import MultiModalTransformer
 from mmt.eval import evaluate_metrics, save_traces_for_subset
 from mmt.checkpoints import load_best_weights
 
-import logging
-
 
 DEBUG_MODE = False
-CONFIGS_ROOT = "scripts_mast/configs"
 
 
 def parse_args_eval() -> argparse.Namespace:
@@ -62,54 +51,33 @@ def parse_args_eval() -> argparse.Namespace:
     parser.add_argument(
         "--task",
         type=str,
-        default="task_2-1",  # pick your preferred default
+        default="task_2-1",
         help="Task folder name under scripts_mast/configs/tasks/<task>/",
     )
     args, _ = parser.parse_known_args()
     return args
 
 
-# ----------------------------------------------------------------------------------------------------------------------
-# Main
-# ----------------------------------------------------------------------------------------------------------------------
-
-
 def main() -> None:
     # ------------------------------------------------------------------
     # Device / multiprocessing
     # ------------------------------------------------------------------
-    device = torch.device(
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps"
-        if torch.backends.mps.is_available()
-        else "cpu"
-    )
-
-    # Needed for DataLoader(num_workers>0) on some platforms
-    mp.set_start_method("spawn", force=True)
+    device = setup_device_and_mp()
 
     # ------------------------------------------------------------------
-    # Load MMT config (phase + experiment_base + embeddings + baseline)
+    # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_eval()
     cfg_mmt = load_experiment_config(
         task=args.task,
         phase="eval",
-        configs_root=CONFIGS_ROOT,
+        configs_root="scripts_mast/configs",
     )
-    validate_eval_config(cfg_mmt.raw)
-
-    # Small sub-configs for readability
-    cfg_prep = cfg_mmt.preprocess
-    cfg_chunks = cfg_prep["chunk"]
-    cfg_trim = cfg_prep["trim_chunks"]
-    cfg_valid_win = cfg_prep["valid_windows"]
+    validate_config(cfg_mmt.raw)
 
     cfg_data = cfg_mmt.data
     cfg_model = cfg_mmt.model
     cfg_loader = cfg_mmt.loader
-    # cfg_collate = cfg_mmt.collate
     cfg_eval = cfg_mmt.eval
 
     enable_cache = cfg_data["cache"].get("enable", False)
@@ -119,9 +87,9 @@ def main() -> None:
     cfg_backbone = cfg_model["backbone"]
     cfg_modality_heads = cfg_model["modality_heads"]
     cfg_output_adapters = cfg_model["output_adapters"]
-    max_positions = cfg_trim["max_chunks"]
+    max_positions = cfg_mmt.preprocess["trim_chunks"]["max_chunks"]
 
-    # Baseline task config (with overrides such as subset_of_shots)
+    # Baseline task config (with overrides such as subset_of_shots/local)
     cfg_task = build_task_config(cfg_mmt)
 
     # ------------------------------------------------------------------
@@ -137,8 +105,9 @@ def main() -> None:
     )
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
 
-    logger = logging.getLogger("mmt.Task")
-    logger.info(f"task = {cfg_mmt.task} | phase = {cfg_mmt.phase} | device = {device}")
+    logging.getLogger("mmt.Task").info(
+        "task=%s | phase=%s | device=%s", cfg_mmt.task, cfg_mmt.phase, device
+    )
 
     # ------------------------------------------------------------------
     # Baseline datasets + metadata
@@ -146,59 +115,34 @@ def main() -> None:
     datasets_shots_raw, dict_metadata = initialize_datasets_and_metadata_for_task(
         cfg_task
     )
-    signal_stats = {}
-    for role in ("input", "actuator", "output"):
-        role_meta = dict_metadata.get(role, {})
-        if not isinstance(role_meta, dict):
-            continue
-        for name, meta in role_meta.items():
-            if isinstance(meta, dict) and ("mean" in meta) and ("std" in meta):
-                signal_stats[name] = meta
 
-    # Build signals_by_role from baseline config + metadata and signal specs
+    # Stats (mean/std) for de-normalizing outputs during metrics/traces
+    signal_stats = extract_signal_stats(dict_metadata)
+
+    # Build signals_by_role from baseline config + metadata and signal specs/codecs
     signals_by_role = build_signals_by_role_from_task_config(cfg_task, dict_metadata)
     signal_specs = build_signal_specs(
         embeddings_cfg=cfg_mmt.embeddings,
         signals_by_role=signals_by_role,
         dict_metadata=dict_metadata,
-        chunk_length_sec=cfg_chunks["chunk_length"],
+        chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
     )
     codecs = build_codecs(signal_specs)
 
     # ------------------------------------------------------------------
     # Model-specific transform chain (shot -> windows)
     # ------------------------------------------------------------------
-    mmt_transform_map = ComposeTransforms(
-        [
-            ChunkWindowsTransform(
-                dict_metadata=dict_metadata,
-                chunk_length_sec=cfg_chunks["chunk_length"],
-                stride_sec=cfg_chunks["stride"],
-            ),
-            SelectValidWindowsTransform(
-                min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
-                min_valid_chunks=cfg_valid_win["min_valid_chunks"],
-                min_valid_outputs=cfg_valid_win["min_valid_outputs"],
-                window_stride_sec=cfg_valid_win["window_stride_sec"],
-            ),
-            TrimChunksTransform(
-                max_chunks=cfg_trim["max_chunks"],
-            ),
-            EmbedChunksTransform(
-                signal_specs=signal_specs,
-                codecs=codecs,
-                keep_output_native=keep_output_native,
-            ),
-            BuildTokensTransform(
-                signal_specs=signal_specs,
-            ),
-        ]
+    mmt_transform_map = build_default_transform(
+        cfg_mmt,
+        dict_metadata=dict_metadata,
+        signal_specs=signal_specs,
+        codecs=codecs,
+        keep_output_native=keep_output_native,
     )
 
     # ------------------------------------------------------------------
-    # Model-level datasets (TaskModelTransformWrapper, shot-based)
+    # Model-level dataset (shot-based wrapper)
     # ------------------------------------------------------------------
-
     datasets_shots_wrapped = {
         "test": initialize_model_dataset(
             datasets_shots_raw.get("test"),
@@ -209,8 +153,8 @@ def main() -> None:
         ),
     }
 
+    # Optional debug: iterate a single shot to exercise wrapper + transforms
     if DEBUG_MODE and datasets_shots_wrapped["test"] is not None:
-        # Trigger one full-shot iteration to exercise the wrapper + transforms.
         ds = datasets_shots_wrapped["test"]
         shot = ds[0]
         for _ in shot:
@@ -219,45 +163,29 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Window-level dataset for EVAL (test only)
     # ------------------------------------------------------------------
-
-    datasets_windows = {}
-
-    if enable_cache:
-        logger = logging.getLogger("mmt.Cache")
-        logger.info("Starting caching test")
-        t0 = time.perf_counter()
-        datasets_windows["test"] = WindowCachedDataset.from_streaming(
-            datasets_shots_wrapped["test"],
-            num_workers_cache=num_workers_cache,
-        )
-        t1 = time.perf_counter()
-        logger.info("Finished caching test in %.3f seconds", t1 - t0)
-
-    else:
-        # Always deterministic for eval
-        datasets_windows["test"] = WindowStreamedDataset(
-            datasets_shots_wrapped["test"],
-            shuffle_shots=False,
-            seed=cfg_mmt.seed,
-        )
+    datasets_windows = build_window_datasets(
+        datasets_shots_wrapped=datasets_shots_wrapped,
+        enable_cache=enable_cache,
+        num_workers_cache=num_workers_cache,
+        seed=cfg_mmt.seed,
+        shuffle_shots=False,  # deterministic for eval
+        cache_splits=("test",),  # eval uses test split only
+    )
 
     # ------------------------------------------------------------------
     # DataLoader
     # ------------------------------------------------------------------
     cfg_drop = cfg_eval.get("drop", {}) or {}
-
     drop_inputs = cfg_drop.get("inputs", []) or []
     drop_actuators = cfg_drop.get("actuators", []) or []
     drop_outputs = cfg_drop.get("outputs", []) or []
 
-    collate_cfg = {
-        "keep_output_native": keep_output_native,  # whatever you already use
-        # force-drop selected signals
-        "p_drop_inputs_overrides": {k: 1.0 for k in drop_inputs},
-        "p_drop_actuators_overrides": {k: 1.0 for k in drop_actuators},
-        "p_drop_outputs_overrides": {k: 1.0 for k in drop_outputs},
-    }
-    collate_fn = MMTCollate(cfg_collate=collate_cfg)
+    collate_fn = make_collate_fn(
+        keep_output_native=keep_output_native,
+        drop_inputs=drop_inputs,
+        drop_actuators=drop_actuators,
+        drop_outputs=drop_outputs,
+    )
 
     eval_loader = initialize_mmt_dataloaders(
         datasets_windows,
@@ -270,7 +198,7 @@ def main() -> None:
     )["test"]
 
     # ------------------------------------------------------------------
-    # 5. Build the MMT model
+    # Model
     # ------------------------------------------------------------------
     model = MultiModalTransformer(
         signal_specs=signal_specs,
@@ -287,15 +215,19 @@ def main() -> None:
     model.to(device)
 
     # ------------------------------------------------------------------
-    # 6. Load best weights from training run
+    # Load best weights from training run
     # ------------------------------------------------------------------
     train_run_dir = cfg_mmt.model_init["model_dir"]
-    epoch_best, best_val, metadata = load_best_weights(
+    epoch_best, best_val, _metadata = load_best_weights(
         run_dir=train_run_dir, model=model, map_location=device
     )
+
     logger = logging.getLogger("mmt.Eval")
     logger.info(
-        f"Loaded checkpoint from {train_run_dir} (epoch={epoch_best}, best_val={best_val})"
+        "Loaded checkpoint from %s (epoch=%s, best_val=%s)",
+        train_run_dir,
+        epoch_best,
+        best_val,
     )
     logger.info(
         "[Eval] Forced drops: inputs=%s actuators=%s outputs=%s",
@@ -306,13 +238,13 @@ def main() -> None:
     model.eval()
 
     # ------------------------------------------------------------------
-    # 6) Evaluation: metrics + optional traces
+    # Evaluation: metrics + optional traces
     # ------------------------------------------------------------------
     run_dir = cfg_mmt.paths["run_dir"]
     cfg_metrics = cfg_eval.get("metrics", {})
     cfg_traces = cfg_eval.get("traces", {})
 
-    # All output specs for this task
+    # All output specs for this task (excluding forced-dropped outputs)
     drop_outputs_set = set(drop_outputs or [])
     output_specs = [
         spec
@@ -321,23 +253,20 @@ def main() -> None:
     ]
     id_to_name = {spec.signal_id: spec.name for spec in output_specs}
 
-    # Map: output_name -> codec (using signal_id internally)
     output_codecs = {
         spec.name: codecs[spec.signal_id]
         for spec in output_specs
         if spec.signal_id in codecs
     }
 
-    # Map: output_name -> stats (mean/std) filtered to task outputs
     output_stats = {
         spec.name: signal_stats[spec.name]
         for spec in output_specs
         if spec.name in signal_stats
     }
 
-    # Metrics evaluation (always full window-level metrics)
     if cfg_metrics.get("enable", True):
-        logger.info(f"Computing metrics in: {run_dir}/metrics/")
+        logger.info("Computing metrics in: %s/metrics/", run_dir)
         summary_metrics = evaluate_metrics(
             model=model,
             dataloader=eval_loader,
@@ -345,15 +274,16 @@ def main() -> None:
             stats=output_stats,
             codecs=output_codecs,
             id_to_name=id_to_name,
-            run_dir=run_dir,  # function will create metrics/ inside it
+            run_dir=run_dir,
             debug=True,
         )
-        logger.info(f"Summary metrics: {summary_metrics}")
+        logger.info("Summary metrics: %s", summary_metrics)
 
-    # Trace extraction (subset of shots)
     if cfg_traces.get("enable", False):
         logger.info(
-            f"Saving traces (n_max={cfg_traces.get('n_max', 10)}) in: {run_dir}/traces/"
+            "Saving traces (n_max=%s) in: %s/traces/",
+            cfg_traces.get("n_max", 10),
+            run_dir,
         )
         save_traces_for_subset(
             model=model,

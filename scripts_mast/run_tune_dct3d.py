@@ -6,21 +6,28 @@ import logging
 from pathlib import Path
 
 import numpy as np
-import torch
-import torch.multiprocessing as mp
 import yaml
 
-from scripts.pipelines.utils.preprocessing_utils import (
+from scripts.pipeline_tools.initialize_model_dataset import (
+    initialize_model_dataset,
+)
+
+from scripts.pipeline_tools.initialize_dataset_and_metadata import (
     initialize_datasets_and_metadata_for_task,
 )
-from scripts.pipelines.utils.utils import initialize_model_dataset
 
 from scripts_mast.mast_utils import (
     build_task_config,
     build_signals_by_role_from_task_config,
 )
+from scripts_mast.mast_utils.pipeline_helpers import (
+    setup_device_and_mp,
+)
 
-from mmt.utils.config import load_experiment_config
+from mmt.utils.config import (
+    load_experiment_config,
+    validate_config,
+)
 from mmt.utils import set_seed, setup_logging
 from mmt.data import (
     build_signal_specs,
@@ -33,7 +40,6 @@ from mmt.data import (
 )
 
 DEBUG_MODE = False
-CONFIGS_ROOT = "scripts_mast/configs"
 
 
 def parse_args_tune_dct3d() -> argparse.Namespace:
@@ -54,31 +60,19 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Device / multiprocessing
     # ------------------------------------------------------------------
-    device = torch.device(
-        "cuda"
-        if torch.cuda.is_available()
-        else "mps"
-        if torch.backends.mps.is_available()
-        else "cpu"
-    )
-
-    # Needed for DataLoader(num_workers>0) on some platforms
-    mp.set_start_method("spawn", force=True)
+    device = setup_device_and_mp()
 
     # ------------------------------------------------------------------
-    # Load merged config (NEW: convention-based)
+    # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_tune_dct3d()
     cfg_mmt = load_experiment_config(
         task=args.task,
         phase="tune_dct3d",
-        configs_root=CONFIGS_ROOT,
+        configs_root="scripts_mast/configs",
     )
+    validate_config(cfg_mmt.raw)
 
-    if "tune_dct3d" not in cfg_mmt.raw:
-        raise KeyError("Missing 'tune_dct3d' section in config.")
-
-    # Small sub-configs for readability
     cfg_prep = cfg_mmt.preprocess
     cfg_chunks = cfg_prep["chunk"]
     cfg_trim = cfg_prep["trim_chunks"]
@@ -104,7 +98,7 @@ def main() -> None:
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
 
     logger = logging.getLogger("mmt.TuneDCT3D")
-    logger.info(f"task = {cfg_mmt.task} | phase = {cfg_mmt.phase} | device = {device}")
+    logger.info("task=%s | phase=%s | device=%s", cfg_mmt.task, cfg_mmt.phase, device)
 
     # ------------------------------------------------------------------
     # Baseline datasets + metadata
@@ -176,15 +170,14 @@ def main() -> None:
         )
         ds_shots_selected = [ds_shots_full[i] for i in sel_indices]
     else:
-        sel_indices = all_indices
+        # sel_indices = all_indices
         ds_shots_selected = ds_shots_full
 
     logger.info(
-        "ds_shots_full=%d, requested n_shots=%s, selected=%d, sel_indices=%s",
+        "ds_shots_full=%d, requested n_shots=%s, selected=%d",
         len(ds_shots_full),
         str(n_shots),
         len(ds_shots_selected),
-        np.array(sel_indices).tolist() if n_shots is not None else None,
     )
 
     # ------------------------------------------------------------------
@@ -218,11 +211,15 @@ def main() -> None:
     for role, by_sig in best.items():
         for name, info in by_sig.items():
             logger.info(
-                f"[{role}:{name}] "
-                f"shape={info['rep_shape']} "
-                f"keep=({info['eff_keep_h']},{info['eff_keep_w']},{info['eff_keep_t']}) "
-                f"rmse={info['rmse_mean_windows']:.4e} "
-                f"eff_dim={info['effective_dim']}"
+                "[%s:%s] shape=%s keep=(%s,%s,%s) rmse=%.4e eff_dim=%s",
+                role,
+                name,
+                info["rep_shape"],
+                info["eff_keep_h"],
+                info["eff_keep_w"],
+                info["eff_keep_t"],
+                info["rmse_mean_windows"],
+                info["effective_dim"],
             )
 
     # ------------------------------------------------------------------
@@ -234,22 +231,18 @@ def main() -> None:
     for role, by_sig in best.items():
         for name, info in by_sig.items():
             spec = signal_specs.get(role, name)
-            if spec is None:
-                continue
-            if spec.encoder_name != "dct3d":
+            if spec is None or spec.encoder_name != "dct3d":
                 continue
 
             tuned_keep_h = int(info["eff_keep_h"])
             tuned_keep_w = int(info["eff_keep_w"])
             tuned_keep_t = int(info["eff_keep_t"])
 
-            # Compare against current baseline kwargs used for this run
             base_kwargs = dict(spec.encoder_kwargs or {})
             base_keep_h = int(base_kwargs.get("keep_h", tuned_keep_h))
             base_keep_w = int(base_kwargs.get("keep_w", tuned_keep_w))
             base_keep_t = int(base_kwargs.get("keep_t", tuned_keep_t))
 
-            # Only write an override if something actually changes
             if (tuned_keep_h, tuned_keep_w, tuned_keep_t) == (
                 base_keep_h,
                 base_keep_w,

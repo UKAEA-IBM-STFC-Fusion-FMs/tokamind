@@ -343,5 +343,6 @@ def validate_tune_dct3d_config(cfg: Dict[str, Any]) -> None:
         raise KeyError("Missing required block: tune_dct3d.search_space")
 
     for k in ("keep_h", "keep_w", "keep_t"):
-        if k not in ss or not isinstance(ss[k], list) or len(ss[k]) == 0:
+        v = ss.get(k)
+        if not isinstance(v, list) or not v:
             raise ValueError(f"tune_dct3d.search_space.{k} must be a non-empty list.")

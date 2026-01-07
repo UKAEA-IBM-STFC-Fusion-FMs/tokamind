@@ -10,7 +10,7 @@
 task: "task_2-1"
 
 # Baseline task config (resolved by scripts_mast/mast_utils/task_config.py)
-task_config: "scripts/pipelines/configs/configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"
+task_config: "configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"
 
 
 #model:
