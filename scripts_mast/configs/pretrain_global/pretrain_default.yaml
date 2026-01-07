@@ -1,5 +1,5 @@
-experiment_base: "mmt/configs/pretrain_global/experiment_base.yaml"
-embedding_config: "mmt/configs/pretrain_global/embeddings_default.yaml"
+experiment_base: "scripts_mast/configs/pretrain_global/experiment_base.yaml"
+embedding_config: "scripts_mast/configs/pretrain_global/embeddings_default.yaml"
 phase: pretrain
 run_id: test_pretrain
 

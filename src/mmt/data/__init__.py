@@ -30,7 +30,7 @@ from .collate import MMTCollate
 from .signal_spec import (
     SignalSpec,
     build_signal_specs,
-    build_signal_role_modality_map,
+    infer_modality,
 )
 
 # -----------------------------
@@ -51,6 +51,6 @@ __all__ = [
     "MMTCollate",
     "SignalSpec",
     "build_signal_specs",
-    "build_signal_role_modality_map",
+    "infer_modality",
     "build_codecs",
 ]

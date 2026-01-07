@@ -1,6 +1,6 @@
 task: "pretrain_task_inputs_actuators_to_inputs_outputs"
 
-task_config: "mmt/configs/pretrain_global/pretrain_task_inputs_actuators_to_inputs_outputs.yaml"
+task_config: "scripts_mast/configs/pretrain_global/pretrain_task_inputs_actuators_to_inputs_outputs.yaml"
 
 seed: 54
 

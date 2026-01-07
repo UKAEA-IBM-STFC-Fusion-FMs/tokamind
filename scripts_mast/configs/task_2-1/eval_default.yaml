@@ -1,11 +1,11 @@
-experiment_base: "mmt/configs/task_2-1/experiment_base.yaml"
-embedding_config: "mmt/configs/task_2-1/embeddings_default.yaml"
+experiment_base: "scripts_mast/configs/task_2-1/experiment_base.yaml"
+embedding_config: "scripts_mast/configs/task_2-1/embeddings_default.yaml"
 phase: eval
 eval_id: eval_test
 
 # Required: which trained run to evaluate
 model_init:
-  model_dir: "runs/test_train/"
+  model_dir: "runs/test/"
 
 
 data:
@@ -36,7 +36,7 @@ eval:
   drop:
     inputs: # ["pf_active-coil_current"]
     actuators:
-    outputs: # ["pf_active-solenoid_current"]
+    outputs: # ["pf_active-solenoid_current", "summary-ip"]
 
   metrics:
     enable: true

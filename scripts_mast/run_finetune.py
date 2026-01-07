@@ -16,8 +16,13 @@ from scripts.pipelines.utils.utils import (
     initialize_model_dataset,
 )
 
-from mmt.utils.config import (
+from scripts_mast.mast_utils import (
     build_task_config,
+    build_signals_by_role_from_task_config,
+)
+
+
+from mmt.utils.config import (
     load_experiment_config,
     validate_train_config,
 )
@@ -28,7 +33,6 @@ from mmt.utils import (
 )
 
 from mmt.data import (
-    build_signal_role_modality_map,
     build_signal_specs,
     build_codecs,
     ChunkWindowsTransform,
@@ -58,7 +62,7 @@ def parse_args_finetune() -> argparse.Namespace:
     parser.add_argument(
         "--phase_config",
         type=str,
-        default="mmt/configs/task_2-1/finetune_default.yaml",
+        default="scripts_mast/configs/task_2-1/finetune_default.yaml",
         help=(
             "Path to the phase YAML config file "
             "(e.g. mmt/configs/task_2-1/finetune_default.yaml)"
@@ -143,10 +147,10 @@ def main() -> None:
     )
 
     # Build signals_by_role from baseline config + metadata and signal specs
-    signals_role_modality_map = build_signal_role_modality_map(cfg_task, dict_metadata)
+    signals_by_role = build_signals_by_role_from_task_config(cfg_task, dict_metadata)
     signal_specs = build_signal_specs(
         embeddings_cfg=cfg_mmt.embeddings,
-        signals_by_role=signals_role_modality_map,
+        signals_by_role=signals_by_role,
         dict_metadata=dict_metadata,
         chunk_length_sec=cfg_chunks["chunk_length"],
     )

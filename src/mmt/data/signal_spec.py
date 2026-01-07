@@ -2,39 +2,56 @@
 Signal specification and registry utilities
 ===========================================
 
-This module defines:
+This module defines the core "signal spec" abstraction used throughout MMT.
 
-  • `SignalSpec`: a frozen dataclass describing one *role-specific* signal
-                  in the MMT pipeline (e.g., input coil_current,
-                  output coil_current).
+A SignalSpec is a compact, stable description of a signal:
+  - canonical name (e.g. "pf_active-coil_current")
+  - integer signal_id (stable within a task/config)
+  - role: input / actuator / output
+  - modality: timeseries / profile / video
+  - embedding parameters (e.g. DCT keep coefficients)
+  - window/chunk metadata used by the model and collate (dt, stride, etc.)
 
-  • `SignalSpecRegistry`: a container providing lookup by id, by (role,name),
-                          and by role, used throughout the tokenization and
-                          embedding stages.
+The SignalSpecRegistry is the single source of truth that maps between:
+  - canonical signal names ↔ integer ids
+  - ids ↔ role/modality
+  - ids ↔ embedding configuration
 
-  • Builders that construct the registry deterministically from:
-        - task configuration (signals and roles),
-        - metadata (sampling rate, shapes),
-        - embedding configuration.
+Builders
+--------
+This module provides builders that construct the registry deterministically from:
+  - a role→signal mapping (signals_by_role) provided by the dataset adapter,
+  - metadata (sampling rate, shapes),
+  - embedding configuration.
+
+Adapter contract
+----------------
+MMT core is dataset-agnostic, but it expects the dataset integration layer to
+provide two inputs:
+
+1) signals_by_role:
+   Mapping[str, Mapping[str, str]]
+       role -> { canonical_signal_name -> modality }
+
+   where role ∈ {"input", "actuator", "output"} and
+         modality ∈ {"timeseries", "profile", "video"}.
+
+2) dict_metadata:
+   Mapping[str, Mapping[str, Any]]
+       dict_metadata[role][canonical_signal_name] must contain at least:
+         - "dt": float
+         - "values_shape": tuple[int, ...]
+       and for role == "output" it must also contain:
+         - "sec_length": float  (the target window length in seconds)
+
+Dataset-specific task YAML parsing (e.g. FAIRMAST config_task_*.yaml) lives
+outside the core package (e.g. in scripts_mast/).
 
 Motivation
 ----------
-A single *physical* signal (e.g., "pf_active-coil_current") may appear in
-multiple roles:
-
-    - as INPUT (past context),
-    - as ACTUATOR (control signal for prediction),
-    - as OUTPUT (supervised target to reconstruct/forecast).
-
-These roles can produce embeddings of *different* dimensionalities.
-Therefore, each (role, name) pair must receive its own signal_id, so
-that encoders, projection layers, and token embeddings remain consistent
-and unambiguous.
-
-This registry makes that explicit: **each (role, name) is a distinct SignalSpec.**
-
-The model still learns that different roles of the same physical signal
-are semantically related via modality embeddings, context, and attention.
+MMT routes and masks signals using integer ids (fast, stable, compact). Names
+are used only at the boundaries (configs, logging, saving results). The registry
+bridges those worlds consistently across training, evaluation, and warm-start.
 """
 
 from __future__ import annotations
@@ -189,24 +206,42 @@ def build_signal_specs(
     chunk_length_sec: float,
 ) -> SignalSpecRegistry:
     """
-    Construct a SignalSpecRegistry from:
+    Build a SignalSpecRegistry from embedding config + adapter-provided signal lists.
 
-        - embedding defaults + per-signal overrides,
-        - task role-to-signal mapping,
-        - metadata describing dt and spatial shape.
+    This function is part of the MMT core. It does not parse dataset-specific task
+    YAMLs. Instead, it expects the dataset integration layer to provide:
+      - signals_by_role: role -> {canonical_name -> modality}
+      - dict_metadata:   role -> {canonical_name -> meta}
 
-    Each (role, name) pair becomes one SignalSpec with a unique ID.
-    Roles do NOT share IDs, even if their names coincide. This avoids
-    embedding-dimension collisions between input/actuator/output versions
-    of the same physical variable.
+    Parameters
+    ----------
+    embeddings_cfg:
+        Embedding configuration dictionary (defaults + optional per-signal overrides).
+        Expected to follow the structure used in mmt/configs/embeddings_*.yaml.
 
-    IMPORTANT (v0 length semantics)
-    -------------------------------
-    - input/actuator embeddings are **chunk-level** → compute embedding_dim using
-      `chunk_length_sec`
-    - output embeddings are **window-level**        → compute embedding_dim using
-      `dict_metadata['output'][name]['sec_length']` (i.e., baseline output_length)
+    signals_by_role:
+        Mapping of role -> {canonical_signal_name -> modality}.
+        role must be one of {"input", "actuator", "output"}.
+
+    dict_metadata:
+        Mapping of role -> {canonical_signal_name -> meta}.
+        For each (role, name), meta must include:
+          - "dt": float
+          - "values_shape": tuple[int, ...]
+        Additionally, for role == "output", meta must include:
+          - "sec_length": float  (target window length in seconds)
+
+    chunk_length_sec:
+        Chunk length used for input/actuator chunking (seconds). This is used to
+        derive chunk counts/strides and to validate embeddings.
+
+    Returns
+    -------
+    SignalSpecRegistry
+        Registry containing all SignalSpecs with stable ids, roles, modalities,
+        and embedding parameters.
     """
+
     # YAML may parse "null" as None -> normalize to {}
     defaults = embeddings_cfg.get("defaults") or {}
     overrides = embeddings_cfg.get("per_signal_overrides") or {}
@@ -219,9 +254,10 @@ def build_signal_specs(
         for name in sorted(signals_by_role[role].keys()):
             modality = signals_by_role[role][name]
 
-            meta = dict_metadata[role].get(name)
-            if meta is None:
-                raise KeyError(f"Signal {name!r} missing in dict_metadata[{role!r}]")
+            role_meta = dict_metadata.get(role)
+            if role_meta is None:
+                raise KeyError(f"dict_metadata missing role={role!r}")
+            meta = role_meta.get(name)
 
             values_shape = tuple(meta.get("values_shape", ()))
             dt = float(meta.get("dt"))
@@ -319,55 +355,6 @@ def infer_modality(values_shape: Tuple[int, ...]) -> str:
     if len(values_shape) == 2:
         return "video"
     raise ValueError(f"Unsupported values_shape={values_shape!r}")
-
-
-def build_signal_role_modality_map(
-    cfg_task: Mapping[str, Any],
-    dict_metadata: Mapping[str, Any],
-) -> Dict[str, Dict[str, str]]:
-    """
-    Build the signals_by_role mapping from the task configuration and metadata.
-
-    dict_metadata is expected to be:
-        {
-          "sec_stride": float,
-          "input":    { "<name>": {...}, ... },
-          "actuator": { "<name>": {...}, ... },
-          "output":   { "<name>": {...}, ... },
-        }
-    """
-    # v0: no backwards compatibility
-    for role in ("input", "actuator", "output"):
-        if role not in dict_metadata:
-            raise KeyError(f"dict_metadata missing role layer {role!r}")
-
-    ss_cfg = cfg_task.get("sources_and_signals", {})
-    signals_by_role: Dict[str, Dict[str, str]] = {}
-
-    role_key_pairs = [
-        ("input", "input_name"),
-        ("actuator", "actuator_name"),
-        ("output", "output_name"),
-    ]
-
-    for role, key in role_key_pairs:
-        pairs = ss_cfg.get(key) or []
-        role_map: Dict[str, str] = {}
-
-        role_meta = dict_metadata[role]
-        for source, signal in pairs:
-            name = f"{source}-{signal}"  # canonical name
-            meta = role_meta.get(name)
-            if meta is None:
-                raise KeyError(f"Signal {name!r} missing in dict_metadata[{role!r}]")
-
-            val_shape = tuple(meta.get("values_shape", ()))
-            modality = infer_modality(val_shape)
-            role_map[name] = modality
-
-        signals_by_role[role] = role_map
-
-    return signals_by_role
 
 
 def canonical_key(role: str, name: str) -> str:
