@@ -52,20 +52,18 @@ import logging
 
 
 DEBUG_MODE = False
+CONFIGS_ROOT = "scripts_mast/configs"
 
 
 def parse_args_pretrain() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run pretrain for a given task/phase config."
+        description="Run pretraining for a given pretrain task."
     )
     parser.add_argument(
-        "--phase_config",
+        "--task",
         type=str,
-        default="scripts_mast/configs/pretrain_global/pretrain_default.yaml",
-        help=(
-            "Path to the phase YAML config file "
-            "(e.g.mmt/configs/pretrain_global/pretrain_default.yaml)"
-        ),
+        default="pretrain_inputs_actuators_to_inputs_outputs",  # pick your preferred default
+        help="Pretrain task folder name under scripts_mast/configs/tasks/<task>/",
     )
     args, _ = parser.parse_known_args()
     return args
@@ -95,7 +93,11 @@ def main() -> None:
     # Load MMT config (phase + experiment_base + embeddings + baseline)
     # ------------------------------------------------------------------
     args = parse_args_pretrain()
-    cfg_mmt = load_experiment_config(args.phase_config)
+    cfg_mmt = load_experiment_config(
+        task=args.task,
+        phase="finetune",
+        configs_root=CONFIGS_ROOT,
+    )
     validate_train_config(cfg_mmt.raw)
 
     # Small sub-configs for readability

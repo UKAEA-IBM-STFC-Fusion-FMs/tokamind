@@ -1,0 +1,58 @@
+# Default configuration for EVAL phase.
+#
+# This file contains eval settings shared across tasks.
+#
+# IMPORTANT:
+#   - model_init.model_dir must point to the TRAINING run to evaluate.
+#   - Do NOT set model_dir here (common config).
+#     Set it in: scripts_mast/configs/tasks/<task>/eval_overrides.yaml
+#     (or later via a CLI arg).
+#
+# Outputs are saved under:
+#   <model_dir>/eval__<timestamp>/   (unless eval_id is provided)
+
+
+model_init:
+  model_dir: null   # REQUIRED for eval; set in task eval overrides
+
+# eval_id: null     # optional; if omitted, loader uses eval__<timestamp>
+
+
+data:
+  cache:
+    enable: true
+    num_workers: 4
+  keep_output_native: true
+
+
+preprocess:
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    window_stride_sec: 0.005
+
+
+loader:
+  batch_size: 1024
+  num_workers: 1
+  drop_last: false
+  batches_per_epoch: null   # ignored in evaluation
+
+
+eval:
+  # list of inputs/actuators/outputs you want to drop for evaluation
+  # null: evaluate the full model
+  drop:
+    inputs: # ["pf_active-coil_current"]
+    actuators:
+    outputs: # ["pf_active-solenoid_current", "summary-ip"]
+
+  metrics:
+    enable: true
+
+  traces:
+    enable: false
+    n_max: 2
+    signals: # ["pf_active-coil_current"]           # null → save all outputs
+    times_indexes: # [0, 1]                         # null → save full horizon

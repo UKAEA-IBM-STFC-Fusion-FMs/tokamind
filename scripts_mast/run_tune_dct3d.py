@@ -1,22 +1,19 @@
 from __future__ import annotations
 
 import argparse
-import torch
-import torch.multiprocessing as mp
-
 import copy
-import yaml
+import logging
 from pathlib import Path
 
 import numpy as np
+import torch
+import torch.multiprocessing as mp
+import yaml
 
 from scripts.pipelines.utils.preprocessing_utils import (
     initialize_datasets_and_metadata_for_task,
 )
-
-from scripts.pipelines.utils.utils import (
-    initialize_model_dataset,
-)
+from scripts.pipelines.utils.utils import initialize_model_dataset
 
 from scripts_mast.mast_utils import (
     build_task_config,
@@ -24,12 +21,7 @@ from scripts_mast.mast_utils import (
 )
 
 from mmt.utils.config import load_experiment_config
-
-from mmt.utils import (
-    set_seed,
-    setup_logging,
-)
-
+from mmt.utils import set_seed, setup_logging
 from mmt.data import (
     build_signal_specs,
     ChunkWindowsTransform,
@@ -40,32 +32,22 @@ from mmt.data import (
     WindowStreamedDataset,
 )
 
-
-import logging
-
 DEBUG_MODE = False
+CONFIGS_ROOT = "scripts_mast/configs"
 
 
 def parse_args_tune_dct3d() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Tune parse_args_tune_dct3d for a given task/phase config."
+        description="Tune DCT3D embedding parameters for a given task."
     )
     parser.add_argument(
-        "--phase_config",
+        "--task",
         type=str,
-        default="scripts_mast/configs/task_2-1/tune_dct3d.yaml",
-        help=(
-            "Path to the phase YAML config file "
-            "(e.g. mmt/configs/task_2-1/tune_dct3d.yaml)"
-        ),
+        default="task_2-1",
+        help="Task folder name under scripts_mast/configs/tasks/<task>/",
     )
     args, _ = parser.parse_known_args()
     return args
-
-
-# ----------------------------------------------------------------------------------------------------------------------
-# Main
-# ----------------------------------------------------------------------------------------------------------------------
 
 
 def main() -> None:
@@ -84,10 +66,14 @@ def main() -> None:
     mp.set_start_method("spawn", force=True)
 
     # ------------------------------------------------------------------
-    # Load MMT config (phase + experiment_base + embeddings + baseline)
+    # Load merged config (NEW: convention-based)
     # ------------------------------------------------------------------
     args = parse_args_tune_dct3d()
-    cfg_mmt = load_experiment_config(args.phase_config)
+    cfg_mmt = load_experiment_config(
+        task=args.task,
+        phase="tune_dct3d",
+        configs_root=CONFIGS_ROOT,
+    )
 
     if "tune_dct3d" not in cfg_mmt.raw:
         raise KeyError("Missing 'tune_dct3d' section in config.")
@@ -100,7 +86,7 @@ def main() -> None:
 
     cfg_tune = cfg_mmt.raw["tune_dct3d"]
 
-    # Baseline task config (with overrides such as subset_of_shots)
+    # Baseline task config (with overrides such as subset_of_shots/local)
     cfg_task = build_task_config(cfg_mmt)
 
     # ------------------------------------------------------------------
@@ -108,6 +94,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     set_seed(cfg_mmt.seed, deterministic=True, warn_only=True)
 
+    # For tune_dct3d, loader sets run_dir to: scripts_mast/configs/tasks/<task>/
     logger = setup_logging(
         cfg_mmt.paths["run_dir"],
         logger_name="mmt",
@@ -159,9 +146,7 @@ def main() -> None:
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
-            TrimChunksTransform(
-                max_chunks=cfg_trim["max_chunks"],
-            ),
+            TrimChunksTransform(max_chunks=cfg_trim["max_chunks"]),
             tune_transform,
         ]
     )
@@ -169,16 +154,13 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Shot-level dataset (wrapped) for tuning
     # ------------------------------------------------------------------
-    datasets_shots_wrapped = {
-        "train": initialize_model_dataset(
-            datasets_shots_raw.get("train"),
-            dict_metadata,
-            cfg_task,
-            model_specific_transform=mmt_transform_map,
-            verbose=False,
-        )
-    }
-    ds_shots_full = datasets_shots_wrapped["train"]
+    ds_shots_full = initialize_model_dataset(
+        datasets_shots_raw.get("train"),
+        dict_metadata,
+        cfg_task,
+        model_specific_transform=mmt_transform_map,
+        verbose=False,
+    )
 
     # ------------------------------------------------------------------
     # Random shot selection (optional)
@@ -192,9 +174,7 @@ def main() -> None:
         sel_indices = rng.choice(
             all_indices, size=min(n_shots, len(all_indices)), replace=False
         )
-        ds_shots_selected = [
-            ds_shots_full[i] for i in sel_indices
-        ]  # index-based subset
+        ds_shots_selected = [ds_shots_full[i] for i in sel_indices]
     else:
         sel_indices = all_indices
         ds_shots_selected = ds_shots_full
@@ -210,14 +190,11 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Window-level dataset (streaming)
     # ------------------------------------------------------------------
-    datasets_windows = {
-        "train": WindowStreamedDataset(
-            ds_shots_selected,
-            shuffle_shots=False,
-            seed=cfg_mmt.seed,
-        )
-    }
-    ds_windows = datasets_windows["train"]
+    ds_windows = WindowStreamedDataset(
+        ds_shots_selected,
+        shuffle_shots=False,
+        seed=cfg_mmt.seed,
+    )
 
     # ------------------------------------------------------------------
     # Shot exploration
@@ -230,7 +207,7 @@ def main() -> None:
         if max_windows is not None and n_windows_total >= max_windows:
             break
 
-    logger.info(f"Processed windows: total={n_windows_total}")
+    logger.info("Processed windows: total=%d", n_windows_total)
 
     # ------------------------------------------------------------------
     # Select and print best configs
@@ -249,41 +226,63 @@ def main() -> None:
             )
 
     # ------------------------------------------------------------------
-    # Create a tuned copy of embeddings config
+    # Write tuned overrides to: tasks/<task>/embeddings_overrides.yaml
+    # (ONLY per-signal overrides; no defaults)
     # ------------------------------------------------------------------
-    embeddings_tuned = copy.deepcopy(cfg_mmt.embeddings)
+    overrides_out = {"embeddings": {"per_signal_overrides": {}}}
 
-    # Ensure per-signal override section exists (YAML may parse it as None)
-    per_sig = embeddings_tuned.get("per_signal_overrides") or {}
-    embeddings_tuned["per_signal_overrides"] = per_sig
     for role, by_sig in best.items():
-        embeddings_tuned["per_signal_overrides"].setdefault(role, {})
-
         for name, info in by_sig.items():
-            # Only override signals that are actually using DCT3D
             spec = signal_specs.get(role, name)
-            if spec is None or spec.encoder_name != "dct3d":
+            if spec is None:
+                continue
+            if spec.encoder_name != "dct3d":
                 continue
 
-            embeddings_tuned["per_signal_overrides"][role][name] = {
+            tuned_keep_h = int(info["eff_keep_h"])
+            tuned_keep_w = int(info["eff_keep_w"])
+            tuned_keep_t = int(info["eff_keep_t"])
+
+            # Compare against current baseline kwargs used for this run
+            base_kwargs = dict(spec.encoder_kwargs or {})
+            base_keep_h = int(base_kwargs.get("keep_h", tuned_keep_h))
+            base_keep_w = int(base_kwargs.get("keep_w", tuned_keep_w))
+            base_keep_t = int(base_kwargs.get("keep_t", tuned_keep_t))
+
+            # Only write an override if something actually changes
+            if (tuned_keep_h, tuned_keep_w, tuned_keep_t) == (
+                base_keep_h,
+                base_keep_w,
+                base_keep_t,
+            ):
+                continue
+
+            new_kwargs = copy.deepcopy(base_kwargs)
+            new_kwargs.update(
+                {"keep_h": tuned_keep_h, "keep_w": tuned_keep_w, "keep_t": tuned_keep_t}
+            )
+
+            overrides_out["embeddings"]["per_signal_overrides"].setdefault(role, {})
+            overrides_out["embeddings"]["per_signal_overrides"][role][name] = {
                 "encoder_name": "dct3d",
-                "encoder_kwargs": {
-                    "keep_h": int(info["eff_keep_h"]),
-                    "keep_w": int(info["eff_keep_w"]),
-                    "keep_t": int(info["eff_keep_t"]),
-                },
+                "encoder_kwargs": new_kwargs,
             }
 
-    out_path = Path(cfg_mmt.paths["run_dir"]) / "embeddings_tuned.yaml"
-    with open(out_path, "w") as f:
-        yaml.safe_dump(
-            embeddings_tuned,
-            f,
-            sort_keys=False,
-            default_flow_style=False,
-        )
+    out_path = Path(cfg_mmt.paths["run_dir"]) / "embeddings_overrides.yaml"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    logger.info(f"Wrote tuned embeddings config to {out_path}")
+    header = (
+        "# Auto-generated by scripts_mast/run_tune_dct3d.py\n"
+        f"# task: {cfg_mmt.task}\n"
+        "# Merged on top of config/common/embeddings.yaml\n"
+        "# Contains ONLY per-signal overrides.\n\n"
+    )
+
+    with out_path.open("w", encoding="utf-8") as f:
+        f.write(header)
+        yaml.safe_dump(overrides_out, f, sort_keys=False, default_flow_style=False)
+
+    logger.info("Wrote tuned embedding overrides to %s", out_path)
 
 
 if __name__ == "__main__":

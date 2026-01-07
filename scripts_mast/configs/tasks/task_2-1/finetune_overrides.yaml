@@ -1,0 +1,23 @@
+# scripts_mast/configs/tasks/task_2-1/finetune_overrides.yaml
+#
+# Task-specific overrides for finetuning.
+# Typical uses:
+#   - warm-start / initialization settings (model_init)
+#   - task-specific training knobs (epochs, lr, batch_size, etc.)
+#   - per-signal collate drop rates or masking policies
+#   - per-signal adapter sizes (if you prefer not to keep them in task.yaml)
+
+model_init:
+  # Optional: warm-start from an existing trained run.
+  # If omitted/null, finetune trains from scratch (unless your code enforces warmstart).
+  model_dir: #  runs/test_train
+
+# Optional: name the eval subfolder. If omitted, loader auto-generates one (timestamped).
+run_id: "task_2-1_test"
+
+  # load_parts:
+  #   backbone: true
+  #   token_encoder: true
+  #   modality_heads: true
+  #   output_adapters: false
+

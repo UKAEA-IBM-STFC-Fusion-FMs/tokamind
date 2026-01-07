@@ -1,30 +1,40 @@
 """
-Validator for the MMT experiment configuration (MMT v0).
+Validator for the MMT experiment configuration (new config layout).
 
-This module validates and normalizes the full YAML-merged experiment
-configuration produced by the config loader. The validator enforces
-the MMT v0 specification:
+This module validates and normalizes the fully-merged configuration produced by
+the convention-based loader (common + task + optional overrides).
 
-  • mandatory global training fields,
-  • mandatory stage-level fields (epochs, lr/wd, freeze, scheduler),
-  • automatic inheritance of lr/wd from backbone,
-  • freeze → force lr=0 and wd=0 (with warnings),
-  • model_init.load_parts normalized (defaults to True),
-  • dataset loader rules: if we do not cache, we need to define batches_per_epoch
+We deliberately keep validation focused and simple:
+  • common required fields (phase/task/task_config),
+  • training stages validation (lr/wd inheritance, freeze rules),
+  • loader rules for streaming vs cached datasets,
+  • eval-specific requirements (model_init.model_dir, keep_output_native),
+  • tune_dct3d minimal requirements.
 
-Any missing or inconsistent entry raises a clear KeyError/ValueError
-before training starts.
+No backwards compatibility: the config is expected to be in the new format.
 """
 
 from __future__ import annotations
 
 import warnings
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, List, Tuple, Union
 
 
 # ---------------------------------------------------------------------------
-# Utility: nested retrieval
+# Helpers
 # ---------------------------------------------------------------------------
+
+
+def _as_dict(cfg: Union[Dict[str, Any], Any]) -> Dict[str, Any]:
+    """
+    Accept either a raw dict or an ExperimentConfig-like object with `.raw`.
+    """
+    if isinstance(cfg, dict):
+        return cfg
+    raw = getattr(cfg, "raw", None)
+    if isinstance(raw, dict):
+        return raw
+    raise TypeError("cfg must be a dict or an object with a `.raw` dict attribute.")
 
 
 def _get_nested(cfg: Dict[str, Any], path: str) -> Any:
@@ -32,35 +42,70 @@ def _get_nested(cfg: Dict[str, Any], path: str) -> Any:
     Retrieve a nested key from dict `cfg` using a dotted path,
     raising KeyError if any component is missing.
     """
-    node = cfg
-    parts = path.split(".")
-    for p in parts:
-        if p not in node:
+    node: Any = cfg
+    for p in path.split("."):
+        if not isinstance(node, dict) or p not in node:
             raise KeyError(f"Missing required config entry: {path}")
         node = node[p]
     return node
 
 
+def _ensure_dict(cfg: Dict[str, Any], path: str) -> Dict[str, Any]:
+    """
+    Ensure a nested value exists and is a dict.
+    """
+    val = _get_nested(cfg, path)
+    if not isinstance(val, dict):
+        raise TypeError(f"Expected dict at '{path}', got {type(val).__name__}.")
+    return val
+
+
+def _normalize_null_to_empty_dict(cfg: Dict[str, Any], path: str) -> None:
+    """
+    YAML like:
+        output_weights:
+    parses as None. Normalize it to {} for downstream code.
+    """
+    parts = path.split(".")
+    node = cfg
+    for p in parts[:-1]:
+        node = node.setdefault(p, {})
+        if not isinstance(node, dict):
+            raise TypeError(f"Expected dict while walking '{path}', got {type(node)}")
+
+    leaf = parts[-1]
+    if leaf not in node or node[leaf] is None:
+        node[leaf] = {}
+    elif not isinstance(node[leaf], dict):
+        raise TypeError(f"Expected dict at '{path}', got {type(node[leaf]).__name__}.")
+
+
 # ---------------------------------------------------------------------------
-# REQUIRED TOP-LEVEL TRAIN FIELDS (minimal global spec)
+# Common required fields
+# ---------------------------------------------------------------------------
+
+ALLOWED_PHASES = {"pretrain", "finetune", "eval", "tune_dct3d"}
+
+REQUIRED_COMMON_FIELDS: List[Tuple[str, type]] = [
+    ("phase", str),
+    ("task", str),
+    ("task_config", str),  # pointer string; resolved by integration layer
+]
+
+
+# ---------------------------------------------------------------------------
+# Training validation (same spec as before)
 # ---------------------------------------------------------------------------
 
 REQUIRED_TRAIN_FIELDS: List[Tuple[str, type]] = [
     ("train.resume", bool),
     ("train.early_stop.patience", int),
     ("train.early_stop.delta", float),
-    ("train.loss.output_weights", dict),
+    ("train.loss.output_weights", dict),  # normalized if YAML gives null
     ("train.optimizer.use_adamw", bool),
     ("train.scheduler.warmup_steps_fraction", float),
     ("train.stages", list),
 ]
-
-
-# ---------------------------------------------------------------------------
-# REQUIRED STAGE FIELDS
-# These fields must exist in each stage block.
-# Types are validated loosely; lr/wd may be None (inherit).
-# ---------------------------------------------------------------------------
 
 REQUIRED_STAGE_FIELDS: List[Tuple[str, type]] = [
     ("name", str),
@@ -81,12 +126,6 @@ REQUIRED_STAGE_FIELDS: List[Tuple[str, type]] = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# LR/WD INHERITANCE
-# Missing or None → inherit from backbone.
-# ---------------------------------------------------------------------------
-
-
 def _apply_lr_wd_inheritance(stage_cfg: Dict[str, Any]) -> None:
     lr = stage_cfg["optimizer"]["lr"]
     wd = stage_cfg["optimizer"]["wd"]
@@ -99,12 +138,6 @@ def _apply_lr_wd_inheritance(stage_cfg: Dict[str, Any]) -> None:
             lr[block] = backbone_lr
         if wd.get(block) is None:
             wd[block] = backbone_wd
-
-
-# ---------------------------------------------------------------------------
-# FREEZE RULES
-# freeze.<block> = True → force lr=0, wd=0 (with warning)
-# ---------------------------------------------------------------------------
 
 
 def _apply_freeze_rules(stage_cfg: Dict[str, Any]) -> None:
@@ -124,55 +157,42 @@ def _apply_freeze_rules(stage_cfg: Dict[str, Any]) -> None:
             wd[block] = 0.0
 
 
-# ---------------------------------------------------------------------------
-# POST-FREEZE CONSISTENCY CHECK
-# Ensures freeze.<block> actually results in lr=0, wd=0.
-# ---------------------------------------------------------------------------
-
-
 def _validate_stage_consistency(stage_cfg: Dict[str, Any]) -> None:
     lr = stage_cfg["optimizer"]["lr"]
     wd = stage_cfg["optimizer"]["wd"]
     freeze = stage_cfg["freeze"]
 
-    # 1) If frozen → lr and wd must already be zero (enforced by _apply_freeze_rules)
     for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
         if freeze.get(block, False):
             if lr[block] != 0.0 or wd[block] != 0.0:
                 raise RuntimeError(
-                    f"Inconsistent config: block '{block}' is frozen "
-                    f"but lr={lr[block]} or wd={wd[block]} is nonzero."
+                    f"Inconsistent config: block '{block}' is frozen but lr={lr[block]} or wd={wd[block]} is nonzero."
                 )
 
-    # 2) If NOT frozen, lr=0 for backbone/token_encoder is almost certainly a mistake.
-    #    We do NOT apply this check to modality_heads/output_adapters,
-    #    because their lr is dynamically toggled per batch.
     for block in ("token_encoder", "backbone"):
         if not freeze.get(block, False) and lr[block] == 0.0:
             raise ValueError(
                 f"Inconsistent config: freeze.{block}=False but optimizer.lr.{block}=0. "
-                f"This implicitly disables training for '{block}'. "
                 f"Either set freeze.{block}=True or specify a positive learning rate."
             )
 
 
 # ---------------------------------------------------------------------------
-# LOADER VALIDATION (streamed vs cached dataset rules)
+# Loader rules: streamed vs cached
 # ---------------------------------------------------------------------------
 
 
 def _validate_loader(cfg: Dict[str, Any]) -> None:
-    loader_cfg = cfg.get("loader", {})
+    loader_cfg = cfg.get("loader", {}) or {}
     phase = cfg.get("phase", None)
 
-    data_cfg = cfg.get("data", {})
+    data_cfg = cfg.get("data", {}) or {}
     cache_cfg = data_cfg.get("cache") or {}
     cache_enable = bool(cache_cfg.get("enable", False))
 
     bpe = loader_cfg.get("batches_per_epoch", None)
 
-    # Training rule:
-    # If cache is disabled (=> streaming windows), an epoch length must be defined.
+    # If cache is disabled (streaming windows), an epoch length must be defined.
     if phase in ("pretrain", "finetune"):
         if not cache_enable and bpe is None:
             raise ValueError(
@@ -182,20 +202,11 @@ def _validate_loader(cfg: Dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# MODEL_INIT.load_parts validation
-# Missing entries → default to True (most user-friendly behaviour)
+# model_init.load_parts normalization
 # ---------------------------------------------------------------------------
 
 
 def _normalize_load_parts(cfg: Dict[str, Any]) -> None:
-    """
-    Normalize cfg.model_init.load_parts.
-
-    - If model_init is missing/null: do nothing (train from scratch).
-    - If model_init exists:
-        * If load_parts is missing: default to all True.
-        * If load_parts exists: fill missing blocks with True.
-    """
     mi = cfg.get("model_init", None)
     if mi is None:
         return
@@ -204,53 +215,61 @@ def _normalize_load_parts(cfg: Dict[str, Any]) -> None:
         raise TypeError("model_init must be a dict or null.")
 
     lp = mi.get("load_parts", None)
-
     if lp is None:
         lp = {}
         mi["load_parts"] = lp
     elif not isinstance(lp, dict):
         raise TypeError("model_init.load_parts must be a dict.")
 
-    # Fill missing entries with True
     for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
         if lp.get(block) is None:
             lp[block] = True
 
 
 # ---------------------------------------------------------------------------
-# MAIN VALIDATOR for TRAIN and EVAL
+# Public API
 # ---------------------------------------------------------------------------
+
+
+def validate_config(cfg: Union[Dict[str, Any], Any]) -> None:
+    """
+    Validate config based on cfg.phase.
+    """
+    cfgd = _as_dict(cfg)
+
+    # Common fields
+    for k, _t in REQUIRED_COMMON_FIELDS:
+        if k not in cfgd:
+            raise KeyError(f"Missing required config entry: {k}")
+
+    phase = cfgd["phase"]
+    if phase not in ALLOWED_PHASES:
+        raise ValueError(
+            f"Unsupported phase: {phase} (allowed: {sorted(ALLOWED_PHASES)})"
+        )
+
+    if phase in ("pretrain", "finetune"):
+        validate_train_config(cfgd)
+    elif phase == "eval":
+        validate_eval_config(cfgd)
+    elif phase == "tune_dct3d":
+        validate_tune_dct3d_config(cfgd)
+    else:
+        raise ValueError(f"Unsupported phase: {phase}")
 
 
 def validate_train_config(cfg: Dict[str, Any]) -> None:
     """
-    Validate the full experiment configuration for training phases (pretrain/finetune).
-
-    This function performs:
-      • validation of the global training block,
-      • validation and normalization of all training stages
-        (lr/wd inheritance, freeze→force-zero rules),
-      • validation/normalization of model_init.load_parts (if model_init is provided),
-      • validation of dataset loader rules (streamed vs cached),
-      • guardrail: train.resume is mutually exclusive with model_init.
-
-    Parameters
-    ----------
-    cfg : dict
-        The fully merged configuration loaded by config_loader.
-
-    Raises
-    ------
-    KeyError / ValueError / TypeError
-        If any required entry is missing or inconsistent.
+    Validate configuration for training phases (pretrain/finetune).
     """
-    # -----------------------------
-    # Validate global train fields
-    # -----------------------------
+    # Normalize YAML-null dicts that are commonly left empty by users
+    _normalize_null_to_empty_dict(cfg, "train.loss.output_weights")
+
+    # Validate required train fields exist
     for path, _t in REQUIRED_TRAIN_FIELDS:
         _get_nested(cfg, path)
 
-    # Mutual exclusion: resume (same run_dir) vs warm-start (other run_dir)
+    # Mutual exclusion: resume vs warm-start from other run
     if cfg["train"]["resume"] is True and cfg.get("model_init", None) is not None:
         raise ValueError(
             "Inconsistent config: train.resume=true is incompatible with model_init. "
@@ -262,82 +281,67 @@ def validate_train_config(cfg: Dict[str, Any]) -> None:
     if not isinstance(stages, list) or len(stages) == 0:
         raise ValueError("train.stages must be a non-empty list for training phases.")
 
-    # -----------------------------
-    # Validate and normalize stages
-    # -----------------------------
     for i, stage in enumerate(stages):
-        # Ensure required fields exist
         for path, _t in REQUIRED_STAGE_FIELDS:
             _get_nested(stage, path)
 
-        # Check grad_accum_steps once per stage (not once per required field)
         gas = stage["scheduler"]["grad_accum_steps"]
         if not isinstance(gas, int) or gas < 1:
             raise ValueError(
-                "Inconsistent config: scheduler.grad_accum_steps must be an integer >= 1 "
+                "scheduler.grad_accum_steps must be an integer >= 1 "
                 f"(got {gas}) in train.stages[{i}]."
             )
 
-        # 1) Inherit lr/wd from backbone
         _apply_lr_wd_inheritance(stage)
-
-        # 2) Freeze → force lr=0, wd=0
         _apply_freeze_rules(stage)
-
-        # 3) Check consistency post-freeze
         _validate_stage_consistency(stage)
 
-    # -----------------------------
-    # Normalize model_init.load_parts (only if model_init is provided)
-    # -----------------------------
     _normalize_load_parts(cfg)
-
-    # -----------------------------
-    # Validate dataset loader rules
-    # -----------------------------
     _validate_loader(cfg)
-
-    return None
 
 
 def validate_eval_config(cfg: Dict[str, Any]) -> None:
     """
-    Validate the evaluation configuration.
-
-    Evaluation configuration is intentionally MUCH simpler than training:
-    - No train.stages, no lr/wd rules, no freeze rules
-      (these apply only to training).
-    - No model_init.load_parts
-      (evaluation ALWAYS loads all four model blocks).
-    - We still validate loader
-    - We enforce data.keep_output_native = True for metrics + traces.
-    - We DO NOT enforce any streaming/cached logic here.
-      Dataset mode is controlled exclusively via data.cache.enable.
+    Validate evaluation configuration.
     """
-
-    # ---------------------------------------------------------
-    # 1. Basic loader validation
-    # ---------------------------------------------------------
     _validate_loader(cfg)
 
-    # ---------------------------------------------------------
-    # 2. keep_output_native MUST be True in eval
-    # ---------------------------------------------------------
-    data_cfg = cfg.get("data", {})
-    kon = data_cfg.get("keep_output_native", None)
-    if not kon:
+    # Eval requires native outputs for metrics/traces.
+    data_cfg = cfg.get("data", {}) or {}
+    if not bool(data_cfg.get("keep_output_native", False)):
         raise ValueError(
             "For phase='eval', data.keep_output_native must be True "
             "(native outputs are required for metrics and trace saving)."
         )
 
-    # ---------------------------------------------------------
-    # 3. No training-related fields required
-    #    We deliberately DO NOT require:
-    #       - train.*
-    #       - model_init.load_parts
-    #       - training stages
-    #       - optimizer/scheduler
-    # ---------------------------------------------------------
+    # Eval requires a model_dir to evaluate.
+    mi = cfg.get("model_init", None)
+    if not isinstance(mi, dict) or not mi.get("model_dir"):
+        raise ValueError(
+            "For phase='eval', model_init.model_dir must be set (path to a training run)."
+        )
 
-    return None
+
+def validate_tune_dct3d_config(cfg: Dict[str, Any]) -> None:
+    """
+    Minimal validation for tune_dct3d phase.
+    """
+    td = cfg.get("tune_dct3d", None)
+    if not isinstance(td, dict):
+        raise KeyError("For phase='tune_dct3d', missing required block: tune_dct3d")
+
+    # Required: sampling.n_max_per_signal
+    sampling = td.get("sampling", None)
+    if not isinstance(sampling, dict) or not isinstance(
+        sampling.get("n_max_per_signal", None), int
+    ):
+        raise ValueError("tune_dct3d.sampling.n_max_per_signal must be an int.")
+
+    # Required: search_space.keep_h/keep_w/keep_t
+    ss = td.get("search_space", None)
+    if not isinstance(ss, dict):
+        raise KeyError("Missing required block: tune_dct3d.search_space")
+
+    for k in ("keep_h", "keep_w", "keep_t"):
+        if k not in ss or not isinstance(ss[k], list) or len(ss[k]) == 0:
+            raise ValueError(f"tune_dct3d.search_space.{k} must be a non-empty list.")

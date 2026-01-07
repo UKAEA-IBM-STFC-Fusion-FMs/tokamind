@@ -1,0 +1,10 @@
+# Pretrain variant task definition.
+# This "task" is implemented via a baseline-style task_config living in
+# scripts_mast/configs/pretrain_global/.
+#
+# Keep this file minimal: just name the task and point to the task_config.
+# Any additional overrides (if ever needed) can be added here or via
+# phase-specific overrides (e.g., pretrain_overrides.yaml / eval_overrides.yaml).
+
+task: "pretrain_inputs_actuators_to_inputs_outputs"
+task_config: "scripts_mast/configs/pretrain_global/pretrain_inputs_actuators_to_inputs_outputs.yaml"

@@ -1,7 +1,12 @@
-experiment_base: "scripts_mast/configs/pretrain_global/experiment_base.yaml"
-embedding_config: "scripts_mast/configs/pretrain_global/embeddings_default.yaml"
-phase: pretrain
-run_id: test_pretrain
+# This file defines all settings that are shared across tasks during pretraining:
+#   • optimizer / scheduler parameters
+#   • data loader and batch settings
+#   • dropout and collate defaults
+#   • preprocess settings that may differ from pretrain/eval (e.g. valid_windows)
+#
+# Do NOT add task-specific values here (e.g., per-signal overrides,
+# custom learning rates, or warm-start paths). Those should live in:
+#   scripts_mast/configs/tasks/<task>/pretrain_overrides.yaml
 
 collate:
   p_drop_inputs: 0.08
@@ -62,8 +67,9 @@ loader:
 #   backbone:         transformer trunk
 #   modality_heads:   modality-level heads
 #   output_adapters:  per-output adapters
+
 model_init:
-  model_dir:   # "runs/test_train"           # e.g. "runs/run_id"
+  model_dir: null  # e.g. "runs/run_id"
   load_parts:
     token_encoder: true
     backbone: true

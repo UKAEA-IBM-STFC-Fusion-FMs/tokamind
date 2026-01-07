@@ -1,7 +1,7 @@
-task: "task_2-1"
-
-task_config: "scripts/pipelines/configs/configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"
-#task_config: "scripts/pipelines/configs/configs_task/task_1_reconstruction/config_task_1-2.yaml"
+# Global defaults shared by *all* phases (pretrain/finetune/eval/tune_dct3d).
+# Intentionally does NOT include:
+#   - task / task_config (belongs in tasks/<task>/task.yaml)
+#   - preprocess.valid_windows (can differ per phase; keep it in phase configs)
 
 seed: 54
 
@@ -19,10 +19,10 @@ preprocess:
 
 model:
   backbone:
-    d_model: 128
-    n_layers: 2
-    n_heads: 2
-    dim_ff: 256
+    d_model: 128  # 256
+    n_layers: 2   # 4
+    n_heads: 2    # 8
+    dim_ff: 256   # 1024
     dropout: 0.1
     activation: "relu"
 
@@ -39,5 +39,5 @@ model:
 
   output_adapters:
     hidden_default: 0
-    hidden_overrides:
-      equilibrium-psi: 32
+    hidden_overrides: {}   # task-specific overrides go in tasks/<task>/task.yaml
+#      equilibrium-psi: 32

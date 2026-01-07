@@ -53,20 +53,18 @@ import logging
 
 
 DEBUG_MODE = False
+CONFIGS_ROOT = "scripts_mast/configs"
 
 
 def parse_args_finetune() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Run finetuning for a given task/phase config."
+        description="Run finetuning for a given task (convention-based configs)."
     )
     parser.add_argument(
-        "--phase_config",
+        "--task",
         type=str,
-        default="scripts_mast/configs/task_2-1/finetune_default.yaml",
-        help=(
-            "Path to the phase YAML config file "
-            "(e.g. mmt/configs/task_2-1/finetune_default.yaml)"
-        ),
+        default="task_2-1",  # pick your preferred default
+        help="Task folder name under scripts_mast/configs/tasks/<task>/",
     )
     args, _ = parser.parse_known_args()
     return args
@@ -96,7 +94,11 @@ def main() -> None:
     # Load MMT config (phase + experiment_base + embeddings + baseline)
     # ------------------------------------------------------------------
     args = parse_args_finetune()
-    cfg_mmt = load_experiment_config(args.phase_config)
+    cfg_mmt = load_experiment_config(
+        task=args.task,
+        phase="finetune",
+        configs_root=CONFIGS_ROOT,
+    )
     validate_train_config(cfg_mmt.raw)
 
     # Small sub-configs for readability

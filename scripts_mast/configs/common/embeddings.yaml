@@ -1,0 +1,63 @@
+# Default encoder settings per (role, modality).
+# Used for all signals of that role+modality unless overridden per-signal below.
+#
+# encoder_name: "dct3d" or "identity"
+
+embeddings:
+  defaults:
+    input:
+      timeseries:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 1, keep_w: 1, keep_t: 10 }
+
+      profile:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 5, keep_w: 1, keep_t: 10 }
+
+      video:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 16, keep_w: 16, keep_t: 5 }
+
+    actuator:
+      timeseries:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 1, keep_w: 1, keep_t: 10 }
+
+      profile:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 5, keep_w: 1, keep_t: 10 }
+
+      video:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 16, keep_w: 16, keep_t: 5 }
+
+    output:
+      timeseries:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 1, keep_w: 1, keep_t: 10 }
+
+      profile:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 10, keep_w: 1, keep_t: 10 }
+
+      video:
+        encoder_name: "dct3d"
+        encoder_kwargs: { keep_h: 8, keep_w: 8, keep_t: 10 }
+
+  # Optional per-signal overrides keyed by signal name (canonical name in baseline task config).
+  # Task-specific overrides should live in tasks/<task>/embeddings_overrides.yaml.
+  per_signal_overrides: {}
+#    input:
+#      pf_active-coil_current:
+#        encoder_name: "dct3d"
+#        encoder_kwargs:
+#          keep_h: 100
+#          keep_w: 1
+#          keep_t: 100
+#    output:
+#      equilibrium-psi:
+#        encoder_name: "dct3d"
+#        encoder_kwargs:
+#          keep_h: 16
+#          keep_w: 16
+#          keep_t: 5

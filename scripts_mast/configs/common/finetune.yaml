@@ -1,12 +1,18 @@
-experiment_base: "scripts_mast/configs/task_2-1/experiment_base.yaml"
-embedding_config: "scripts_mast/configs/task_2-1/embeddings_default.yaml"
-phase: finetune
-run_id: test
+# This file defines all settings that are shared across tasks during finetuning:
+#   • optimizer / scheduler parameters
+#   • data loader and batch settings
+#   • dropout and collate defaults
+#   • preprocess settings that may differ from pretrain/eval (e.g. valid_windows)
+#
+# Do NOT add task-specific values here (e.g., per-signal overrides,
+# custom learning rates, or warm-start paths). Those should live in:
+#   scripts_mast/configs/tasks/<task>/finetune_overrides.yaml
+
 
 collate:
   p_drop_inputs: 0.08
-  p_drop_inputs_overrides:
-    pf_active-solenoid_current: 0.1
+  p_drop_inputs_overrides: {}
+#    pf_active-solenoid_current: 0.1
   p_drop_outputs: 0.0
   p_drop_outputs_overrides: {}
   p_drop_actuators: 0.0
@@ -63,7 +69,7 @@ loader:
 #   modality_heads:   modality-level heads
 #   output_adapters:  per-output adapters
 model_init:
-  model_dir:   # "runs/test_train"           # e.g. "runs/run_id"
+  model_dir: null  # should be specified in finetune_overrides.yaml
   load_parts:
     token_encoder: true
     backbone: true
