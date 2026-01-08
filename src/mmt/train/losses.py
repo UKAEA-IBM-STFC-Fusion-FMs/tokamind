@@ -1,13 +1,3 @@
-# mmt/train/losses.py
-
-from __future__ import annotations
-
-from typing import Dict, Hashable, Mapping, Optional, Tuple
-
-import torch
-from torch import Tensor
-
-
 """
 Loss utilities for the Multi-Modal Transformer.
 
@@ -57,6 +47,13 @@ comparison in a paper), you can reintroduce a per-output scale factor:
 using N derived from the original output shape (e.g. via metadata or a
 collate-side computation).
 """
+
+from __future__ import annotations
+
+from typing import Dict, Hashable, Mapping, Optional, Tuple
+
+import torch
+from torch import Tensor
 
 
 def compute_loss_pred_space(

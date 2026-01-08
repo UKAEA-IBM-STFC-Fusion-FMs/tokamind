@@ -1,3 +1,17 @@
+"""
+DCT3D tuning entrypoint for MMT (per-task embedding hyperparameters).
+
+This script:
+- parses `--task`,
+- loads and validates the merged config for phase="tune_dct3d",
+- resolves the baseline task_config and builds datasets/metadata,
+- streams windows and evaluates candidate (keep_h, keep_w, keep_t) settings,
+- selects the best per-signal configuration,
+- writes tuned results to `tasks/<task>/embeddings_overrides.yaml`.
+
+This phase does not train the transformer; it tunes embedding parameters only.
+"""
+
 from __future__ import annotations
 
 import argparse

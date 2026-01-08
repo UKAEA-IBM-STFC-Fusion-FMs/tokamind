@@ -1,6 +1,5 @@
 """
 loop.py — High-level train loop for the Multi-Modal Transformer (MMT)
-=======================================================================
 
 This module orchestrates the complete finetuning flow of the MMT model,
 including:

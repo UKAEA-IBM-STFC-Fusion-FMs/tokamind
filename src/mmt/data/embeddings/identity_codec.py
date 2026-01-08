@@ -1,4 +1,14 @@
-# src/mmt/data/embeddings/identity_codec.py
+"""
+Identity codec used by the embedding pipeline.
+
+This codec performs no feature transform: it simply flattens each input chunk
+(and optionally casts dtype). It is useful for:
+- bypassing compression/encoding for specific signals,
+- debugging the end-to-end token/embedding pipeline,
+- keeping signals in (almost) native space while still using the same
+  embedding/caching interfaces as other codecs.
+"""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

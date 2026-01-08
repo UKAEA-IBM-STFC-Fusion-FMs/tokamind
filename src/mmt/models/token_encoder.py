@@ -1,3 +1,20 @@
+"""
+Token encoder for MMT.
+
+The TokenEncoder converts ragged per-token embeddings produced by the data
+pipeline (BuildTokensTransform + MMTCollate) into a dense token tensor of shape
+(B, L+1, d_model) suitable for the transformer backbone.
+
+It:
+- projects each token embedding into d_model using per-signal projection layers,
+- adds positional, signal-id, modality, and role embeddings,
+- prepends a learned CLS token,
+- returns an attention-keep mask aligned with the padded token sequence.
+
+Projection layers are keyed by stable canonical keys ("role:name") to keep
+checkpoint loading and warm-start robust to signal ordering.
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, cast

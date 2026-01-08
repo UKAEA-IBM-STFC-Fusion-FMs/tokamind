@@ -1,3 +1,10 @@
+"""
+Lightweight transform composer for the MMT data pipeline.
+
+ComposeTransforms chains a sequence of shot/window transforms into a single
+callable, stopping early if any transform returns None (drop semantics).
+"""
+
 from __future__ import annotations
 from typing import Any, Iterable, List, Callable
 

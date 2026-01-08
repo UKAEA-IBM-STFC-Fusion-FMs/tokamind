@@ -1,3 +1,14 @@
+"""
+Modality heads for MMT.
+
+A modality head is a small MLP that maps the pooled transformer representation
+(CLS token, size d_model) into a modality-specific latent space (G_mod).
+
+These heads provide a shared representation per modality (e.g. timeseries,
+profile, video), which is then consumed by per-output adapters to produce
+signal-specific predictions.
+"""
+
 from __future__ import annotations
 
 from typing import List

@@ -1,4 +1,15 @@
-# src/mmt/data/embeddings/codec_utils.py
+"""
+Codec utilities for the embedding pipeline.
+
+This module provides:
+- small shape helpers (e.g., inferring (H, W) from non-time value shapes),
+- a lightweight embedding-dimension estimator for a given encoder + signal shape,
+- a factory to build per-signal codec instances from the SignalSpec registry.
+
+The utilities here are intentionally simple and mirror the behaviour of the
+corresponding codec implementations
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, Mapping, Tuple

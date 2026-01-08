@@ -1,3 +1,18 @@
+"""
+Pretraining entrypoint for MMT using the convention-based config system.
+
+This script:
+- parses `--task` (a pretrain-* task folder),
+- loads and validates the merged config for phase="pretrain",
+- resolves the baseline task_config and builds datasets/metadata,
+- builds signal specs/codecs and the standard shot→windows transform pipeline,
+- optionally warm-starts from `model_init.model_dir`,
+- runs the training loop and writes outputs under cfg_mmt.paths["run_dir"].
+
+Shared boilerplate (device/MP setup, default transforms, window datasets,
+collate construction) lives in `scripts_mast.mast_utils.pipeline_helpers`.
+"""
+
 from __future__ import annotations
 
 import argparse

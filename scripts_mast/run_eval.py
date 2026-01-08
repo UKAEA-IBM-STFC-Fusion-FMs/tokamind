@@ -1,3 +1,19 @@
+"""
+Evaluation entrypoint for MMT using the convention-based config system.
+
+This script is intentionally thin:
+- parses `--task`,
+- loads and validates the merged config for phase="eval",
+- resolves the baseline task_config and builds datasets/metadata,
+- builds signal specs/codecs and the standard shot→windows transform pipeline,
+- loads the best checkpoint from `model_init.model_dir`,
+- runs window-level evaluation (metrics + optional traces),
+- writes outputs under the eval run directory (cfg_mmt.paths["run_dir"]).
+
+Shared boilerplate (device/MP setup, default transforms, window datasets,
+collate construction, etc.) lives in `scripts_mast.mast_utils.pipeline_helpers`.
+"""
+
 from __future__ import annotations
 
 import argparse

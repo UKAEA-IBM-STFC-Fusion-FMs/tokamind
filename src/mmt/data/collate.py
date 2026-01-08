@@ -1,3 +1,22 @@
+"""
+Batch collation for the MMT window-level dataloaders.
+
+MMTCollate takes a list of per-window dictionaries (produced by the transforms
+pipeline) and builds a padded, model-ready batch by:
+
+- padding variable-length token sequences and keeping embeddings ragged,
+- applying per-token and per-chunk dropout for inputs/actuators (and optional
+  per-output dropout),
+- producing masks for padding and dropped tokens,
+- assembling output embeddings (and optionally native output tensors for eval).
+
+This collate uses explicit PAD semantics (PAD id/role/mod/pos) so padding/dropped
+tokens are never confused with real signals.
+
+The returned batch dict is the standard input format expected by
+MultiModalTransformer.forward().
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple

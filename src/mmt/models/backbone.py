@@ -1,3 +1,11 @@
+"""
+Transformer backbone for MMT.
+
+A thin wrapper around PyTorch's nn.TransformerEncoder (batch_first=True).
+Kept as its own module to support clear checkpointing, freezing, and warm-start
+behaviour independent from the TokenEncoder and task-specific heads.
+"""
+
 from __future__ import annotations
 
 import torch

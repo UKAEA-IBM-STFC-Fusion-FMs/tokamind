@@ -1,6 +1,5 @@
 """
 Signal specification and registry utilities
-===========================================
 
 This module defines the core "signal spec" abstraction used throughout MMT.
 

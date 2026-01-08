@@ -1,6 +1,4 @@
 """
-scripts_mast.mast_utils.pipeline_helpers
-
 Shared helpers for the `scripts_mast/run_*.py` entrypoints.
 
 Purpose

@@ -1,3 +1,14 @@
+"""
+Output adapters for MMT.
+
+Each output signal has a small adapter network that maps from the modality
+latent space (G_mod) to the target output embedding dimension (K_t).
+
+Adapters are lightweight (linear or a tiny MLP with one hidden layer) and are
+keyed by stable canonical keys ("output:<name>") to ensure predictable
+checkpoint loading and warm-start across tasks.
+"""
+
 from __future__ import annotations
 
 import torch

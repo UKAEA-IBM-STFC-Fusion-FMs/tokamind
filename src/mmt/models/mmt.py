@@ -1,3 +1,20 @@
+"""
+Multi-Modal Transformer (MMT) model.
+
+This module defines the main model used by the MMT pipeline. It consumes token
+batches produced by:
+
+  Chunk → SelectValidWindows → TrimChunks → EmbedChunks → BuildTokens → MMTCollate
+
+and produces predictions for all output signals of the task.
+
+The architecture is intentionally modular:
+- TokenEncoder: projects per-token embeddings into d_model and adds metadata
+- Backbone: transformer encoder over the token sequence
+- Modality heads: map CLS to modality-specific latent vectors
+- Output adapters: per-signal heads mapping modality latent → output embedding
+"""
+
 from __future__ import annotations
 
 from typing import Any, Dict, List, Mapping
