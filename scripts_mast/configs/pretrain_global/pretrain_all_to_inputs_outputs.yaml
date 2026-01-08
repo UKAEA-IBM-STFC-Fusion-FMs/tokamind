@@ -167,8 +167,8 @@ sources_and_signals:
       - t_e
 
 standardscaling_setting:
-  mean_path: /../metadata/2025-09-22_stdscaling/flattened_dict_mean_shot.pkl
-  std_path: /../metadata/2025-09-22_stdscaling/flattened_dict_std_shot.pkl
+  mean_path: /metadata/flattened_dict_mean_shot.pkl
+  std_path: /metadata/flattened_dict_std_shot.pkl
 
 task_window_segmenter:
   input_keys: *input_keys
