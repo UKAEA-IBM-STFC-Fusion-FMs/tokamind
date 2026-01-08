@@ -49,21 +49,21 @@ def _baseline_repo_root() -> Path | None:
     Returns None if the baseline package is not importable.
     """
     try:
-        import scripts.pipeline_tools.initialize_dataset_and_metadata as pt  # baseline module
+        import MAST_benchmark.tasks as tasks  # baseline module
     except Exception:
         return None
 
     # If the baseline exposes REPO_ROOT, prefer it.
-    repo_root = getattr(pt, "REPO_ROOT", None)
+    repo_root = getattr(tasks, "REPO_ROOT", None)
     if isinstance(repo_root, str) and repo_root:
         return Path(repo_root).resolve()
 
     # Otherwise infer from module location:
     # <baseline_root>/scripts/pipelines/utils/preprocessing_utils.py
-    p = Path(pt.__file__).resolve()
+    p = Path(tasks.__file__).resolve()
     # parents: utils(0) -> pipelines(1) -> scripts(2) -> baseline_root(3)
     if len(p.parents) >= 4:
-        return p.parents[2]
+        return p.parents[1]
     return None
 
 

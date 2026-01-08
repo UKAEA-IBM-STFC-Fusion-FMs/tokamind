@@ -19,13 +19,14 @@ from __future__ import annotations
 import argparse
 import logging
 
-from scripts.pipeline_tools.initialize_model_dataset import (
+from MAST_benchmark.data import (
+    initialize_MAST_dataset,
     initialize_model_dataset,
 )
 
-from scripts.pipeline_tools.initialize_dataset_and_metadata import (
-    initialize_datasets_and_metadata_for_task,
-)
+from MAST_benchmark.data_split import get_train_test_val_shots
+from MAST_benchmark.tasks import get_task_metadata
+
 
 from scripts_mast.mast_utils import (
     build_task_config,
@@ -124,24 +125,50 @@ def main() -> None:
         "task=%s | phase=%s | device=%s", cfg_mmt.task, cfg_mmt.phase, device
     )
 
-    # ------------------------------------------------------------------
-    # Baseline datasets + metadata
-    # ------------------------------------------------------------------
-    datasets_shots_raw, dict_metadata = initialize_datasets_and_metadata_for_task(
-        cfg_task
+    # -------------------------------------------------------------------
+    # Initialize task-specific metadata
+    # -------------------------------------------------------------------
+
+    dict_task_metadata = get_task_metadata(
+        cfg_task,
+        verbose=False,
     )
 
+    # ------------------------------------------------------------------
+    # Initialize MAST datasets
+    # ------------------------------------------------------------------
+
+    train_shots_, test_shots_, val_shots_ = get_train_test_val_shots(
+        max_index=cfg_data["subset_of_shots"],
+    )
+
+    test_mast_dataset = initialize_MAST_dataset(
+        cfg_task,
+        test_shots_,
+        use_std_scaling=True,
+        return_incomplete_shots=True,
+    )
+
+    # ------------------------------------------------------------------
+    # Signal specs
+    # ------------------------------------------------------------------
+
     # Stats (mean/std) for de-normalizing outputs during metrics/traces
-    signal_stats = extract_signal_stats(dict_metadata)
+    signal_stats = extract_signal_stats(dict_task_metadata)
 
     # Build signals_by_role from baseline config + metadata and signal specs/codecs
-    signals_by_role = build_signals_by_role_from_task_config(cfg_task, dict_metadata)
+    signals_by_role = build_signals_by_role_from_task_config(
+        cfg_task,
+        dict_task_metadata,
+    )
+
     signal_specs = build_signal_specs(
         embeddings_cfg=cfg_mmt.embeddings,
         signals_by_role=signals_by_role,
-        dict_metadata=dict_metadata,
+        dict_metadata=dict_task_metadata,
         chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
     )
+
     codecs = build_codecs(signal_specs)
 
     # ------------------------------------------------------------------
@@ -149,7 +176,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     mmt_transform_map = build_default_transform(
         cfg_mmt,
-        dict_metadata=dict_metadata,
+        dict_metadata=dict_task_metadata,
         signal_specs=signal_specs,
         codecs=codecs,
         keep_output_native=keep_output_native,
@@ -158,10 +185,10 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model-level dataset (shot-based wrapper)
     # ------------------------------------------------------------------
-    datasets_shots_wrapped = {
+    model_datasets = {
         "test": initialize_model_dataset(
-            datasets_shots_raw.get("test"),
-            dict_metadata,
+            test_mast_dataset,
+            dict_task_metadata,
             cfg_task,
             model_specific_transform=mmt_transform_map,
             verbose=True,
@@ -169,8 +196,8 @@ def main() -> None:
     }
 
     # Optional debug: iterate a single shot to exercise wrapper + transforms
-    if DEBUG_MODE and datasets_shots_wrapped["test"] is not None:
-        ds = datasets_shots_wrapped["test"]
+    if DEBUG_MODE and model_datasets["test"] is not None:
+        ds = model_datasets["test"]
         shot = ds[0]
         for _ in shot:
             continue
@@ -179,7 +206,7 @@ def main() -> None:
     # Window-level dataset for EVAL (test only)
     # ------------------------------------------------------------------
     datasets_windows = build_window_datasets(
-        datasets_shots_wrapped=datasets_shots_wrapped,
+        model_datasets=model_datasets,
         enable_cache=enable_cache,
         num_workers_cache=num_workers_cache,
         seed=cfg_mmt.seed,

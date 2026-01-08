@@ -7,4 +7,4 @@
 task: task_4-4
 
 # Baseline task config (resolved by scripts_mast/mast_utils/task_config.py)
-task_config: configs_task/task_4_disruptions/config_task_4-4.yaml
+task_config: MAST_benchmark/tasks_configs/group_4_mhd_activity/config_task_4-4.yaml

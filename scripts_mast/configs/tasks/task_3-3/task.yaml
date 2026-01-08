@@ -7,4 +7,4 @@
 task: task_3-3
 
 # Baseline task config (resolved by scripts_mast/mast_utils/task_config.py)
-task_config: configs_task/task_3_profiles_dynamics/config_task_3-3.yaml
+task_config: MAST_benchmark/tasks_configs/group_3_profiles_dynamics/config_task_3-3.yaml

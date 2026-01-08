@@ -209,7 +209,7 @@ def build_default_transform(
 
 def build_window_datasets(
     *,
-    datasets_shots_wrapped: Mapping[str, Any],
+    model_datasets: Mapping[str, Any],
     enable_cache: bool,
     num_workers_cache: int,
     seed: int,
@@ -221,7 +221,7 @@ def build_window_datasets(
 
     Parameters
     ----------
-    datasets_shots_wrapped:
+    model_datasets:
         Mapping split -> shot-level dataset wrapper.
     enable_cache:
         If True, cache selected splits to RAM using WindowCachedDataset.
@@ -246,7 +246,7 @@ def build_window_datasets(
     cache_splits_set = set(cache_splits)
     out: Dict[str, Any] = {}
 
-    for split, ds_stream in datasets_shots_wrapped.items():
+    for split, ds_stream in model_datasets.items():
         if ds_stream is None:
             out[split] = None
             continue

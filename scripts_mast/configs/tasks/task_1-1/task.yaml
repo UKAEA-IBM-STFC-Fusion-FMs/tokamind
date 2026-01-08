@@ -7,4 +7,4 @@
 task: task_1-1
 
 # Baseline task config (resolved by scripts_mast/mast_utils/task_config.py)
-task_config: configs_task/task_1_reconstruction/config_task_1-1.yaml
+task_config: MAST_benchmark/tasks_configs/group_1_reconstruction/config_task_1-1.yaml
