@@ -50,7 +50,7 @@ def parse_args_pretrain() -> argparse.Namespace:
     parser.add_argument(
         "--task",
         type=str,
-        default="pretrain_inputs_actuators_to_inputs_outputs",
+        default="pretrain_all_to_inputs_outputs",
         help="Pretrain task folder name under scripts_mast/configs/tasks/<task>/",
     )
     args, _ = parser.parse_known_args()

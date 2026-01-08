@@ -6,5 +6,5 @@
 # Any additional overrides (if ever needed) can be added here or via
 # phase-specific overrides (e.g., pretrain_overrides.yaml / eval_overrides.yaml).
 
-task: "pretrain_inputs_actuators_to_inputs_outputs"
+task: "pretrain_all_to_inputs_outputs"
 task_config: "scripts_mast/configs/pretrain_global/pretrain_all_to_inputs_outputs.yaml"
