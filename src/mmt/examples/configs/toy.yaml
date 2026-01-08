@@ -1,0 +1,78 @@
+# configs/examples/toy.yaml
+#
+# Minimal example config for training MMT on synthetic (in-memory) data.
+#
+# This example is intentionally baseline-free:
+# it does NOT depend on scripts_mast/, FAIRMAST, or any dataset files.
+# It is meant for:
+#   - quick sanity checks
+#   - documentation ("first run")
+#   - CI smoke tests
+
+seed: 0
+
+toy:
+  # Synthetic dataset size (number of window samples)
+  num_windows: 256
+
+  # Training loop
+  batch_size: 32
+  num_steps: 200
+  lr: 1.0e-3
+
+  # Token / output dimensions
+  embedding_dim: 8
+
+  # Number of temporal positions ("chunks") per window.
+  # tokens_per_window = positions * (len(inputs) + len(actuators))
+  positions: 1
+
+  # Signals (names are arbitrary; used only for logging/overrides)
+  inputs: ["x1", "x2"]
+  actuators: ["u1"]
+  outputs: ["y"]
+
+  # Keep the toy example single-modality for simplicity
+  modality: "timeseries"
+
+  # How targets are generated from inputs
+  target:
+    kind: "linear_mean"   # y = mean(tokens) @ W + b (+ noise)
+    noise_std: 0.0
+
+model:
+  backbone:
+    d_model: 64
+    n_layers: 2
+    n_heads: 4
+    dim_ff: 128
+    dropout: 0.1
+    activation: "relu"
+
+  modality_heads:
+    timeseries:
+      hidden: 0
+      out_dim: 64
+
+  output_adapters:
+    hidden_default: 0
+    hidden_overrides: {}
+
+  # Must be >= toy.positions (positions are used as token "pos")
+  max_positions: 8
+
+# Collate config (no dropout by default so behaviour is deterministic)
+collate:
+  p_drop_inputs: 0.0
+  p_drop_inputs_overrides: {}
+
+  p_drop_outputs: 0.0
+  p_drop_outputs_overrides: {}
+
+  p_drop_actuators: 0.0
+  p_drop_actuators_overrides: {}
+
+  p_drop_inputs_chunks: 0.0
+  p_drop_actuators_chunks: 0.0
+
+  keep_output_native: false
