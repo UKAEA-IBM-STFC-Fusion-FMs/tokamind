@@ -2,9 +2,11 @@
 # This "task" is implemented via a baseline-style task_config living in
 # scripts_mast/configs/pretrain_global/.
 #
-# Keep this file minimal: just name the task and point to the task_config.
-# Any additional overrides (if ever needed) can be added here or via
-# phase-specific overrides (e.g., pretrain_overrides.yaml / eval_overrides.yaml).
+# This file defines:
+#   - the task name (must match the enclosing folder name),
+#   - the task_config pointer (baseline task definition),
+#   - optional task-wide overrides that should apply to *all* phases
+#     (pretrain / finetune / eval / tune_dct3d), e.g. model adapter sizes.
 
-task: "pretrain_inputs_actuators_to_inputs_outputs"
-task_config: "scripts_mast/configs/pretrain_global/pretrain_inputs_actuators_to_outputs.yaml"
+task: pretrain_inputs_actuators_to_inputs_outputs
+task_config: scripts_mast/configs/pretrain_global/pretrain_inputs_actuators_to_outputs.yaml

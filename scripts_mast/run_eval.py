@@ -66,7 +66,7 @@ def parse_args_eval() -> argparse.Namespace:
     parser.add_argument(
         "--task",
         type=str,
-        default="task_2-1",
+        default="_test",
         help="Task folder name under scripts_mast/configs/tasks/<task>/",
     )
     args, _ = parser.parse_known_args()
@@ -232,7 +232,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Load best weights from training run
     # ------------------------------------------------------------------
-    train_run_dir = cfg_mmt.model_init["model_dir"]
+    train_run_dir = cfg_mmt.model_source["run_dir"]
     epoch_best, best_val, _metadata = load_best_weights(
         run_dir=train_run_dir, model=model, map_location=device
     )

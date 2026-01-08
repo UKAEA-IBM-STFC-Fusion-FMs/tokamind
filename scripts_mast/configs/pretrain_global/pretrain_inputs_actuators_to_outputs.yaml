@@ -7,8 +7,8 @@
 # We set input_length=output_length=0.050s and delta=-0.050s, so targets align to the same history window.
 # (Edit these three numbers if you want 25ms instead of 50ms, etc.)
 
-subset_of_shots: null
-local: false
+#subset_of_shots: null
+#local: false
 task_name: pretrain_inputs_actuators_to_outputs
 
 sources_and_signals:

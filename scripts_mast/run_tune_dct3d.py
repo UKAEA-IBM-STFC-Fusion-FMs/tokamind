@@ -62,7 +62,7 @@ def parse_args_tune_dct3d() -> argparse.Namespace:
     parser.add_argument(
         "--task",
         type=str,
-        default="task_2-1",
+        default="_test",
         help="Task folder name under scripts_mast/configs/tasks/<task>/",
     )
     args, _ = parser.parse_known_args()

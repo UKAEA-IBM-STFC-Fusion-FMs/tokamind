@@ -1,12 +1,13 @@
-# This file defines all settings that are shared across tasks during pretraining:
-#   • optimizer / scheduler parameters
-#   • data loader and batch settings
-#   • dropout and collate defaults
-#   • preprocess settings that may differ from pretrain/eval (e.g. valid_windows)
+# Default configuration for PRETRAIN phase. (shared across tasks)
 #
-# Do NOT add task-specific values here (e.g., per-signal overrides,
-# custom learning rates, or warm-start paths). Those should live in:
-#   scripts_mast/configs/tasks/<task>/pretrain_overrides.yaml
+# Task-specific changes belong in:
+#   scripts_mast/configs/tasks/<task>/finetune_overrides.yaml
+#   (e.g., run_id, model_source.run_dir for warm-start, per-signal collate drops, etc.)
+#
+# Notes on resume vs warm-start:
+# - train.resume=true resumes the SAME run_dir (optimizer/scheduler/scaler/RNG/epochs).
+# - model_source.run_dir is a warm-start from a DIFFERENT run (weights only, overlap loading).
+
 
 collate:
   p_drop_inputs: 0.08
@@ -40,47 +41,39 @@ loader:
   num_workers: 0
   shuffle: true
   drop_last: false
-  batches_per_epoch: null    # REQUIRED when train with cache: enable: false, document in config guide
+  batches_per_epoch: null  # Required only when data.cache.enable=false (streaming)
 
-# How to initialise the model's weights for this run.
-#
-# - If model_dir is null    → train from scratch.
-# - If model_dir is a path  → warm-start from that previous run using overlap loading.
-#
-#   *Overlap loading* means we only copy parameters whose keys AND shapes match
-#   between the checkpoint and the current model; everything else keeps its
-#   current initialisation. This allows you to:
-#   - add/remove outputs,
-#   - add/remove modalities,
-#   - change some submodule shapes
-#   between pretrain and finetune.
-#
-# Use model_init (not resume) when you want a NEW run_dir but still reuse weights with:
-#   - different masking rates / different pretrain_task.yaml variant,
-#   - staged pretraining  without inheriting optimizer state,
-#   - switching  batch size / LR schedule while keeping weights.
-#
-# load_parts controls which large blocks we reuse; typically keep these True.
-# (Even when True, only the compatible intersection is loaded via key+shape match.)
-#
-#   token_encoder:    per-signal projection layers
-#   backbone:         transformer trunk
-#   modality_heads:   modality-level heads
-#   output_adapters:  per-output adapters
+model_source:
+  # Optional warm-start source run directory.
+  #
+  # - run_dir: null  -> train from scratch
+  # - run_dir: <path> -> warm-start weights from another run (partial/overlap load)
+  #
+  # Overlap loading reuses parameters only when (key, shape) match; missing or
+  # incompatible parameters are initialized. This is different from resume
+  # (resume continues the *same* run_dir with full optimizer/scheduler state).
+  #
+  # Overlap loading allows to:
+  #   - add/remove outputs,
+  #   - add/remove modalities,
+  #   - change some submodule shapes between pretrain and finetune.
+  #
+  # See docs/config_guide.md#warmstart for details.
+  run_dir: null
 
-model_init:
-  model_dir: null  # e.g. "runs/run_id"
+  # Which model parts to warm-start. Defaults to True for all parts if omitted.
   load_parts:
     token_encoder: true
     backbone: true
     modality_heads: true
     output_adapters: true
 
+
 train:
   # This is run-level behaviour, not per-stage.
   # If true and checkpoints/latest exists in *this* run_dir, we strictly
   # resume that run: model weights + optimizer + scheduler + scaler + RNG +
-  # epoch counters. This is different from model_init.model_dir, which is a
+  # epoch counters. This is different from model_source.run_dir, which is a
   # warm-start from some *other* run.
   resume: false
 
@@ -141,7 +134,7 @@ train:
           modality_heads: 0.05
           output_adapters: 0.05
 
-      # model_dir is null, freeze must be all false
+      # run_dir is null, freeze must be all false
       freeze:
         token_encoder: false
         backbone: false

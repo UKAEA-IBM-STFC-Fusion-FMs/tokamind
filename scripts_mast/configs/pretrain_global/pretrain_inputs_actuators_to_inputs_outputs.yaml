@@ -1,5 +1,5 @@
 # Pretraining task: Denoising with broad targets without inflating the token vocabulary.
-# RECOMMENDED
+# CHOSEN for final pretraining
 # Inputs are ALL benchmark inputs + ALL actuators; targets are ALL inputs + ALL outputs.
 # Advantages: trains all output heads (including equilibrium-only outputs) and also reconstructs input-only sensors,
 # while keeping the input/token set small (no equilibrium-only outputs as tokens). Recommended starting point.
@@ -8,52 +8,52 @@
 # We set input_length=output_length=0.050s and delta=-0.050s, so targets align to the same history window.
 # (Edit these three numbers if you want 25ms instead of 50ms, etc.)
 
-subset_of_shots: null
-local: false
+#subset_of_shots: null
+#local: false
 task_name: pretrain_inputs_actuators_to_inputs_outputs
 
 sources_and_signals:
   input_name: &input_keys
     - - equilibrium
       - lcfs_r
-#    - - interferometer
-#      - n_e_line
-#    - - magnetics
-#      - b_field_pol_probe_ccbv_field
-#    - - magnetics
-#      - b_field_pol_probe_obr_field
-#    - - magnetics
-#      - b_field_pol_probe_obv_field
-#    - - magnetics
-#      - b_field_pol_probe_omv_voltage
-#    - - magnetics
-#      - b_field_tor_probe_cc_field
-#    - - magnetics
-#      - b_field_tor_probe_saddle_voltage
-#    - - magnetics
-#      - flux_loop_flux
-#    - - pf_active
-#      - coil_current
-#    - - pf_active
-#      - solenoid_current
-#    - - soft_x_rays
-#      - horizontal_cam_lower
-#    - - soft_x_rays
-#      - horizontal_cam_upper
-#    - - spectrometer_visible
-#      - filter_spectrometer_dalpha_voltage
-#    - - summary
-#      - ip
-#    - - thomson_scattering
-#      - n_e
+    - - interferometer
+      - n_e_line
+    - - magnetics
+      - b_field_pol_probe_ccbv_field
+    - - magnetics
+      - b_field_pol_probe_obr_field
+    - - magnetics
+      - b_field_pol_probe_obv_field
+    - - magnetics
+      - b_field_pol_probe_omv_voltage
+    - - magnetics
+      - b_field_tor_probe_cc_field
+    - - magnetics
+      - b_field_tor_probe_saddle_voltage
+    - - magnetics
+      - flux_loop_flux
+    - - pf_active
+      - coil_current
+    - - pf_active
+      - solenoid_current
+    - - soft_x_rays
+      - horizontal_cam_lower
+    - - soft_x_rays
+      - horizontal_cam_upper
+    - - spectrometer_visible
+      - filter_spectrometer_dalpha_voltage
+    - - summary
+      - ip
+    - - thomson_scattering
+      - n_e
     - - thomson_scattering
       - t_e
 
   actuator_name: &actuator_keys
     - - equilibrium
       - lcfs_r
-#    - - gas_injection
-#      - total_injected
+    - - gas_injection
+      - total_injected
     - - pf_active
       - coil_voltage
     - - pulse_schedule

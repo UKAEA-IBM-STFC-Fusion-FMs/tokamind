@@ -1,31 +1,18 @@
-# scripts_mast/configs/tasks/task_2-1/eval_overrides.yaml
-#
 # Task-specific overrides for evaluation.
 # Typical uses:
-#   - point to the training run to evaluate (model_init.model_dir)
+#   - point to the training run to evaluate (model_source.run_dir)
 #   - optionally set a human-readable eval_id (otherwise timestamp is used)
 #   - tweak metrics/traces settings for this task
 #   - tighten/relax preprocess.valid_windows thresholds for eval
 
-model_init:
-  # Path to the TRAINING run directory whose weights will be evaluated.
-  # Example: runs/<task>/<run_name> or runs/<run_id>
-  model_dir: "runs/task_2-1_test"
+model_source:
+  # source model directory
+  run_dir: runs/task_2-1_finetune
 
-# Optional: name the eval subfolder. If omitted, loader uses eval__<timestamp>.
-eval_id: "eval_baseline_compare"
+# If omitted, loader uses eval__<timestamp>.
+eval_id: eval
 
 eval:
-  drop:
-    inputs: # ["pf_active-coil_current"]
-    actuators:
-    outputs: # ["pf_active-solenoid_current", "summary-ip"]
-
   metrics:
     enable: true
 
-#  traces:
-#    enable: false
-#    n_max: 2
-#    signals: # ["pf_active-coil_current"]           # null → save all outputs
-#    times_indexes: # [0, 1]                         # null → save full horizon

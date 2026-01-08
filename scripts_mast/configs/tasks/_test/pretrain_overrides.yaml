@@ -1,0 +1,13 @@
+# Task-specific overrides for the PRETRAIN phase.
+# Use this file only when a given pretrain task needs settings beyond the
+# shared defaults in config/common/pretrain.yaml (e.g. a fixed run_id, different
+# LR/epochs, warm-start settings, etc.).
+
+
+model_source:
+  # Source training run to warm-start from. If omitted/null, train from scratch.
+  run_dir: null
+  # load_parts: { token_encoder: true, backbone: true, modality_heads: true, output_adapters: true }
+
+# Optional: name the training run folder under runs/. If omitted, loader generates one.
+run_id: task_2-1_finetune

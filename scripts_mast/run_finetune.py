@@ -227,10 +227,10 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Optional warm-start from previous run
     # ------------------------------------------------------------------
-    model_init_cfg = cfg_mmt.raw.get("model_init", None)
-    if model_init_cfg is not None:
-        run_init = model_init_cfg.get("model_dir", None)
-        load_parts = model_init_cfg.get("load_parts", None)
+    model_source_cfg = cfg_mmt.raw.get("model_source") or None
+    if model_source_cfg is not None:
+        run_init = model_source_cfg.get("run_dir", None)
+        load_parts = model_source_cfg.get("load_parts", None)
 
         if run_init is not None:
             from mmt.checkpoints import load_parts_from_run_dir

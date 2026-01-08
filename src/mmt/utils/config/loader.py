@@ -41,8 +41,8 @@ Paths behavior
     - saves config_merged.yaml into run_dir
 
 • eval:
-    - requires model_init.model_dir (training run directory)
-    - run_dir = <model_dir>/<eval_id>
+    - requires model_source.run_dir (training run directory)
+    - run_dir = <run_dir>/<eval_id>
     - saves config_merged.yaml into run_dir
 
 • tune_dct3d:
@@ -167,11 +167,11 @@ def _compute_paths(
     # EVALUATION PHASE
     # ----------------------------------------------------------
     if phase == "eval":
-        init_cfg = merged.get("model_init", {})
-        model_dir = init_cfg.get("model_dir")
+        init_cfg = merged.get("model_source", {})
+        model_dir = init_cfg.get("run_dir")
         if model_dir is None:
             raise ValueError(
-                "Eval phase requires model_init.model_dir pointing to a training run."
+                "Eval phase requires model_source.run_dir pointing to a training run."
             )
 
         model_dir = _resolve_from_repo_root(str(model_dir))
@@ -329,11 +329,11 @@ def load_experiment_config(
         merged, configs_root=configs_root_path, task_dir=task_dir
     )
 
-    # Resolve model_init.model_dir to absolute path (if present)
-    if isinstance(merged.get("model_init"), dict):
-        model_dir = merged["model_init"].get("model_dir", None)
+    # Resolve model_source.run_dir to absolute path (if present)
+    if isinstance(merged.get("model_source"), dict):
+        model_dir = merged["model_source"].get("run_dir", None)
         if model_dir is not None:
-            merged["model_init"]["model_dir"] = str(
+            merged["model_source"]["run_dir"] = str(
                 _resolve_from_repo_root(str(model_dir))
             )
 

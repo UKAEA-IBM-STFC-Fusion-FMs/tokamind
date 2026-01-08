@@ -1,7 +1,25 @@
-# Global defaults shared by *all* phases (pretrain/finetune/eval/tune_dct3d).
+# Global defaults shared by all phases (pretrain / finetune / eval / tune_dct3d).
+#
+# This file should contain only stable, task-agnostic defaults:
+#   - seed and global data defaults
+#   - preprocessing steps that must stay consistent across phases
+#     (e.g., chunking, trimming)
+#   - model architecture defaults (backbone / modality heads / adapter defaults)
+#
 # Intentionally does NOT include:
 #   - task / task_config (belongs in tasks/<task>/task.yaml)
-#   - preprocess.valid_windows (can differ per phase; keep it in phase configs)
+#   - preprocess.valid_windows (may differ per phase; defined in common/<phase>.yaml)
+#   - run-specific settings (run_id / eval_id / model_source.run_dir)
+#
+# Config merge order (later wins):
+#   1) common/core.yaml
+#   2) common/embeddings.yaml
+#   3) common/<phase>.yaml
+#   4) tasks/<task>/task.yaml
+#   5) tasks/<task>/<phase>_overrides.yaml (optional)
+#   6) tasks/<task>/embeddings_overrides.yaml (optional; used by default for
+#      pretrain/finetune/eval, not used during tune_dct3d)
+
 
 seed: 54
 
@@ -39,5 +57,5 @@ model:
 
   output_adapters:
     hidden_default: 0
-    hidden_overrides: {}   # task-specific overrides go in tasks/<task>/task.yaml
-#      equilibrium-psi: 32
+    hidden_overrides:    # other task-specific overrides go in tasks/<task>/task.yaml
+      equilibrium-psi: 32

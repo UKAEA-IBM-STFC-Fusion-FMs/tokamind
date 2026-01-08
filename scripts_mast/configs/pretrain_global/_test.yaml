@@ -1,0 +1,43 @@
+
+task_name: _test
+
+sources_and_signals:
+  input_name: &input_keys
+    - - pf_active
+      - coil_current
+    - - pf_active
+      - solenoid_current
+#    - - summary
+#      - ip
+
+  actuator_name: &actuator_keys
+    - - pf_active
+      - coil_voltage
+#    - - summary
+#      - power_nbi
+
+  output_name: &output_keys
+    - - pf_active
+      - coil_current
+    - - pf_active
+      - solenoid_current
+    - - summary
+      - ip
+    - - equilibrium
+      - psi
+
+standardscaling_setting:
+  mean_path: "/metadata/flattened_dict_mean_shot.pkl"
+  std_path: "/metadata/flattened_dict_std_shot.pkl"
+
+task_window_segmenter:
+  input_keys: *input_keys
+  actuator_keys: *actuator_keys
+  output_keys: *output_keys
+  input_length: 0.005
+  output_length: 0.025
+  delta: 0 # this is forecasting
+  verbose: false
+
+paths:
+  data_split_csv_path: ../metadata/data_splits.csv

@@ -1,0 +1,23 @@
+# test task definition.
+# This "task" is implemented via a baseline-style task_config living in
+# scripts_mast/configs/pretrain_global/.
+#
+# Keep this file minimal: just name the task and point to the task_config.
+# Any additional overrides (if ever needed) can be added here or via
+# phase-specific overrides (e.g., finetune_overrides.yaml / eval_overrides.yaml).
+
+
+task: _test
+
+# Baseline task config (resolved by scripts_mast/mast_utils/task_config.py)
+task_config: scripts_mast/configs/pretrain_global/_test.yaml
+
+
+#model:
+#  output_adapters:
+#    # Default hidden size for output adapters (0 = linear head)
+#    hidden_default: 0
+#
+#    # Task-specific per-signal overrides
+#    hidden_overrides:
+#      equilibrium-psi: 64

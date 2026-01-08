@@ -8,7 +8,7 @@ We deliberately keep validation focused and simple:
   • common required fields (phase/task/task_config),
   • training stages validation (lr/wd inheritance, freeze rules),
   • loader rules for streaming vs cached datasets,
-  • eval-specific requirements (model_init.model_dir, keep_output_native),
+  • eval-specific requirements (model_source.run_dir, keep_output_native),
   • tune_dct3d minimal requirements.
 
 No backwards compatibility: the config is expected to be in the new format.
@@ -202,24 +202,24 @@ def _validate_loader(cfg: Dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
-# model_init.load_parts normalization
+# model_source.load_parts normalization
 # ---------------------------------------------------------------------------
 
 
 def _normalize_load_parts(cfg: Dict[str, Any]) -> None:
-    mi = cfg.get("model_init", None)
-    if mi is None:
+    ms = cfg.get("model_source", None)
+    if ms is None:
         return
 
-    if not isinstance(mi, dict):
-        raise TypeError("model_init must be a dict or null.")
+    if not isinstance(ms, dict):
+        raise TypeError("model_source must be a dict or null.")
 
-    lp = mi.get("load_parts", None)
+    lp = ms.get("load_parts", None)
     if lp is None:
         lp = {}
-        mi["load_parts"] = lp
+        ms["load_parts"] = lp
     elif not isinstance(lp, dict):
-        raise TypeError("model_init.load_parts must be a dict.")
+        raise TypeError("model_source.load_parts must be a dict.")
 
     for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
         if lp.get(block) is None:
@@ -270,11 +270,13 @@ def validate_train_config(cfg: Dict[str, Any]) -> None:
         _get_nested(cfg, path)
 
     # Mutual exclusion: resume vs warm-start from other run
-    if cfg["train"]["resume"] is True and cfg.get("model_init", None) is not None:
+    ms = cfg.get("model_source")
+    has_warmstart = isinstance(ms, dict) and bool(ms.get("run_dir"))
+    if cfg["train"]["resume"] is True and has_warmstart:
         raise ValueError(
-            "Inconsistent config: train.resume=true is incompatible with model_init. "
-            "Use resume to continue the same run_dir, or set resume=false and use "
-            "model_init.model_dir to warm-start from a different run."
+            "Inconsistent config: train.resume=true is incompatible with model_source. "
+            "Use resume to continue the same run, or set resume=false and use "
+            "model_source.run_dir to warm-start from a different run."
         )
 
     stages = cfg["train"]["stages"]
@@ -314,11 +316,11 @@ def validate_eval_config(cfg: Dict[str, Any]) -> None:
             "(native outputs are required for metrics and trace saving)."
         )
 
-    # Eval requires a model_dir to evaluate.
-    mi = cfg.get("model_init", None)
-    if not isinstance(mi, dict) or not mi.get("model_dir"):
+    # Eval requires a run_dir to evaluate.
+    ms = cfg.get("model_source", None)
+    if not isinstance(ms, dict) or not ms.get("run_dir"):
         raise ValueError(
-            "For phase='eval', model_init.model_dir must be set (path to a training run)."
+            "For phase='eval', model_source.run_dir must be set (path to a training run)."
         )
 
 
@@ -329,13 +331,6 @@ def validate_tune_dct3d_config(cfg: Dict[str, Any]) -> None:
     td = cfg.get("tune_dct3d", None)
     if not isinstance(td, dict):
         raise KeyError("For phase='tune_dct3d', missing required block: tune_dct3d")
-
-    # Required: sampling.n_max_per_signal
-    sampling = td.get("sampling", None)
-    if not isinstance(sampling, dict) or not isinstance(
-        sampling.get("n_max_per_signal", None), int
-    ):
-        raise ValueError("tune_dct3d.sampling.n_max_per_signal must be an int.")
 
     # Required: search_space.keep_h/keep_w/keep_t
     ss = td.get("search_space", None)
