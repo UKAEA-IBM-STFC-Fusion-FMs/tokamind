@@ -5,7 +5,7 @@ MMT is a **multi-modal, token-based Transformer** designed for scientific / indu
 - **`src/mmt/`**: the *dataset-agnostic* core library (model + data pipeline primitives)
 - **`scripts_mast/`**: the FAIR/MAST integration layer (task configs, dataset wiring, training/eval scripts)
 
-If you’re new to the repo, start with the **toy example** in `examples/` (runs on synthetic data and does not require the baseline dataset stack), then move to `scripts_mast/` for real tasks.
+If you’re new to the repo, start with the **toy example** in `examples/` (runs on synthetic data and does not require the benchmark dataset stack), then move to `scripts_mast/` for real tasks.
 
 ---
 
@@ -40,8 +40,8 @@ Architecture and pipeline diagrams live in:
 
 There are two common workflows:
 
-1) **Core install + toy example** (recommended first; no baseline required)  
-2) **Full MAST integration** (requires the baseline repository and datasets)
+1) **Core install + toy example** (recommended first; no benchmark required)  
+2) **Full MAST integration** (requires the benchmark repository and datasets)
 
 ### 1) Install MMT (core library)
 
@@ -63,23 +63,23 @@ Smoke test with synthetic data:
 python examples/toy_train.py --config examples/configs/toy.yaml
 ```
 
-### 2) Full MAST integration (baseline repository)
+### 2) Full MAST integration (benchmark repository)
 
-This repository is designed to run on top of a **Baseline Environment** (FAIR/MAST preprocessing + datasets).
+This repository is designed to run on top of a **Benchmark Environment** (FAIR/MAST preprocessing + datasets).
 
 Follow these steps:
 
-#### a) Install the baseline repository
+#### a) Install the benchmark repository
 
 ```bash
-git clone https://github.com/<org>/<baseline-repo>.git
-cd <baseline-repo>
+git clone https://github.com/<org>/<benchmark-repo>.git
+cd <benchmark-repo>
 
 # complete block (dataset + deps)
 ```
 
-Make sure the baseline repo is importable in the same Python environment used by MMT
-(e.g., via `pip install -e .` in the baseline repo, or by setting `PYTHONPATH`).
+Make sure the benchmark repo is importable in the same Python environment used by MMT
+(e.g., via `pip install -e .` in the benchmark repo, or by setting `PYTHONPATH`).
 
 #### b) Install MMT
 
@@ -95,7 +95,7 @@ pip install -e ".[dev]"
 
 ## Usage
 
-### 1) Baseline-free toy example (synthetic data)
+### 1) Benchmark-free toy example (synthetic data)
 
 Runs a tiny training loop on synthetic data to demonstrate the core APIs:
 

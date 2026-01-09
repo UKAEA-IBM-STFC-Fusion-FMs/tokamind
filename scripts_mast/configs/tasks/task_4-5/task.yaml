@@ -1,10 +1,8 @@
 # This file defines:
-#   - the task name (must match the enclosing folder name),
-#   - the task_config pointer (baseline task definition),
+#   - the task name (must match the enclosing folder name)
+#     (the task config is inferred *only* from `task`)
 #   - optional task-wide overrides that should apply to *all* phases
 #     (pretrain / finetune / eval / tune_dct3d), e.g. model adapter sizes.
 
 task: task_4-5
 
-# Baseline task config (resolved by scripts_mast/mast_utils/task_config.py)
-task_config: MAST_benchmark/tasks_configs/group_4_mhd_activity/config_task_4-5.yaml

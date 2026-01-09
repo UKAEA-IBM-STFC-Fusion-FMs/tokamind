@@ -4,7 +4,7 @@ Shared helpers for the `scripts_mast/run_*.py` entrypoints.
 Purpose
 -------
 The open-source `mmt/` package is intentionally dataset-agnostic.
-All FAIR/MAST integration (baseline task_config loading, dataset creation,
+All FAIR/MAST integration (benchmark task_config loading, dataset creation,
 metadata handling) lives under `scripts_mast/`.
 
 As a consequence, the phase entrypoints (`run_pretrain.py`, `run_finetune.py`,
@@ -12,7 +12,7 @@ As a consequence, the phase entrypoints (`run_pretrain.py`, `run_finetune.py`,
   - device selection + multiprocessing setup
   - convention-based config loading (task + phase) and validation
   - seed + logging initialisation
-  - baseline task -> datasets + metadata
+  - benchmark task -> datasets + metadata
   - signal_specs (+ codecs when needed)
   - standard shot -> windows transform chain
   - optional caching of window datasets
@@ -37,7 +37,7 @@ Helpers assume the config layout:
 
 Notes
 -----
-- This module may import baseline FAIRMAST utilities from `scripts/...`.
+- This module may import benchmark FAIRMAST utilities from `scripts/...`.
   Do NOT import it from the core `mmt/` package.
 """
 
@@ -62,9 +62,6 @@ from mmt.data import (
     WindowCachedDataset,
     MMTCollate,
 )
-
-
-DEFAULT_CONFIGS_ROOT = "scripts_mast/configs"
 
 
 # -----------------------------------------------------------------------------

@@ -89,7 +89,6 @@ ALLOWED_PHASES = {"pretrain", "finetune", "eval", "tune_dct3d"}
 REQUIRED_COMMON_FIELDS: List[Tuple[str, type]] = [
     ("phase", str),
     ("task", str),
-    ("task_config", str),  # pointer string; resolved by integration layer
 ]
 
 

@@ -2,7 +2,7 @@
 #
 # Minimal example config for training MMT on synthetic (in-memory) data.
 #
-# This example is intentionally baseline-free:
+# This example is intentionally benchmark-free:
 # it does NOT depend on scripts_mast/, FAIRMAST, or any dataset files.
 # It is meant for:
 #   - quick sanity checks

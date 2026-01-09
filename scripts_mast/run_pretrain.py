@@ -4,7 +4,7 @@ Pretraining entrypoint for MMT using the convention-based config system.
 This script:
 - parses `--task` (a pretrain-* task folder),
 - loads and validates the merged config for phase="pretrain",
-- resolves the baseline task_config and builds datasets/metadata,
+- resolves the benchmark task_config and builds datasets/metadata,
 - builds signal specs/codecs and the standard shot→windows transform pipeline,
 - optionally warm-starts from `model_init.model_dir`,
 - runs the training loop and writes outputs under cfg_mmt.paths["run_dir"].
@@ -18,13 +18,12 @@ from __future__ import annotations
 import argparse
 import logging
 
-from MAST_benchmark.data import (
+from scripts_mast.mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
     initialize_model_dataset,
+    get_task_metadata,
+    get_train_test_val_shots,
 )
-
-from MAST_benchmark.data_split import get_train_test_val_shots
-from MAST_benchmark.tasks import get_task_metadata
 
 from scripts_mast.mast_utils import (
     build_task_config,
@@ -98,13 +97,14 @@ def main() -> None:
     enable_cache = cfg_data["cache"].get("enable", False)
     num_workers_cache = cfg_data["cache"].get("num_workers", 0)
     keep_output_native = cfg_data.get("keep_output_native", False)
+    local_flag = cfg_data.get("local", True)
 
     cfg_backbone = cfg_model["backbone"]
     cfg_modality_heads = cfg_model["modality_heads"]
     cfg_output_adapters = cfg_model["output_adapters"]
     max_positions = cfg_mmt.preprocess["trim_chunks"]["max_chunks"]
 
-    # Baseline task config (with overrides such as subset_of_shots/local)
+    # benchmark task config (with overrides such as subset_of_shots/local)
     cfg_task = build_task_config(cfg_mmt)
 
     # ------------------------------------------------------------------
@@ -144,6 +144,7 @@ def main() -> None:
     train_mast_dataset = initialize_MAST_dataset(
         cfg_task,
         train_shots_,
+        local_flag=local_flag,
         use_std_scaling=True,
         return_incomplete_shots=True,
     )
@@ -151,6 +152,7 @@ def main() -> None:
     val_mast_dataset = initialize_MAST_dataset(
         cfg_task,
         val_shots_,
+        local_flag=local_flag,
         use_std_scaling=True,
         return_incomplete_shots=True,
     )
@@ -159,7 +161,7 @@ def main() -> None:
     # Signal specs
     # ------------------------------------------------------------------
 
-    # Build signals_by_role from baseline config + metadata and signal specs/codecs
+    # Build signals_by_role from benchmark config + metadata and signal specs/codecs
     signals_by_role = build_signals_by_role_from_task_config(
         cfg_task,
         dict_task_metadata,

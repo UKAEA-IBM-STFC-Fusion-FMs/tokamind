@@ -1,7 +1,7 @@
-# Pretraining task: Maximal denoising autoencoding over the full signal universe.
-# Inputs are (ALL benchmark inputs + ALL benchmark outputs) + ALL actuators; targets are ALL inputs + ALL outputs.
-# Advantages: trains TokenEncoder ingestion for every signal (including equilibrium-only outputs) and trains all output heads;
-# most 'foundation-model' style, but heaviest.
+# Pretraining task (Option 1): Denoising / masked reconstruction with a downstream-like supervision set.
+# Inputs are ALL benchmark inputs + ALL actuators; targets are ALL benchmark outputs.
+# Advantages: fastest and closest to finetuning behaviour; learns a robust backbone conditioned on actuators
+# while training only the output heads used in downstream tasks.
 #
 # Windowing: instantaneous reconstruction (output window overlaps input window).
 # We set input_length=output_length=0.050s and delta=-0.050s, so targets align to the same history window.
@@ -9,46 +9,12 @@
 
 #subset_of_shots: null
 #local: false
-task_name: pretrain_all_to_inputs_outputs
+task_name: pretrain_inputs_actuators_to_outputs
 
 sources_and_signals:
   input_name: &input_keys
     - - equilibrium
-      - beta_normal
-    - - equilibrium
-      - beta_pol
-    - - equilibrium
-      - beta_tor
-    - - equilibrium
-      - bphi_rmag
-    - - equilibrium
-      - bvac_rmag
-    - - equilibrium
-      - elongation
-    - - equilibrium
-      - elongation_axis
-    - - equilibrium
       - lcfs_r
-    - - equilibrium
-      - lcfs_z
-    - - equilibrium
-      - magnetic_axis_r
-    - - equilibrium
-      - magnetic_axis_z
-    - - equilibrium
-      - minor_radius
-    - - equilibrium
-      - psi
-    - - equilibrium
-      - q95
-    - - equilibrium
-      - triangularity_lower
-    - - equilibrium
-      - triangularity_upper
-    - - equilibrium
-      - x_point_r
-    - - equilibrium
-      - x_point_z
     - - interferometer
       - n_e_line
     - - magnetics
@@ -133,22 +99,10 @@ sources_and_signals:
       - x_point_r
     - - equilibrium
       - x_point_z
-    - - interferometer
-      - n_e_line
-    - - magnetics
-      - b_field_pol_probe_ccbv_field
-    - - magnetics
-      - b_field_pol_probe_obr_field
-    - - magnetics
-      - b_field_pol_probe_obv_field
     - - magnetics
       - b_field_pol_probe_omv_voltage
     - - magnetics
       - b_field_tor_probe_cc_field
-    - - magnetics
-      - b_field_tor_probe_saddle_voltage
-    - - magnetics
-      - flux_loop_flux
     - - pf_active
       - coil_current
     - - pf_active
@@ -166,10 +120,6 @@ sources_and_signals:
     - - thomson_scattering
       - t_e
 
-standardscaling_setting:
-  mean_path: /metadata/flattened_dict_mean_shot.pkl
-  std_path: /metadata/flattened_dict_std_shot.pkl
-
 task_window_segmenter:
   input_keys: *input_keys
   actuator_keys: *actuator_keys
@@ -179,5 +129,3 @@ task_window_segmenter:
   delta: -0.050
   verbose: false
 
-paths:
-  data_split_csv_path: ../metadata/2025-05-12/data_splits.csv

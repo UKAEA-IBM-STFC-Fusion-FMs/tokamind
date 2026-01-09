@@ -99,7 +99,7 @@ class ChunkWindowsTransform:
     def _slice_with_pad(arr: np.ndarray, start: int, length: int) -> np.ndarray:
         """
         Slice arr[..., start:start+length] and right-pad with NaN if out-of-range.
-        Assumes float-like arrays (baseline wrapper already pads with NaNs).
+        Assumes float-like arrays.
         """
         if length <= 0:
             raise ValueError("length must be > 0")

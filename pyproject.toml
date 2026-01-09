@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 # We deliberately do NOT list torch/numpy/etc here, because we assume
-# they come from the baseline repo environment.
+# they come from the benchmark repo environment.
 # Otherwise, you can populate the dependencies field
 dependencies = [
 #    "torch>=2.2",

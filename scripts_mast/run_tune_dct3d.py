@@ -4,7 +4,7 @@ DCT3D tuning entrypoint for MMT (per-task embedding hyperparameters).
 This script:
 - parses `--task`,
 - loads and validates the merged config for phase="tune_dct3d",
-- resolves the baseline task_config and builds datasets/metadata,
+- resolves the benchmark task_config and builds datasets/metadata,
 - streams windows and evaluates candidate (keep_h, keep_w, keep_t) settings,
 - selects the best per-signal configuration,
 - writes tuned results to `tasks/<task>/embeddings_overrides.yaml`.
@@ -22,13 +22,12 @@ from pathlib import Path
 import numpy as np
 import yaml
 
-from MAST_benchmark.data import (
+from scripts_mast.mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
     initialize_model_dataset,
+    get_task_metadata,
+    get_train_test_val_shots,
 )
-
-from MAST_benchmark.data_split import get_train_test_val_shots
-from MAST_benchmark.tasks import get_task_metadata
 
 from scripts_mast.mast_utils import (
     build_task_config,
@@ -91,10 +90,11 @@ def main() -> None:
     cfg_chunks = cfg_prep["chunk"]
     cfg_trim = cfg_prep["trim_chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
-
     cfg_tune = cfg_mmt.raw["tune_dct3d"]
 
-    # Baseline task config (with overrides such as subset_of_shots/local)
+    local_flag = cfg_data.get("local", True)
+
+    # benchmark task config (with overrides such as subset_of_shots/local)
     cfg_task = build_task_config(cfg_mmt)
 
     # ------------------------------------------------------------------
@@ -134,6 +134,7 @@ def main() -> None:
     train_mast_dataset = initialize_MAST_dataset(
         cfg_task,
         train_shots_,
+        local_flag=local_flag,
         use_std_scaling=True,
         return_incomplete_shots=True,
     )
@@ -142,7 +143,7 @@ def main() -> None:
     # Signal specs
     # ------------------------------------------------------------------
 
-    # Build signals_by_role from baseline config + metadata and signal specs
+    # Build signals_by_role from benchmark config + metadata and signal specs
     signals_by_role = build_signals_by_role_from_task_config(
         cfg_task, dict_task_metadata
     )

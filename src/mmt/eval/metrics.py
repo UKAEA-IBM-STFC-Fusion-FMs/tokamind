@@ -9,7 +9,7 @@ Responsibilities
 ----------------
 - Run the model in evaluation mode (no grad, AMP-enabled).
 - Convert predictions from standardised coefficient space to native units.
-- De-standardise ground truth using baseline statistics.
+- De-standardise ground truth using statistics.
 - Compute native-space MSE metrics per window and per output.
 - Optionally save temporally ordered traces for selected shots.
 
@@ -108,7 +108,7 @@ def evaluate_metrics(
 
             for b in range(B):
                 shot_id = int(shot_ids[b])
-                window_id = int(window_indices[b])  # baseline window index
+                window_id = int(window_indices[b])  # window index
 
                 for out in stats.keys():
                     ok = bool(y_mask[out][b])

@@ -6,9 +6,9 @@ window-level datasets produced by the MMT pipeline.
 
 Scope
 -----
-- This module does NOT build datasets or perform baseline integration.
+- This module does NOT build datasets or perform benchmark integration.
   Dataset construction (shot → windows, metadata, etc.) is handled upstream
-  by the entrypoint scripts (run_*.py) and baseline utilities.
+  by the entrypoint scripts (run_*.py) and benchmark utilities.
 - This module focuses on DataLoader concerns:
   - cached (map-style) vs streamed (IterableDataset) handling,
   - deterministic shuffling/seeding,
@@ -41,8 +41,6 @@ from torch.utils.data import DataLoader, IterableDataset, Dataset
 
 from mmt.utils.seed import make_worker_seed_fn
 
-# We still rely on the baseline TaskModelTransformWrapper to define
-# how a "shot" is turned into an iterable of windows.
 
 __all__ = ["initialize_mmt_dataloaders"]
 
@@ -81,8 +79,7 @@ def initialize_mmt_dataloaders(
     """
     Build PyTorch DataLoaders for the MMT pipeline (window-level).
 
-    This function is the MMT-specific analogue of the baseline
-    `initialize_dataloaders`, extended to correctly handle both:
+    This function handle both:
 
       - map-style datasets (e.g. WindowCachedDataset), and
       - IterableDataset (e.g. WindowStreamedDataset).

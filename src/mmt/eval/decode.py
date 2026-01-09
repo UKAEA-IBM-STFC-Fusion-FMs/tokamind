@@ -5,7 +5,7 @@ This module converts model outputs from standardised coefficient space
 (backbone / adapter outputs) into native physical units by:
 
 1) decoding coefficients using signal-specific codecs,
-2) inverting the baseline standardisation (mean / std).
+2) inverting the standardisation (mean / std).
 
 All functions operate on NumPy arrays (CPU) and are intended for
 evaluation and trace saving, not training.

@@ -54,7 +54,7 @@ def build_signals_by_role_from_task_config(
               - output_name:   [[source, signal], ...]
 
     dict_metadata:
-        Baseline metadata dict with role-scoped entries:
+        benchmark metadata dict with role-scoped entries:
             dict_metadata["input"][canonical_name]["values_shape"]
             dict_metadata["actuator"][canonical_name]["values_shape"]
             dict_metadata["output"][canonical_name]["values_shape"]

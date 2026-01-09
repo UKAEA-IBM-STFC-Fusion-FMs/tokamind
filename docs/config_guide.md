@@ -137,15 +137,12 @@ Task-specific tuning tweaks (rare) go in `tasks/<task>/tune_dct3d_overrides.yaml
 ## 5) Task configs
 
 ### `tasks/<task>/task.yaml`
-This file defines the task identity and links to the baseline-style task definition.
+This file defines the task identity and links to the benchmark-style task definition.
 
 Minimal example:
 
 ```yaml
 task: "task_2-1"
-
-# Baseline task definition (see task_config resolution below)
-task_config: "scripts/pipelines/configs/configs_task/task_2_magnetics_dynamics/config_task_2-1.yaml"
 
 # Optional: task-wide model/data overrides (apply to ALL phases)
 model:
@@ -162,6 +159,65 @@ data:
 - Put **task-wide** overrides here (apply to pretrain/finetune/eval/tune).
 - Put **phase-specific** and **run-specific** overrides in `<phase>_overrides.yaml`.
 
+### Important
+The benchmark-style task definition is inferred **only** from `task`.
+Resolution order:
+
+1) **Benchmark task (preferred)**  
+   If the benchmark package knows the task name, we load it via the benchmark API:
+
+- `MAST_benchmark.tasks.get_task_config(task_name)`
+
+2) **Local task (registry)**  
+   If benchmark does not know the task name (raises `KeyError`), we treat it as a **local** task and load it via a local registry map:
+
+- `LOCAL_TASK_CONFIGS_MAP[task_name]` → path under `scripts_mast/configs/`
+
+The local registry lives in:
+
+- `scripts_mast/mast_utils/task_config.py`
+
+## Adding a NEW task
+
+### A) Adding a benchmark task (already in benchmark)
+
+1. Create folder: `scripts_mast/configs/tasks/<task_name>/`
+2. Create `task.yaml` containing:
+
+```yaml
+task: <task_name>
+```
+
+3. Run:
+
+```bash
+python scripts_mast/run_finetune.py --task <task_name>
+```
+
+No additional YAML paths are required; the benchmark benchmark owns the mapping from task name → YAML.
+
+
+### B) Adding a local task (not in benchmark)
+
+1. Add a benchmark-style YAML under:
+
+- `scripts_mast/configs/local_tasks_def/<task_name>.yaml`
+
+2. Register the task in `LOCAL_TASK_CONFIGS_MAP` in:
+
+- `scripts_mast/mast_utils/task_config.py`
+
+Example:
+
+```python
+LOCAL_TASK_CONFIGS_MAP["my_local_task"] = "local_tasks_def/my_local_task.yaml"
+```
+
+3. Create `scripts_mast/configs/tasks/my_local_task/task.yaml`:
+
+```yaml
+task: my_local_task
+```
 ---
 
 ## 6) Run-specific overrides
@@ -188,7 +244,7 @@ If `run_id` is omitted, the loader creates a timestamped one:
 To name the eval output folder, set in `tasks/<task>/eval_overrides.yaml`:
 
 ```yaml
-eval_id: "eval_baseline_compare"
+eval_id: "eval_test"
 ```
 
 If omitted, eval defaults to `eval__<timestamp>`.
@@ -312,7 +368,7 @@ The validator enforces:
 ## 11) Task config resolution (`task_config`)
 
 `tasks/<task>/task.yaml` contains a `task_config:` string.
-`scripts_mast/mast_utils/task_config.py` resolves it and loads the baseline task YAML.
+`scripts_mast/mast_utils/task_config.py` resolves it and loads the benchmark task YAML.
 
 Supported forms:
 
@@ -323,17 +379,17 @@ task_config: "/abs/path/to/config_task.yaml"
 
 2) **Repo-root relative path** (relative to this repository)
 ```yaml
-task_config: "scripts_mast/configs/pretrain_global/pretrain_task_inputs_actuators_to_outputs.yaml"
+task_config: "scripts_mast/configs/local_tasks_def/pretrain_task_inputs_actuators_to_outputs.yaml"
 ```
 
-3) **Baseline package path** (legacy / convenience)
+3) **benchmark package path** (legacy / convenience)
 ```yaml
 task_config: "scripts/pipelines/configs/.../config_task_2-1.yaml"
 ```
 
 The package-path form is resolved using `importlib.resources` by treating the first path component as a Python package name.
 
-If your baseline repository layout changes (e.g., configs move to a different top-level folder), either:
+If your benchmark repository layout changes (e.g., configs move to a different top-level folder), either:
 
 - use an **absolute path**, or
 - update `scripts_mast/mast_utils/task_config.py` so it can resolve your new layout.
@@ -390,7 +446,7 @@ This writes `tasks/<task>/embeddings_overrides.yaml`.
 
 ---
 
-## 14) Toy example (baseline-free)
+## 14) Toy example (benchmark-free)
 
-For a baseline-free smoke run, see the repo’s toy example (synthetic data) under `examples/`.
+For a benchmark-free smoke run, see the repo’s toy example (synthetic data) under `examples/`.
 

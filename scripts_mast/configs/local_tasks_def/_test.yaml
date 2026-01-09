@@ -26,10 +26,6 @@ sources_and_signals:
     - - equilibrium
       - psi
 
-standardscaling_setting:
-  mean_path: "/metadata/flattened_dict_mean_shot.pkl"
-  std_path: "/metadata/flattened_dict_std_shot.pkl"
-
 task_window_segmenter:
   input_keys: *input_keys
   actuator_keys: *actuator_keys
@@ -38,6 +34,3 @@ task_window_segmenter:
   output_length: 0.025
   delta: 0 # this is forecasting
   verbose: false
-
-paths:
-  data_split_csv_path: ../metadata/data_splits.csv

@@ -133,10 +133,6 @@ sources_and_signals:
     - - thomson_scattering
       - t_e
 
-standardscaling_setting:
-  mean_path: /metadata/flattened_dict_mean_shot.pkl
-  std_path: /metadata/flattened_dict_std_shot.pkl
-
 task_window_segmenter:
   input_keys: *input_keys
   actuator_keys: *actuator_keys
@@ -146,5 +142,3 @@ task_window_segmenter:
   delta: -0.050
   verbose: false
 
-paths:
-  data_split_csv_path: ../metadata/2025-05-12/data_splits.csv

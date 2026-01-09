@@ -1,6 +1,6 @@
 """examples/toy_train.py
 
-Minimal, baseline-free MMT example.
+Minimal, benchmark-free MMT example.
 
 This script demonstrates how to:
   1) Load a small YAML config (configs/examples/toy.yaml)
