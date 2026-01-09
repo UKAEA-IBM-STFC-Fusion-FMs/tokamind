@@ -7,7 +7,7 @@ This script:
 - resolves the benchmark task_config and builds datasets/metadata,
 - streams windows and evaluates candidate (keep_h, keep_w, keep_t) settings,
 - selects the best per-signal configuration,
-- writes tuned results to `tasks/<task>/embeddings_overrides.yaml`.
+- writes tuned results to `tasks_overrides/<task>/embeddings_overrides.yaml`.
 
 This phase does not train the transformer; it tunes embedding parameters only.
 """
@@ -30,16 +30,14 @@ from scripts_mast.mast_utils.benchmark_imports import (
 )
 
 from scripts_mast.mast_utils import (
-    build_task_config,
-    build_signals_by_role_from_task_config,
+    load_experiment_config,
+    load_task_definition,
+    build_signals_by_role_from_task_definition,
     setup_device_and_mp,
-    DEFAULT_CONFIGS_ROOT,
 )
 
-from mmt.utils.config import (
-    load_experiment_config,
-    validate_config,
-)
+from mmt.utils.config.validator import validate_config
+
 from mmt.utils import set_seed, setup_logging
 from mmt.data import (
     build_signal_specs,
@@ -62,7 +60,7 @@ def parse_args_tune_dct3d() -> argparse.Namespace:
         "--task",
         type=str,
         default="_test",
-        help="Task folder name under scripts_mast/configs/tasks/<task>/",
+        help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
     args, _ = parser.parse_known_args()
     return args
@@ -78,12 +76,8 @@ def main() -> None:
     # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_tune_dct3d()
-    cfg_mmt = load_experiment_config(
-        task=args.task,
-        phase="tune_dct3d",
-        configs_root=DEFAULT_CONFIGS_ROOT,
-    )
-    validate_config(cfg_mmt.raw)
+    cfg_mmt = load_experiment_config(task=args.task, phase="tune_dct3d")
+    validate_config(cfg_mmt)
 
     cfg_data = cfg_mmt.data
     cfg_prep = cfg_mmt.preprocess
@@ -95,14 +89,14 @@ def main() -> None:
     local_flag = cfg_data.get("local", True)
 
     # benchmark task config (with overrides such as subset_of_shots/local)
-    cfg_task = build_task_config(cfg_mmt)
+    cfg_task = load_task_definition(args.task)
 
     # ------------------------------------------------------------------
     # Seed + logging
     # ------------------------------------------------------------------
     set_seed(cfg_mmt.seed, deterministic=True, warn_only=True)
 
-    # For tune_dct3d, loader sets run_dir to: scripts_mast/configs/tasks/<task>/
+    # For tune_dct3d, loader sets run_dir to: scripts_mast/configs/tasks_overrides/<task>/
     logger = setup_logging(
         cfg_mmt.paths["run_dir"],
         logger_name="mmt",
@@ -144,8 +138,9 @@ def main() -> None:
     # ------------------------------------------------------------------
 
     # Build signals_by_role from benchmark config + metadata and signal specs
-    signals_by_role = build_signals_by_role_from_task_config(
-        cfg_task, dict_task_metadata
+    signals_by_role = build_signals_by_role_from_task_definition(
+        cfg_task,
+        dict_task_metadata,
     )
 
     signal_specs = build_signal_specs(
@@ -262,7 +257,7 @@ def main() -> None:
             )
 
     # ------------------------------------------------------------------
-    # Write tuned overrides to: tasks/<task>/embeddings_overrides.yaml
+    # Write tuned overrides to: tasks_overrides/<task>/embeddings_overrides.yaml
     # (ONLY per-signal overrides; no defaults)
     # ------------------------------------------------------------------
     overrides_out = {"embeddings": {"per_signal_overrides": {}}}

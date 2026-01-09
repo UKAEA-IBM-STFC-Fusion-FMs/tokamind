@@ -1,14 +1,14 @@
 # Default configuration for the DCT3D tuning phase.
 #
-# This file defines settings shared across tasks for run_tune_dct3d.py:
+# This file defines settings shared across tasks_overrides for run_tune_dct3d.py:
 #   • preprocess.valid_windows thresholds used to select windows for tuning
 #   • tune_dct3d sampling policy, objective thresholds, and search space
 #
 # Do NOT add task-specific values here. Task-specific changes (e.g. different
 # search space, objective thresholds, or tuned parameters output) should go in:
-#   scripts_mast/configs/tasks/<task>/tune_dct3d_overrides.yaml   (optional)
+#   scripts_mast/configs/tasks_overrides/<task>/tune_dct3d_overrides.yaml   (optional)
 # and tuned encoder parameters should be written to:
-#   scripts_mast/configs/tasks/<task>/embeddings_overrides.yaml   (generated)
+#   scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides.yaml   (generated)
 
 preprocess:
   valid_windows:

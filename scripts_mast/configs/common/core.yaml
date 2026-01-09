@@ -7,7 +7,6 @@
 #   - model architecture defaults (backbone / modality heads / adapter defaults)
 #
 # Intentionally does NOT include:
-#   - task / task_config (belongs in tasks/<task>/task.yaml)
 #   - preprocess.valid_windows (may differ per phase; defined in common/<phase>.yaml)
 #   - run-specific settings (run_id / eval_id / model_source.run_dir)
 #
@@ -15,10 +14,11 @@
 #   1) common/core.yaml
 #   2) common/embeddings.yaml
 #   3) common/<phase>.yaml
-#   4) tasks/<task>/task.yaml
-#   5) tasks/<task>/<phase>_overrides.yaml (optional)
-#   6) tasks/<task>/embeddings_overrides.yaml (optional; used by default for
+#   4) tasks_overrides/<task>/core_overrides.yaml
+#   5) tasks_overrides/<task>/<phase>_overrides.yaml (optional)
+#   6) tasks_overrides/<task>/embeddings_overrides.yaml (optional; used by default for
 #      pretrain/finetune/eval, not used during tune_dct3d)
+
 
 
 seed: 54
@@ -57,5 +57,5 @@ model:
 
   output_adapters:
     hidden_default: 0
-    hidden_overrides:    # other task-specific overrides go in tasks/<task>/task.yaml
+    hidden_overrides:    # other task-specific overrides go in tasks_overrides/<task>/task.yaml
       equilibrium-psi: 32

@@ -1,7 +1,7 @@
-# Default configuration for FINETUNE phase. (shared across tasks)
+# Default configuration for FINETUNE phase. (shared across tasks_overrides)
 #
 # Task-specific changes belong in:
-#   scripts_mast/configs/tasks/<task>/finetune_overrides.yaml
+#   scripts_mast/configs/tasks_overrides/<task>/finetune_overrides.yaml
 #   (e.g., run_id, model_source.run_dir for warm-start, per-signal collate drops, etc.)
 #
 # Notes on resume vs warm-start:

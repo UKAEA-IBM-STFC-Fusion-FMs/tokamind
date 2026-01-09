@@ -106,7 +106,7 @@ python examples/toy_train.py --config examples/configs/toy.yaml
 ### 2) Run training/evaluation with MAST integration
 
 All phase scripts use the same pattern: pass a **task folder name** under
-`scripts_mast/configs/tasks/<task>/`.
+`scripts_mast/configs/tasks_overrides/<task>/`.
 
 Finetune:
 
@@ -122,7 +122,7 @@ python scripts_mast/run_pretrain.py --task pretrain_inputs_actuators_to_inputs_o
 
 Evaluate:
 
-1. In `scripts_mast/configs/tasks/<task>/eval_overrides.yaml`, set:
+1. In `scripts_mast/configs/tasks_overrides/<task>/eval_overrides.yaml`, set:
 
    ```yaml
    model_source:
@@ -144,7 +144,7 @@ python scripts_mast/run_tune_dct3d.py --task task_2-1
 This writes:
 
 ```
-scripts_mast/configs/tasks/<task>/embeddings_overrides.yaml
+scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides.yaml
 ```
 
 ### 3) Configuration
@@ -154,9 +154,9 @@ Configuration is **convention-based** (no pointers inside YAML). The loader merg
 1) `scripts_mast/configs/common/core.yaml`  
 2) `scripts_mast/configs/common/embeddings.yaml`  
 3) `scripts_mast/configs/common/<phase>.yaml`  
-4) `scripts_mast/configs/tasks/<task>/task.yaml`  
-5) `scripts_mast/configs/tasks/<task>/<phase>_overrides.yaml` *(optional)*  
-6) `scripts_mast/configs/tasks/<task>/embeddings_overrides.yaml` *(optional)*
+4) `scripts_mast/configs/tasks_overrides/<task>/core_overrides.yaml`  
+5) `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*  
+6) `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides.yaml` *(optional)*
 
 See:
 - `docs/config_guide.md`

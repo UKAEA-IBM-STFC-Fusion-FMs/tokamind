@@ -1,11 +1,11 @@
 # Default configuration for EVAL phase.
 #
-# This file contains eval settings shared across tasks.
+# This file contains eval settings shared across tasks_overrides.
 #
 # IMPORTANT:
 #   - model_source.run_dir must point to the TRAINING run to evaluate.
 #   - Do NOT set it here (common config).
-#     Set it in: scripts_mast/configs/tasks/<task>/eval_overrides.yaml
+#     Set it in: scripts_mast/configs/tasks_overrides/<task>/eval_overrides.yaml
 #
 # Outputs are saved under:
 #   <model_source.run_dir>/<eval_id>/   (or eval__<timestamp> if eval_id is omitted)
@@ -30,7 +30,7 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: 0.005
+    window_stride_sec: 0.001
 
 
 loader:

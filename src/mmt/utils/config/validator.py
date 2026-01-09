@@ -5,7 +5,7 @@ This module validates and normalizes the fully-merged configuration produced by
 the convention-based loader (common + task + optional overrides).
 
 We deliberately keep validation focused and simple:
-  • common required fields (phase/task/task_config),
+  • common required fields (phase/task),
   • training stages validation (lr/wd inheritance, freeze rules),
   • loader rules for streaming vs cached datasets,
   • eval-specific requirements (model_source.run_dir, keep_output_native),

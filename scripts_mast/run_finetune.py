@@ -27,19 +27,17 @@ from scripts_mast.mast_utils.benchmark_imports import (
 )
 
 from scripts_mast.mast_utils import (
-    build_task_config,
-    build_signals_by_role_from_task_config,
+    load_experiment_config,
+    load_task_definition,
+    build_signals_by_role_from_task_definition,
     setup_device_and_mp,
     build_default_transform,
     build_window_datasets,
     make_collate_fn,
-    DEFAULT_CONFIGS_ROOT,
 )
 
-from mmt.utils.config import (
-    load_experiment_config,
-    validate_config,
-)
+from mmt.utils.config.validator import validate_config
+
 from mmt.utils import (
     set_seed,
     setup_logging,
@@ -63,7 +61,7 @@ def parse_args_finetune() -> argparse.Namespace:
         "--task",
         type=str,
         default="task_2-1",
-        help="Task folder name under scripts_mast/configs/tasks/<task>/",
+        help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
     args, _ = parser.parse_known_args()
     return args
@@ -79,12 +77,8 @@ def main() -> None:
     # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_finetune()
-    cfg_mmt = load_experiment_config(
-        task=args.task,
-        phase="finetune",
-        configs_root=DEFAULT_CONFIGS_ROOT,
-    )
-    validate_config(cfg_mmt.raw)
+    cfg_mmt = load_experiment_config(task=args.task, phase="finetune")
+    validate_config(cfg_mmt)
 
     cfg_data = cfg_mmt.data
     cfg_model = cfg_mmt.model
@@ -103,7 +97,7 @@ def main() -> None:
     max_positions = cfg_mmt.preprocess["trim_chunks"]["max_chunks"]
 
     # benchmark task config (with overrides such as subset_of_shots/local)
-    cfg_task = build_task_config(cfg_mmt)
+    cfg_task = load_task_definition(args.task)
 
     # ------------------------------------------------------------------
     # Seed + logging
@@ -160,7 +154,7 @@ def main() -> None:
     # ------------------------------------------------------------------
 
     # Build signals_by_role from benchmark config + metadata and signal specs/codecs
-    signals_by_role = build_signals_by_role_from_task_config(
+    signals_by_role = build_signals_by_role_from_task_definition(
         cfg_task,
         dict_task_metadata,
     )

@@ -37,7 +37,7 @@ def _pairs_to_names(pairs: Iterable[Tuple[str, str]]) -> list[str]:
     return names
 
 
-def build_signals_by_role_from_task_config(
+def build_signals_by_role_from_task_definition(
     cfg_task: Mapping[str, Any],
     dict_metadata: Mapping[str, Any],
 ) -> Dict[Role, Dict[CanonicalName, Modality]]:

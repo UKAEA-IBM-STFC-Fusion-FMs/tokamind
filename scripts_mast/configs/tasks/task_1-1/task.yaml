@@ -1,8 +1,0 @@
-# This file defines:
-#   - the task name (must match the enclosing folder name)
-#     (the task config is inferred *only* from `task`)
-#   - optional task-wide overrides that should apply to *all* phases
-#     (pretrain / finetune / eval / tune_dct3d), e.g. model adapter sizes.
-
-task: task_1-1
-
