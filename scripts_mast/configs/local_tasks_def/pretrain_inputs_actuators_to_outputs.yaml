@@ -129,3 +129,4 @@ task_window_segmenter:
   delta: -0.050
   verbose: false
 
+stride_window: 0.001
