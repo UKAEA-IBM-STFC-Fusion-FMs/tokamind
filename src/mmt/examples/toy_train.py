@@ -299,8 +299,8 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--config",
         type=str,
-        default="examples/configs/toy.yaml",
-        help="Path to a YAML config (relative to repo root by default).",
+        default="configs/toy.yaml",
+        help="Path to a YAML config (relative to where you run the command).",
     )
     return p.parse_args()
 
@@ -309,11 +309,7 @@ def main() -> None:
     args = parse_args()
 
     # Resolve config path relative to repo root (examples/ is at repo_root/examples/)
-    repo_root = Path(__file__).resolve().parents[1]
     cfg_path = Path(args.config)
-    if not cfg_path.is_absolute():
-        cfg_path = (repo_root / cfg_path).resolve()
-
     cfg = _load_yaml(cfg_path)
 
     seed = int(cfg.get("seed", 0))
