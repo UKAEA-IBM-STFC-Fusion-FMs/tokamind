@@ -79,7 +79,7 @@ def main() -> None:
     # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_pretrain()
-    cfg_mmt = load_experiment_config(task=args.task, phase="finetune")
+    cfg_mmt = load_experiment_config(task=args.task, phase="pretrain")
     validate_config(cfg_mmt)
 
     cfg_data = cfg_mmt.data
