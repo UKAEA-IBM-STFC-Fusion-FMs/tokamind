@@ -29,7 +29,7 @@ classifiers = [
 # Otherwise, you can populate the dependencies field
 dependencies = [
 #    "torch>=2.2",
-    "google_crc32>=1.7",
+    "google_crc32c>=1.7",
 ]
 
 [project.optional-dependencies]
