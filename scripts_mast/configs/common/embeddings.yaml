@@ -45,7 +45,7 @@ embeddings:
         encoder_kwargs: { keep_h: 8, keep_w: 8, keep_t: 10 }
 
   # Optional per-signal overrides keyed by signal name (canonical name in benchmark task config).
-  # Task-specific overrides should live in tasks_overrides/<task>/embeddings_overrides.yaml.
+  # Task-specific overrides should live in tasks_overrides/<task>/embedding_overrides/<profile>.yaml.
   per_signal_overrides: {}
 #    input:
 #      pf_active-coil_current:

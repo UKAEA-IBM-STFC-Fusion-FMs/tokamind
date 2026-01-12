@@ -8,7 +8,7 @@
 # search space, objective thresholds, or tuned parameters output) should go in:
 #   scripts_mast/configs/tasks_overrides/<task>/tune_dct3d_overrides.yaml   (optional)
 # and tuned encoder parameters should be written to:
-#   scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides.yaml   (generated)
+#   scripts_mast/configs/tasks_overrides/<task>/dct3d.yaml   (generated)
 
 preprocess:
   valid_windows:

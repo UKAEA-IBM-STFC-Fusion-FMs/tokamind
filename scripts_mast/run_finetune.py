@@ -63,6 +63,13 @@ def parse_args_finetune() -> argparse.Namespace:
         default="task_2-1",
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
+    parser.add_argument(
+        "--emb_profile",
+        type=str,
+        default="dct3d",
+        help="embeddings_profile chosen for the task: "
+        "scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -77,7 +84,11 @@ def main() -> None:
     # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_finetune()
-    cfg_mmt = load_experiment_config(task=args.task, phase="finetune")
+    cfg_mmt = load_experiment_config(
+        task=args.task,
+        phase="finetune",
+        embeddings_profile=args.emb_profile,
+    )
     validate_config(cfg_mmt)
 
     cfg_data = cfg_mmt.data
@@ -129,7 +140,7 @@ def main() -> None:
     # Initialize MAST datasets
     # ------------------------------------------------------------------
 
-    train_shots_, test_shots_, val_shots_ = get_train_test_val_shots(
+    train_shots_, _, val_shots_ = get_train_test_val_shots(
         max_index=cfg_data["subset_of_shots"],
     )
 

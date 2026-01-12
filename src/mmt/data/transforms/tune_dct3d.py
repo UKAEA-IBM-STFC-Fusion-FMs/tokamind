@@ -2,12 +2,12 @@
 TuneDCT3DTransform
 ==================
 
-Tune DCT3D truncation parameters (keep_h, keep_w, keep_t) per (role, signal).
+Streaming evaluator used by `scripts_mast/run_tune_dct3d.py` to pick per-signal
+DCT3D truncation parameters (keep_h, keep_w, keep_t).
 
-This is a pass-through transform designed to be inserted in the model_transform
-chain after TrimChunksTransform and before EmbedChunksTransform. It observes each
-kept window, accumulates per-window RMSE for each candidate configuration, and
-later selects the smallest effective configuration under a per-role threshold.
+This transform **does not** modify the window payload for downstream training.
+It only accumulates reconstruction RMSE statistics over the streamed windows
+and later selects a best configuration per (role, signal).
 
 Objective
 ---------
@@ -37,7 +37,14 @@ Expected window format (v0)
 - input/actuator are read from window["chunks"][role][i]["signals"][name]
 - output is read from window["output"][name]["values"]
 
-No fallback formats are supported on purpose.
+Roles
+-----
+By default, the tuner evaluates all roles: ("input", "actuator", "output").
+You can restrict computation by passing a subset via `roles`, e.g.:
+
+    TuneDCT3DTransform(..., roles=("output",))
+
+Only the specified roles are processed and returned by `select_best()`.
 """
 
 from __future__ import annotations
@@ -81,10 +88,48 @@ class TuneDCT3DTransform:
         keep_w: Iterable[int],
         keep_t: Iterable[int],
         thresholds: Mapping[str, float],
+        roles: Iterable[str] = ("input", "actuator", "output"),
         max_coeffs: int | None = None,
     ) -> None:
+        """Create a DCT3D tuner.
+
+        Parameters
+        ----------
+        signal_specs:
+            Registry of all signals for the current task.
+        keep_h, keep_w, keep_t:
+            Candidate truncation values along H/W/T.
+        thresholds:
+            Role-specific RMSE thresholds, e.g. {"input": 1e-2, "output": 1e-2, ...}.
+        roles:
+            Which roles to tune. Subset of {"input", "actuator", "output"}.
+            Default: all three.
+        max_coeffs:
+            Optional cap on keep_h*keep_w*keep_t to prune large candidates.
+        """
         self.signal_specs = signal_specs
-        self.thresholds = {k: float(v) for k, v in thresholds.items()}
+
+        # normalize + validate roles
+        allowed = {"input", "actuator", "output"}
+        roles_norm: List[str] = []
+        for r in roles:
+            rr = str(r).strip()
+            if not rr:
+                continue
+            if rr not in allowed:
+                raise ValueError(
+                    f"TuneDCT3D: invalid role {rr!r}. Allowed roles: {sorted(allowed)}"
+                )
+            if rr not in roles_norm:
+                roles_norm.append(rr)
+        if not roles_norm:
+            raise ValueError("TuneDCT3D: roles must contain at least one role")
+        self.roles = tuple(roles_norm)
+
+        # role thresholds (only for the tuned roles)
+        self.thresholds = {
+            k: float(v) for k, v in thresholds.items() if k in self.roles
+        }
 
         # candidate keep configs
         self.candidates: List[Tuple[int, int, int]] = []
@@ -108,14 +153,20 @@ class TuneDCT3DTransform:
         self.stats: Dict[str, Dict[str, Dict[Tuple[int, int, int], List[float]]]] = {}
         self.rep_shape: Dict[Tuple[str, str], Tuple[int, ...]] = {}
 
-        # pre-create slots for all specs (ignore original encoder_name on purpose)
+        # pre-create slots for all specs in selected roles (ignore original encoder_name on purpose)
         for spec in self.signal_specs.specs:
             role, name = spec.role, spec.name
+            if role not in self.roles:
+                continue
             self.stats.setdefault(role, {}).setdefault(name, {})
             for cfg in self.candidates:
                 self.stats[role][name][cfg] = [0.0, 0.0]
 
-        logger.info("TuneDCT3D initialized | candidates=%d", len(self.candidates))
+        logger.info(
+            "TuneDCT3D initialized | roles=%s | candidates=%d",
+            ",".join(self.roles),
+            len(self.candidates),
+        )
 
     def _rmse_on_finite(self, x: np.ndarray, x_hat: np.ndarray) -> float | None:
         """
@@ -137,10 +188,12 @@ class TuneDCT3DTransform:
         return float(np.sqrt(np.mean(diff_f * diff_f)))
 
     def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
-        if "chunks" not in window:
-            raise KeyError(
-                "TuneDCT3D expects window['chunks'] (run after ChunkWindows/TrimChunks)"
-            )
+        # Only require chunks if we're tuning chunk-based roles.
+        if any(r in self.roles for r in ("input", "actuator")):
+            if "chunks" not in window:
+                raise KeyError(
+                    "TuneDCT3D expects window['chunks'] (run after ChunkWindows/TrimChunks)"
+                )
 
         # Per-window accumulators so each window counts once (mean over chunks).
         # win_sum[role][name][cfg] = sum_rmse_over_chunks
@@ -153,23 +206,64 @@ class TuneDCT3DTransform:
         )
 
         # 1) input/actuator: read from chunks
-        chunks = window.get("chunks") or {}
-        for role in ("input", "actuator"):
-            role_chunks = chunks.get(role) or []
-            for ch in role_chunks:
-                sigs = ch.get("signals") or {}
-                for name, values in sigs.items():
-                    if values is None:
+        if any(r in self.roles for r in ("input", "actuator")):
+            chunks = window.get("chunks") or {}
+            for role in ("input", "actuator"):
+                if role not in self.roles:
+                    continue
+                role_chunks = chunks.get(role) or []
+                for ch in role_chunks:
+                    sigs = ch.get("signals") or {}
+                    for name, values in sigs.items():
+                        if values is None:
+                            continue
+                        if self.signal_specs.get(role, name) is None:
+                            continue
+
+                        x = np.asarray(values)
+                        if x.size == 0 or x.ndim not in (1, 2, 3):
+                            continue
+
+                        # store representative shape for effective_dim ranking
+                        self.rep_shape.setdefault((role, name), tuple(x.shape))
+
+                        finite = np.isfinite(x)
+                        if not finite.any():
+                            continue
+                        x_clean = np.where(finite, x, 0.0)
+
+                        for cfg in self.candidates:
+                            codec = self._codecs[cfg]
+                            z = codec.encode(x_clean)
+                            x_hat = codec.decode(z, original_shape=x_clean.shape)
+
+                            rmse = self._rmse_on_finite(x, x_hat)
+                            if rmse is None or not np.isfinite(rmse):
+                                continue
+
+                            win_sum[role][name][cfg] += rmse
+                            win_n[role][name][cfg] += 1
+
+        # 2) outputs: read from window["output"][name]["values"]
+        if "output" in self.roles:
+            out_group = window.get("output")
+            if isinstance(out_group, dict):
+                for name, entry in out_group.items():
+                    if self.signal_specs.get("output", name) is None:
                         continue
-                    if self.signal_specs.get(role, name) is None:
+                    if not isinstance(entry, dict) or "values" not in entry:
+                        raise TypeError(
+                            f"TuneDCT3D expected window['output'][{name!r}] to be a dict with key 'values'"
+                        )
+                    values = entry["values"]
+                    if values is None:
                         continue
 
                     x = np.asarray(values)
                     if x.size == 0 or x.ndim not in (1, 2, 3):
                         continue
 
-                    # store representative shape for effective_dim ranking
-                    self.rep_shape.setdefault((role, name), tuple(x.shape))
+                    self.rep_shape.setdefault(("output", name), tuple(x.shape))
 
                     finite = np.isfinite(x)
                     if not finite.any():
@@ -185,45 +279,8 @@ class TuneDCT3DTransform:
                         if rmse is None or not np.isfinite(rmse):
                             continue
 
-                        win_sum[role][name][cfg] += rmse
-                        win_n[role][name][cfg] += 1
-
-        # 2) outputs: read from window["output"][name]["values"]
-        out_group = window.get("output")
-        if isinstance(out_group, dict):
-            for name, entry in out_group.items():
-                if self.signal_specs.get("output", name) is None:
-                    continue
-                if not isinstance(entry, dict) or "values" not in entry:
-                    raise TypeError(
-                        f"TuneDCT3D expected window['output'][{name!r}] to be a dict with key 'values'"
-                    )
-                values = entry["values"]
-                if values is None:
-                    continue
-
-                x = np.asarray(values)
-                if x.size == 0 or x.ndim not in (1, 2, 3):
-                    continue
-
-                self.rep_shape.setdefault(("output", name), tuple(x.shape))
-
-                finite = np.isfinite(x)
-                if not finite.any():
-                    continue
-                x_clean = np.where(finite, x, 0.0)
-
-                for cfg in self.candidates:
-                    codec = self._codecs[cfg]
-                    z = codec.encode(x_clean)
-                    x_hat = codec.decode(z, original_shape=x_clean.shape)
-
-                    rmse = self._rmse_on_finite(x, x_hat)
-                    if rmse is None or not np.isfinite(rmse):
-                        continue
-
-                    win_sum["output"][name][cfg] += rmse
-                    win_n["output"][name][cfg] += 1
+                        win_sum["output"][name][cfg] += rmse
+                        win_n["output"][name][cfg] += 1
 
         # 3) Commit: per-window mean over chunks, then accumulate per-window
         for role, by_sig in win_sum.items():
@@ -243,7 +300,8 @@ class TuneDCT3DTransform:
     def select_best(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         out: Dict[str, Dict[str, Dict[str, Any]]] = {}
 
-        for role, by_sig in self.stats.items():
+        for role in self.roles:
+            by_sig = self.stats.get(role, {})
             if role not in self.thresholds:
                 raise KeyError(f"TuneDCT3D missing threshold for role={role!r}")
             thr = float(self.thresholds[role])

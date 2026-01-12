@@ -16,8 +16,8 @@
 #   3) common/<phase>.yaml
 #   4) tasks_overrides/<task>/core_overrides.yaml
 #   5) tasks_overrides/<task>/<phase>_overrides.yaml (optional)
-#   6) tasks_overrides/<task>/embeddings_overrides.yaml (optional; used by default for
-#      pretrain/finetune/eval, not used during tune_dct3d)
+#   6) tasks_overrides/<task>/embedding_overrides/<profile>.yaml
+#      (used by default for pretrain/finetune/eval, not used during tune_dct3d)
 
 
 

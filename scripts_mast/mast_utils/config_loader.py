@@ -12,25 +12,39 @@ scripts_mast/configs/
     eval.yaml
     tune_dct3d.yaml
   tasks_overrides/
-    <task>/                         (optional for baseline tasks_overrides)
-      core_overrides.yaml           (optional)
-      finetune_overrides.yaml       (optional)
-      pretrain_overrides.yaml       (optional)
-      eval_overrides.yaml           (optional)
-      tune_dct3d_overrides.yaml     (optional)
-      embeddings_overrides.yaml     (optional; generally produced by tune_dct3d)
+    <task>/                                   (one folder per task)
+      core_overrides.yaml                     (optional)
+      finetune_overrides.yaml                 (optional)
+      pretrain_overrides.yaml                 (optional)
+      eval_overrides.yaml                     (optional)
+      tune_dct3d_overrides.yaml               (optional)
+      embeddings_overrides/
+        dct3d.yaml                            (task-level embedding overrides for DCT3D)
+        vae.yaml                              (task-level embedding overrides for VAE, future)
 
-Merge order (later wins):
+Embedding profile selection
+---------------------------
+Embedding overrides are selected by an explicit *profile* (default: ``dct3d``).
+The loader looks for:
+
+    tasks_overrides/<task>/embeddings_overrides/<profile>.yaml
+
+Merge order (later wins)
+------------------------
   1) common/core.yaml
   2) common/embeddings.yaml
   3) common/<phase>.yaml
-  4) tasks_overrides/<task>/core_overrides.yaml                (optional)
-  5) tasks_overrides/<task>/<phase>_overrides.yaml             (optional)
-  6) tasks_overrides/<task>/embeddings_overrides.yaml          (optional; merged by default for
-     pretrain/finetune/eval, NOT merged for tune_dct3d)
+  4) tasks_overrides/<task>/core_overrides.yaml                     (optional)
+  5) tasks_overrides/<task>/<phase>_overrides.yaml                  (optional)
+  6) tasks_overrides/<task>/embeddings_overrides/<profile>.yaml     (required for
+     pretrain/finetune/eval; NOT merged for tune_dct3d)
 
-NOTE: Benchmark task *definitions* are resolved separately (scripts_mast layer),
-not here.
+Notes
+-----
+- Benchmark task *definitions* are resolved separately (scripts_mast layer),
+  not here.
+- tune_dct3d intentionally does not merge the task-level embedding overrides so
+  the tuner always writes deltas relative to common/embeddings.yaml.
 """
 
 from __future__ import annotations
@@ -137,15 +151,47 @@ def load_experiment_config(
     configs_root: str | Path = "scripts_mast/configs",
     run_id: str | None = None,
     eval_id: str | None = None,
-    use_embeddings_overrides: bool = True,
+    embeddings_profile: str = "dct3d",
 ) -> ExperimentConfig:
+    """Load and merge YAML configuration for a given task + phase.
+
+    Parameters
+    ----------
+    task:
+        Task folder name under ``scripts_mast/configs/tasks_overrides/<task>/``.
+    phase:
+        One of: ``pretrain``, ``finetune``, ``eval``, ``tune_dct3d``.
+    configs_root:
+        Root folder containing the convention-based config tree.
+    run_id:
+        Optional explicit run identifier (training phases only).
+    eval_id:
+        Optional explicit eval identifier (eval phase only).
+    embeddings_profile:
+        Embedding profile key. The loader merges the corresponding task-level
+        embedding overrides file:
+
+            tasks_overrides/<task>/embeddings_overrides/<embeddings_profile>.yaml
+
+        Default: ``dct3d``.
+
+    Returns
+    -------
+    ExperimentConfig
+        A dynamic wrapper around the merged raw dict (``cfg.raw``).
+    """
     if phase not in ("pretrain", "finetune", "eval", "tune_dct3d"):
         raise ValueError(f"Unsupported phase: {phase}")
 
+    emb_profile = str(embeddings_profile).strip()
+    if not emb_profile:
+        raise ValueError("embeddings_profile must be a non-empty string")
+
     configs_root_path = _resolve_from_repo_root(str(configs_root))
     common_dir = configs_root_path / "common"
-    tasks_overrides_dir = configs_root_path / "tasks_overrides"
-    tasks_overrides_dir = tasks_overrides_dir / task  # may not exist (OK)
+    tasks_overrides_dir = (
+        configs_root_path / "tasks_overrides" / task
+    )  # may not exist (OK)
 
     # Required common files
     core_path = common_dir / "core.yaml"
@@ -159,11 +205,15 @@ def load_experiment_config(
     # Optional task overrides (all optional)
     core_overrides_path = tasks_overrides_dir / "core_overrides.yaml"
     phase_overrides_path = tasks_overrides_dir / f"{phase}_overrides.yaml"
-    embeddings_overrides_path = tasks_overrides_dir / "embeddings_overrides.yaml"
 
-    # For tune_dct3d we write outputs into tasks_overrides_dir, so ensure it exists
+    # Task-level embedding overrides are selected by *profile*
+    embeddings_overrides_dir = tasks_overrides_dir / "embeddings_overrides"
+    embeddings_overrides_path = embeddings_overrides_dir / f"{emb_profile}.yaml"
+
+    # For tune_dct3d we write outputs into tasks_overrides/<task>/, so ensure it exists.
     if phase == "tune_dct3d":
         tasks_overrides_dir.mkdir(parents=True, exist_ok=True)
+        embeddings_overrides_dir.mkdir(parents=True, exist_ok=True)
 
     merged: Dict[str, Any] = {}
     merged = _deep_merge(merged, _load_yaml(core_path))
@@ -178,10 +228,17 @@ def load_experiment_config(
     if phase_overrides_path.is_file():
         merged = _deep_merge(merged, _load_yaml(phase_overrides_path))
 
-    # Merge optional embeddings overrides for run phases (default on), but NOT for tune_dct3d
-    if phase != "tune_dct3d" and use_embeddings_overrides:
-        if embeddings_overrides_path.is_file():
-            merged = _deep_merge(merged, _load_yaml(embeddings_overrides_path))
+    # Merge REQUIRED task-level embedding overrides for run phases.
+    # tune_dct3d does NOT merge them so it can write deltas relative to common/embeddings.yaml.
+    if phase != "tune_dct3d":
+        if not embeddings_overrides_path.is_file():
+            raise FileNotFoundError(
+                "Missing required task-level embedding overrides file for the selected profile.\n"
+                f"task={task!r}, embeddings_profile={emb_profile!r}\n"
+                f"expected: {embeddings_overrides_path}\n\n"
+                "Create an empty YAML file if you do not want task-specific embedding overrides yet."
+            )
+        merged = _deep_merge(merged, _load_yaml(embeddings_overrides_path))
 
     # Enforce task name from CLI/folder selection
     task_in_yaml = merged.get("task", None)
@@ -191,6 +248,7 @@ def load_experiment_config(
         )
     merged["task"] = task
     merged["phase"] = phase  # enforce phase from CLI
+    merged["embeddings_profile"] = emb_profile
 
     # Inject run_id / eval_id if provided
     if run_id is not None:

@@ -2,14 +2,23 @@
 DCT3D tuning entrypoint for MMT (per-task embedding hyperparameters).
 
 This script:
-- parses `--task`,
+- parses `--task` and `--roles`,
 - loads and validates the merged config for phase="tune_dct3d",
 - resolves the benchmark task_config and builds datasets/metadata,
 - streams windows and evaluates candidate (keep_h, keep_w, keep_t) settings,
 - selects the best per-signal configuration,
-- writes tuned results to `tasks_overrides/<task>/embeddings_overrides.yaml`.
+- writes tuned results to:
+
+    tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
 
 This phase does not train the transformer; it tunes embedding parameters only.
+
+Notes
+-----
+- This script is specific to the DCT3D embedding family and always writes into
+  the "dct3d" embedding profile file.
+- The tuner writes ONLY per-signal overrides; defaults remain in
+  scripts_mast/configs/common/embeddings.yaml.
 """
 
 from __future__ import annotations
@@ -62,6 +71,12 @@ def parse_args_tune_dct3d() -> argparse.Namespace:
         default="_test",
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
+    parser.add_argument(
+        "--roles",
+        type=str,
+        default="input,actuator,output",
+        help="Comma-separated roles to tune/write. Default input,actuator,output",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -76,7 +91,13 @@ def main() -> None:
     # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_tune_dct3d()
-    cfg_mmt = load_experiment_config(task=args.task, phase="tune_dct3d")
+    roles = [r.strip() for r in args.roles.split(",") if r.strip()]
+
+    cfg_mmt = load_experiment_config(
+        task=args.task,
+        phase="tune_dct3d",
+        embeddings_profile="dct3d",
+    )
     validate_config(cfg_mmt)
 
     cfg_data = cfg_mmt.data
@@ -88,7 +109,7 @@ def main() -> None:
 
     local_flag = cfg_data.get("local", True)
 
-    # benchmark task config (with overrides such as subset_of_shots/local)
+    # task config (with overrides such as subset_of_shots/local)
     cfg_task = load_task_definition(args.task)
 
     # ------------------------------------------------------------------
@@ -106,12 +127,17 @@ def main() -> None:
     logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
 
     logger = logging.getLogger("mmt.TuneDCT3D")
-    logger.info("task=%s | phase=%s | device=%s", cfg_mmt.task, cfg_mmt.phase, device)
+    logger.info(
+        "task=%s | phase=%s | device=%s | roles=%s",
+        cfg_mmt.task,
+        cfg_mmt.phase,
+        device,
+        ",".join(roles),
+    )
 
     # -------------------------------------------------------------------
     # Initialize task-specific metadata
     # -------------------------------------------------------------------
-
     dict_task_metadata = get_task_metadata(
         cfg_task,
         verbose=False,
@@ -120,7 +146,6 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Initialize MAST datasets
     # ------------------------------------------------------------------
-
     train_shots_, test_shots_, val_shots_ = get_train_test_val_shots(
         max_index=cfg_data["subset_of_shots"],
     )
@@ -136,8 +161,6 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Signal specs
     # ------------------------------------------------------------------
-
-    # Build signals_by_role from benchmark config + metadata and signal specs
     signals_by_role = build_signals_by_role_from_task_definition(
         cfg_task,
         dict_task_metadata,
@@ -159,6 +182,7 @@ def main() -> None:
         keep_w=cfg_tune["search_space"]["keep_w"],
         keep_t=cfg_tune["search_space"]["keep_t"],
         thresholds=cfg_tune["objective"]["thresholds"],
+        roles=roles,
     )
 
     mmt_transform_map = ComposeTransforms(
@@ -204,7 +228,6 @@ def main() -> None:
         )
         ds_shots_selected = [ds_shots_full[i] for i in sel_indices]
     else:
-        # sel_indices = all_indices
         ds_shots_selected = ds_shots_full
 
     logger.info(
@@ -257,7 +280,7 @@ def main() -> None:
             )
 
     # ------------------------------------------------------------------
-    # Write tuned overrides to: tasks_overrides/<task>/embeddings_overrides.yaml
+    # Write tuned overrides to: tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
     # (ONLY per-signal overrides; no defaults)
     # ------------------------------------------------------------------
     overrides_out = {"embeddings": {"per_signal_overrides": {}}}
@@ -295,13 +318,15 @@ def main() -> None:
                 "encoder_kwargs": new_kwargs,
             }
 
-    out_path = Path(cfg_mmt.paths["run_dir"]) / "embeddings_overrides.yaml"
+    out_path = Path(cfg_mmt.paths["run_dir"]) / "embeddings_overrides" / "dct3d.yaml"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     header = (
         "# Auto-generated by scripts_mast/run_tune_dct3d.py\n"
         f"# task: {cfg_mmt.task}\n"
-        "# Merged on top of config/common/embeddings.yaml\n"
+        "# embeddings_profile: dct3d \n"
+        f"# roles: {','.join(roles)}\n"
+        "# Merged on top of scripts_mast/configs/common/embeddings.yaml\n"
         "# Contains ONLY per-signal overrides.\n\n"
     )
 
