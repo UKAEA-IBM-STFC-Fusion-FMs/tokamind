@@ -19,14 +19,14 @@ preprocess:
 
 tune_dct3d:
   sampling:
-    n_shots: 1
+    n_shots: 2
     max_windows: 2000
 
   objective:
     thresholds:
-      input: 0.01
-      actuator: 0.01
-      output: 0.01
+      input: 0.995
+      actuator: 0.995
+      output: 0.995
 
   search_space:
     keep_h: [1, 4, 8, 12, 16, 20, 32]

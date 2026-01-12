@@ -21,7 +21,7 @@ This document explains:
 DCT3D truncation trades off:
 
 - **smaller / cheaper embeddings** (fewer coefficients),
-- vs **reconstruction fidelity** (lower error).
+- vs **explained energy** percentage (higher percentage).
 
 Different signals often have very different spectral content, so a single global truncation setting can
 be overly conservative for some signals and too aggressive for others.
@@ -40,7 +40,7 @@ Then it applies a dedicated transform:
 
 `TuneDCT3DTransform`
 
-which *observes* the chunk arrays and computes reconstruction error for candidate truncations.
+which *observes* the chunk arrays and computes explained energy for candidate truncations.
 
 Tuning is typically placed:
 
