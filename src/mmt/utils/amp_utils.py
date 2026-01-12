@@ -1,3 +1,11 @@
+"""
+Automatic Mixed Precision (AMP) utilities.
+
+Provides:
+- `get_amp_config(...)` to choose AMP enablement and dtype based on model device.
+- `amp_ctx_for_model(...)` to return an autocast context on CUDA, else a no-op context.
+"""
+
 from __future__ import annotations
 
 from contextlib import nullcontext

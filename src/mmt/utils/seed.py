@@ -1,3 +1,11 @@
+"""
+Reproducibility utilities.
+
+Provides:
+- `set_seed(...)` to seed Python/NumPy/PyTorch (CPU/CUDA/MPS) and enable deterministic ops.
+- `seed_worker(...)` / `make_worker_seed_fn()` for PyTorch DataLoader worker seeding.
+"""
+
 from __future__ import annotations
 
 import os
