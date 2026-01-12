@@ -43,3 +43,4 @@ Thumbs.db
 
 # Logs (if you ever create a top-level log dir)
 logs/
+/run_bash.sh
