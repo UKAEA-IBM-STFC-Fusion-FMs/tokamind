@@ -231,8 +231,16 @@ During DCT3D tuning, the chain is typically:
 - observes raw chunk arrays + output arrays,
 - accumulates reconstruction error for each candidate `(keep_h, keep_w, keep_t)`,
 - selects a per-(role, signal) configuration based on thresholds.
+- can be configured to tune only a subset of roles via `roles` (any of: `input`, `actuator`, `output`),
+  which is useful to avoid re-tuning inputs/actuators when you only care about outputs.
 
 It is intentionally a **pass-through transform** so it can be inserted without changing the rest of the pipeline.
+
+The `scripts_mast/run_tune_dct3d.py` runner exposes this as a CLI flag:
+
+```bash
+python scripts_mast/run_tune_dct3d.py --task <task> --roles output
+```
 
 ---
 

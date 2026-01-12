@@ -132,10 +132,14 @@ embeddings:
 By convention this file lives at:
 
 ```
-configs/tasks/<task>/embeddings_overrides.yaml
+scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
 ```
 
-and is treated as an **auto-generated artifact**.
+This is the `dct3d` embedding profile. Training/eval phases select the embedding profile via
+`--emb_profile` (default: `dct3d`) and will merge:
+`tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`.
+
+It is treated as an **auto-generated artifact**.
 
 ---
 
@@ -146,9 +150,13 @@ The config loader typically merges tuned overrides **last**, so they win over de
 1. `common/core.yaml`
 2. `common/embeddings.yaml`
 3. `common/<phase>.yaml`
-4. `tasks/<task>/task.yaml`
-5. `tasks/<task>/<phase>_overrides.yaml` (optional)
-6. `tasks/<task>/embeddings_overrides.yaml` (optional, auto-generated)
+4. `tasks_overrides/<task>/core_overrides.yaml`
+5. `tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*
+6. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune/eval; not merged during tune_dct3d)*
+
+Note: during `tune_dct3d`, the config loader intentionally does **not** merge the task-level
+`embeddings_overrides/<profile>.yaml` file. This allows the tuner to write deltas relative to
+`common/embeddings.yaml` for the selected profile.
 
 This means:
 
@@ -166,7 +174,13 @@ This means:
 python scripts_mast/run_tune_dct3d.py --task <task>
 ```
 
-3) Review the generated `embeddings_overrides.yaml`.  
+Optional: restrict tuning to a subset of roles via `--roles` (comma-separated), for example:
+
+```bash
+python scripts_mast/run_tune_dct3d.py --task <task> --roles output
+```
+
+3) Review the generated `embeddings_overrides/dct3d.yaml`.  
 4) Commit it only if you want to ship it as the “official tuned preset” for that task.  
 5) Run finetune/pretrain/eval as usual; they will automatically use tuned overrides.
 

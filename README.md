@@ -17,7 +17,7 @@ Key features:
 
 - **Dataset-agnostic core (`mmt/`)**: the model and token pipeline are reusable across domains.
 - **Convention-based configuration**: common defaults + per-task overrides, with phases for `pretrain`, `finetune`, `eval`, and `tune_dct3d`.
-- **Per-task embedding tuning**: `run_tune_dct3d.py` writes `embeddings_overrides.yaml` inside the task folder.
+- **Per-task embedding tuning**: `run_tune_dct3d.py` writes `embeddings_overrides/<profile>.yaml` inside the task folder (default profile: `dct3d`).
 - **Flexible training/evaluation**: warm-start vs resume, forced-drop ablations at eval time, cached vs streamed datasets.
 
 For deeper details, see:
@@ -106,6 +106,8 @@ python examples/toy_train.py --config examples/configs/toy.yaml
 ### 2) Run training/evaluation with MAST integration
 
 All phase scripts use the same pattern: pass a **task folder name** under
+
+All phase scripts also accept `--emb_profile <profile>` to select which task-level embedding overrides to use (default: `dct3d`).
 `scripts_mast/configs/tasks_overrides/<task>/`.
 
 Finetune:
@@ -144,7 +146,7 @@ python scripts_mast/run_tune_dct3d.py --task task_2-1
 This writes:
 
 ```
-scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides.yaml
+scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
 ```
 
 ### 3) Configuration
@@ -156,7 +158,7 @@ Configuration is **convention-based** (no pointers inside YAML). The loader merg
 3) `scripts_mast/configs/common/<phase>.yaml`  
 4) `scripts_mast/configs/tasks_overrides/<task>/core_overrides.yaml`  
 5) `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*  
-6) `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides.yaml` *(optional)*
+6) `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required; create an empty file if you do not want task-specific overrides yet)*
 
 See:
 - `docs/config_guide.md`
@@ -174,7 +176,7 @@ Recommended reading order:
 - `docs/transforms.md` — transforms pipeline and window dict contract
 - `docs/checkpointing_and_warmstart.md` — checkpoints, overlap loading, model parts
 - `docs/evaluation.md` — metrics/traces, forced-drop ablations, eval outputs
-- `docs/tuning_embeddings.md` — DCT3D tuning and `embeddings_overrides.yaml`
+- `docs/tuning_embeddings.md` — DCT3D tuning and `embeddings_overrides/<profile>.yaml`
 
 ## Support
 Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
