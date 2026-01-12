@@ -10,4 +10,4 @@ model_source:
   # load_parts: { token_encoder: true, backbone: true, modality_heads: true, output_adapters: true }
 
 # Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: task_2-1_finetune
+run_id: test_train
