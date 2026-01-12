@@ -83,8 +83,6 @@ sources_and_signals:
       - t_e
 
   actuator_name: &actuator_keys
-    - - equilibrium
-      - lcfs_r
     - - gas_injection
       - total_injected
     - - pf_active

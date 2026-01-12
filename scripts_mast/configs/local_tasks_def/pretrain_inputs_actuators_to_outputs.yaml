@@ -13,8 +13,6 @@ task_name: pretrain_inputs_actuators_to_outputs
 
 sources_and_signals:
   input_name: &input_keys
-    - - equilibrium
-      - lcfs_r
     - - interferometer
       - n_e_line
     - - magnetics
@@ -49,8 +47,6 @@ sources_and_signals:
       - t_e
 
   actuator_name: &actuator_keys
-    - - equilibrium
-      - lcfs_r
     - - gas_injection
       - total_injected
     - - pf_active
