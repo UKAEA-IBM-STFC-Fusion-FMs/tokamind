@@ -57,7 +57,7 @@ from mmt.data import (
     WindowStreamedDataset,
 )
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def parse_args_tune_dct3d() -> argparse.Namespace:
