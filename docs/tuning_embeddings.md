@@ -54,7 +54,7 @@ Tuning is typically placed:
 For each window and candidate truncation config:
 
 1. Apply DCT3D → truncate to `(keep_h, keep_w, keep_t)` → inverse transform.
-2. Compute RMSE on **finite** entries only (NaNs from padding are ignored).
+2. Compute explained energy/variance on **finite** entries only (NaNs from padding are ignored).
 3. Aggregate over chunks and windows.
 
 Selection rule (per `(role, signal)`):
@@ -97,7 +97,7 @@ tune_dct3d:
       output: 0.01
 ```
 
-Thresholds are compared against the aggregated RMSE score per signal.
+Thresholds are compared against the aggregated explained energy score per signal.
 
 ### 3) Search space
 Candidate truncation parameters:
