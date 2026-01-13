@@ -19,16 +19,16 @@ preprocess:
 
 tune_dct3d:
   sampling:
-    n_shots: 10
+    n_shots: 1
     max_windows: 2000
 
   objective:
     thresholds:
-      input: 0.995
-      actuator: 0.995
-      output: 0.995
+      input: 0.999
+      actuator: 0.999
+      output: 0.999
 
   search_space:
-    keep_h: [1, 4, 8, 12, 16, 20, 32]
-    keep_w: [1, 4, 8, 12, 16, 20, 32]
-    keep_t: [2, 4, 6, 8, 10, 20, 30, 40, 50]
+    keep_h: [ 1, 4, 8, 12, 16, 20, 30, 40, 60, 90, 120 ]
+    keep_w: [ 1, 4, 8, 12, 16, 20, 32, 65 ]   # video is 65
+    keep_t: [ 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024 ]
