@@ -105,7 +105,7 @@ sources_and_signals:
     - - magnetics                         # remote version needs to be fixed
       - b_field_pol_probe_obv_field       # remote version needs to be fixed
     - - magnetics                         # remote version needs to be fixed
-      - b_field_pol_probe_omv_voltage     # remote version needs to be fixed  ge
+      - b_field_pol_probe_omv_voltage     # remote version needs to be fixed
     - - magnetics                         # remote version needs to be fixed
       - b_field_tor_probe_cc_field        # remote version needs to be fixed
     - - magnetics
