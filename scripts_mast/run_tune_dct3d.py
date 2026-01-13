@@ -28,9 +28,7 @@ import copy
 import logging
 from pathlib import Path
 
-import numpy as np
 import yaml
-from sympy.core.random import shuffle
 
 from scripts_mast.mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
@@ -69,7 +67,7 @@ def parse_args_tune_dct3d() -> argparse.Namespace:
     parser.add_argument(
         "--task",
         type=str,
-        default="pretrain_inputs_actuators_to_inputs_outputs",  # "_test",
+        default="_test",
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
     parser.add_argument(
