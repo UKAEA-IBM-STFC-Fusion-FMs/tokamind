@@ -225,6 +225,15 @@ class TuneDCT3DTransform:
             lambda: defaultdict(lambda: defaultdict(int))
         )
 
+        # Debug: log which signals are being evaluated (once per signal for the entire run).
+        debug_logged = getattr(self, "_debug_logged_signals", None)
+        if logger.isEnabledFor(logging.DEBUG):
+            if debug_logged is None:
+                debug_logged = set()
+                setattr(self, "_debug_logged_signals", debug_logged)
+        else:
+            debug_logged = None
+
         # 1) input/actuator: read from chunks
         if any(r in self.roles for r in ("input", "actuator")):
             chunks = window.get("chunks") or {}
@@ -242,6 +251,19 @@ class TuneDCT3DTransform:
                         x = np.asarray(values)
                         if x.size == 0 or x.ndim not in (1, 2, 3):
                             continue
+
+                        if debug_logged is not None:
+                            key = (role, name)
+                            if key not in debug_logged:
+                                logger.debug(
+                                    "TuneDCT3D evaluating | %s:%s shape=%s n_elem=%d candidates=%d",
+                                    role,
+                                    name,
+                                    tuple(x.shape),
+                                    int(x.size),
+                                    int(len(self.candidates)),
+                                )
+                                debug_logged.add(key)
 
                         # Representative shape for effective_dim ranking
                         self.rep_shape.setdefault((role, name), tuple(x.shape))
@@ -284,6 +306,18 @@ class TuneDCT3DTransform:
                     x = np.asarray(values)
                     if x.size == 0 or x.ndim not in (1, 2, 3):
                         continue
+
+                    if debug_logged is not None:
+                        key = ("output", name)
+                        if key not in debug_logged:
+                            logger.debug(
+                                "TuneDCT3D evaluating | output:%s shape=%s n_elem=%d candidates=%d",
+                                name,
+                                tuple(x.shape),
+                                int(x.size),
+                                int(len(self.candidates)),
+                            )
+                            debug_logged.add(key)
 
                     self.rep_shape.setdefault(("output", name), tuple(x.shape))
 
