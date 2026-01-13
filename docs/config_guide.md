@@ -84,7 +84,10 @@ The loader deep-merges configs in the following order (**later wins**):
 Put **stable, task-agnostic defaults** here:
 
 - `seed`
-- global `data` defaults (e.g., `local`, `subset_of_shots`)
+- `runtime` info: if `debug_logging` is true, the logger saves more diagnostics
+- global `data` defaults
+  - `local`: if `true` the CSD3 version of the MAST data is loaded -- you need permission to access it 
+  - `subset_of_shots`: number of analyzed shots (set to `null` to include all of them)
 - preprocessing that should not drift across phases (e.g., chunking, trimming)
 - model architecture defaults (`model.backbone`, `model.modality_heads`, adapter defaults)
 

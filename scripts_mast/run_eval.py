@@ -53,9 +53,6 @@ from mmt.eval import evaluate_metrics, save_traces_for_subset
 from mmt.checkpoints import load_best_weights
 
 
-DEBUG_MODE = False
-
-
 def parse_args_eval() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description="Run evaluation for a given task (convention-based configs)."
@@ -103,6 +100,7 @@ def main() -> None:
     num_workers_cache = cfg_data["cache"].get("num_workers", 0)
     keep_output_native = cfg_data.get("keep_output_native", False)
     local_flag = cfg_data.get("local", True)
+    debug_mode = cfg_mmt.runtime["debug_logging"]
 
     cfg_backbone = cfg_model["backbone"]
     cfg_modality_heads = cfg_model["modality_heads"]
@@ -123,7 +121,7 @@ def main() -> None:
         filename="eval.log",
         console=True,
     )
-    logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
+    logger.setLevel("DEBUG" if debug_mode else "INFO")
 
     logging.getLogger("mmt.Task").info(
         "task=%s | phase=%s | device=%s", cfg_mmt.task, cfg_mmt.phase, device
@@ -201,7 +199,7 @@ def main() -> None:
     }
 
     # Optional debug: iterate a single shot to exercise wrapper + transforms
-    if DEBUG_MODE and model_datasets["test"] is not None:
+    if debug_mode and model_datasets["test"] is not None:
         ds = model_datasets["test"]
         shot = ds[0]
         for _ in shot:

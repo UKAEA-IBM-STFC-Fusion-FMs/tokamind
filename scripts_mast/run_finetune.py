@@ -50,8 +50,6 @@ from mmt.data import (
 from mmt.models import MultiModalTransformer
 from mmt.train.loop import train_finetune
 
-DEBUG_MODE = False
-
 
 def parse_args_finetune() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -101,6 +99,7 @@ def main() -> None:
     num_workers_cache = cfg_data["cache"].get("num_workers", 0)
     keep_output_native = cfg_data.get("keep_output_native", False)
     local_flag = cfg_data.get("local", True)
+    debug_mode = cfg_mmt.runtime["debug_logging"]
 
     cfg_backbone = cfg_model["backbone"]
     cfg_modality_heads = cfg_model["modality_heads"]
@@ -121,7 +120,7 @@ def main() -> None:
         filename="finetune.log",
         console=True,
     )
-    logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
+    logger.setLevel("DEBUG" if debug_mode else "INFO")
 
     logging.getLogger("mmt.Task").info(
         "task=%s | phase=%s | device=%s", cfg_mmt.task, cfg_mmt.phase, device
@@ -211,7 +210,7 @@ def main() -> None:
     }
 
     # Optional debug: iterate a single shot to exercise wrapper + transforms
-    if DEBUG_MODE and model_datasets["train"] is not None:
+    if debug_mode and model_datasets["train"] is not None:
         ds = model_datasets["train"]
         shot = ds[0]
         for _ in shot:

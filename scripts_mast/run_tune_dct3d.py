@@ -57,8 +57,6 @@ from mmt.data import (
     WindowStreamedDataset,
 )
 
-DEBUG_MODE = False
-
 
 def parse_args_tune_dct3d() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -110,6 +108,7 @@ def main() -> None:
     cfg_tune = cfg_mmt.raw["tune_dct3d"]
     cfg_sampling = cfg_tune["sampling"]
 
+    debug_mode = cfg_mmt.runtime["debug_logging"]
     local_flag = cfg_data.get("local", True)
     n_shots = cfg_sampling.get("n_shots")
 
@@ -128,7 +127,7 @@ def main() -> None:
         filename=None,
         console=True,
     )
-    logger.setLevel("DEBUG" if DEBUG_MODE else "INFO")
+    logger.setLevel("DEBUG" if debug_mode else "INFO")
 
     logger = logging.getLogger("mmt.TuneDCT3D")
     logger.info(
