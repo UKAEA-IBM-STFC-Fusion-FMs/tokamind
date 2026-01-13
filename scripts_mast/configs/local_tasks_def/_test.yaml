@@ -7,24 +7,30 @@ sources_and_signals:
       - coil_current
     - - pf_active
       - solenoid_current
-#    - - summary
-#      - ip
+    - - summary
+      - ip
 
   actuator_name: &actuator_keys
     - - pf_active
       - coil_voltage
-#    - - summary
-#      - power_nbi
+    - - summary
+      - power_nbi
 
   output_name: &output_keys
-    - - pf_active
-      - coil_current
-    - - pf_active
-      - solenoid_current
-    - - summary
-      - ip
+#    - - pf_active
+#      - coil_current
+#    - - pf_active
+#      - solenoid_current
+#    - - summary
+#      - ip
     - - equilibrium
       - psi
+    - - thomson_scattering
+      - n_e
+    - - thomson_scattering
+      - t_e
+    - - soft_x_rays
+      - horizontal_cam_lower
 
 task_window_segmenter:
   input_keys: *input_keys

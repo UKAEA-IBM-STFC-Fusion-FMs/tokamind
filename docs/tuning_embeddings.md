@@ -99,15 +99,29 @@ tune_dct3d:
 
 Thresholds are compared against the aggregated explained energy score per signal.
 
-### 3) Search space
+### 3) Max budget
+Maximum allowed effective embedding dimension (number of kept coefficients) per role.
+Candidates whose `effective_dim` exceeds the budget are excluded.
+
+```yaml
+tune_dct3d:
+  objective:
+    max_budget:
+      input: 4096
+      actuator: 4096
+      output: 4096
+
+```
+
+### 4) Search space
 Candidate truncation parameters:
 
 ```yaml
 tune_dct3d:
   search_space:
-    keep_h: [4, 8, 12, 16]
-    keep_w: [4, 8, 12, 16]
-    keep_t: [2, 4, 6, 8, 10]
+    keep_h: [ 1, 4, 8, 16, 32, 64, 96, 128 ]
+    keep_w: [ 1, 4, 8, 16, 32, 65 ] 
+    keep_t: [ 1, 2, 4, 8, 16, 32, 64, 96, 128, 256, 512, 1024, 2048 ]
 ```
 
 ---

@@ -131,7 +131,7 @@ The training run to evaluate must be provided in `tasks_overrides/<task>/eval_ov
 Tuning defaults:
 
 - `tune_dct3d.sampling.*` (how many shots/windows)
-- `tune_dct3d.objective.*` (thresholds)
+- `tune_dct3d.objective.*` (thresholds and max budget)
 - `tune_dct3d.search_space.*` (keep_h/keep_w/keep_t)
 - `preprocess.valid_windows`
 

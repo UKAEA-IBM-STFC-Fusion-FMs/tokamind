@@ -24,11 +24,11 @@
 seed: 54
 
 runtime:
-  debug_logging: false
+  debug_logging: true
 
 data:
   local: false         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: null   # None / null → uses all shots;
+  subset_of_shots: 2   # None / null → uses all shots;
 
 preprocess:
   chunk:

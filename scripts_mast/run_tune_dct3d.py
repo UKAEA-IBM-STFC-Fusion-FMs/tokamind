@@ -65,7 +65,7 @@ def parse_args_tune_dct3d() -> argparse.Namespace:
     parser.add_argument(
         "--task",
         type=str,
-        default="_test",
+        default="_test",  # "pretrain_inputs_actuators_to_inputs_outputs",  # "_test",
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
     parser.add_argument(
@@ -189,6 +189,7 @@ def main() -> None:
         keep_w=cfg_tune["search_space"]["keep_w"],
         keep_t=cfg_tune["search_space"]["keep_t"],
         thresholds=cfg_tune["objective"]["thresholds"],
+        max_budget=cfg_tune["objective"]["max_budget"],
         roles=roles,
     )
 

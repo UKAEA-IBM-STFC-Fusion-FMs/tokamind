@@ -13,35 +13,47 @@ embeddings:
           keep_h: 1
           keep_w: 1
           keep_t: 2
+      summary-ip:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
     actuator:
       pf_active-coil_voltage:
         encoder_name: dct3d
         encoder_kwargs:
           keep_h: 4
           keep_w: 1
-          keep_t: 2
+          keep_t: 8
+      summary-power_nbi:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 4
     output:
       equilibrium-psi:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 20
-          keep_w: 8
+          keep_h: 16
+          keep_w: 16
           keep_t: 2
-      pf_active-coil_current:
+      soft_x_rays-horizontal_cam_lower:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 10
+          keep_h: 18
           keep_w: 1
-          keep_t: 2
-      pf_active-solenoid_current:
+          keep_t: 128
+      thomson_scattering-n_e:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
+          keep_h: 96
           keep_w: 1
-          keep_t: 2
-      summary-ip:
+          keep_t: 5
+      thomson_scattering-t_e:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
+          keep_h: 120
           keep_w: 1
-          keep_t: 6
+          keep_t: 5
