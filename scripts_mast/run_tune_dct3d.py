@@ -30,6 +30,7 @@ from pathlib import Path
 
 import numpy as np
 import yaml
+from sympy.core.random import shuffle
 
 from scripts_mast.mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
@@ -58,7 +59,7 @@ from mmt.data import (
     WindowStreamedDataset,
 )
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 
 def parse_args_tune_dct3d() -> argparse.Namespace:
@@ -68,7 +69,7 @@ def parse_args_tune_dct3d() -> argparse.Namespace:
     parser.add_argument(
         "--task",
         type=str,
-        default="_test",
+        default="pretrain_inputs_actuators_to_inputs_outputs",  # "_test",
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
     parser.add_argument(
@@ -109,8 +110,10 @@ def main() -> None:
     cfg_trim = cfg_prep["trim_chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
     cfg_tune = cfg_mmt.raw["tune_dct3d"]
+    cfg_sampling = cfg_tune["sampling"]
 
     local_flag = cfg_data.get("local", True)
+    n_shots = cfg_sampling.get("n_shots")
 
     # benchmark task config (with overrides such as subset_of_shots/local)
     cfg_task = load_task_definition(args.task)
@@ -149,8 +152,12 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Initialize MAST datasets
     # ------------------------------------------------------------------
-    train_shots_, test_shots_, val_shots_ = get_train_test_val_shots(
-        max_index=cfg_data["subset_of_shots"],
+
+    # we randomly select n_shots from the train
+    train_shots_, _, _ = get_train_test_val_shots(
+        max_index=n_shots,
+        shuffle=True,
+        seed=cfg_mmt.seed,
     )
 
     train_mast_dataset = initialize_MAST_dataset(
@@ -209,7 +216,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Shot-level dataset (wrapped) for tuning
     # ------------------------------------------------------------------
-    ds_shots_full = initialize_model_dataset(
+    model_dataset = initialize_model_dataset(
         train_mast_dataset,
         dict_task_metadata,
         cfg_task,
@@ -218,33 +225,10 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Random shot selection (optional)
-    # ------------------------------------------------------------------
-    cfg_sampling = cfg_tune["sampling"]
-    n_shots = cfg_sampling.get("n_shots")
-
-    all_indices = np.arange(len(ds_shots_full))
-    if n_shots is not None:
-        rng = np.random.default_rng(cfg_mmt.seed)
-        sel_indices = rng.choice(
-            all_indices, size=min(n_shots, len(all_indices)), replace=False
-        )
-        ds_shots_selected = [ds_shots_full[i] for i in sel_indices]
-    else:
-        ds_shots_selected = ds_shots_full
-
-    logger.info(
-        "ds_shots_full=%d, requested n_shots=%s, selected=%d",
-        len(ds_shots_full),
-        str(n_shots),
-        len(ds_shots_selected),
-    )
-
-    # ------------------------------------------------------------------
     # Window-level dataset (streaming)
     # ------------------------------------------------------------------
     ds_windows = WindowStreamedDataset(
-        ds_shots_selected,
+        model_dataset,
         shuffle_shots=False,
         seed=cfg_mmt.seed,
     )
