@@ -3,6 +3,8 @@ task_name: _test
 
 sources_and_signals:
   input_name: &input_keys
+    - - magnetics                         # remote version needs to be fixed
+      - b_field_pol_probe_obr_field       # remote version needs to be fixed
     - - pf_active
       - coil_current
     - - pf_active
