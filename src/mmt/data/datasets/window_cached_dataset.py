@@ -295,7 +295,7 @@ def materialize_tokenized_split_to_ram(
                 yield w
 
     flat_windows: List[Dict[str, Any]] = []
-    log_interval = 100
+    log_interval = 1000
 
     for n, w in enumerate(_iter_windows(), start=1):
         flat_windows.append(w)
@@ -304,7 +304,7 @@ def materialize_tokenized_split_to_ram(
             break
 
         if n % log_interval == 0:
-            logger.debug(
+            logger.info(
                 "Cached %d windows so far (RAM: %.3f GB)",
                 len(flat_windows),
                 get_ram_gb(),
