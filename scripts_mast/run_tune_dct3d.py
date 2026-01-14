@@ -76,7 +76,7 @@ def parse_args_tune_dct3d() -> argparse.Namespace:
     parser.add_argument(
         "--roles",
         type=str,
-        default=["input", "actuator", "output"],
+        default="input,actuator,output",
         help=(
             "Comma-separated roles to tune and write overrides for. "
             "Subset of: input, actuator, output. Default: input,actuator,output"
@@ -96,7 +96,7 @@ def main() -> None:
     # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_tune_dct3d()
-    roles = args.roles
+    roles = [r.strip() for r in args.roles.split(",") if r.strip()]
 
     cfg_mmt = load_experiment_config(
         task=args.task,
