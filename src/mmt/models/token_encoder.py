@@ -88,6 +88,12 @@ class TokenEncoder(nn.Module):
     • Device semantics follow the model: projection layers are moved to
       the model device via `model.to(device)`, and input vectors are
       cast to the correct device automatically in forward().
+
+    • Padding and token-drop semantics: MMTCollate may use negative sentinel
+      values (e.g., -1) in `id`/`mod`/`role` for padded or dropped tokens.
+      TokenEncoder clamps these indices for embedding lookup and masks their
+      metadata embeddings so they contribute nothing and are excluded from
+      attention.
     """
 
     def __init__(
@@ -246,21 +252,59 @@ class TokenEncoder(nn.Module):
         # ---------------------------------------------------------------
         # Metadata embeddings
         # ---------------------------------------------------------------
+        # MMTCollate uses negative sentinel values (e.g., -1) for padded or
+        # dropped tokens. Clamp to valid indices for embedding lookup and mask
+        # them out so they contribute nothing and are excluded from attention.
+        meta_keep = padding_mask & (sid >= 0) & (mod >= 0) & (role >= 0)
+
+        if self.debug_checks:
+            if bool((pos < 0).any()):
+                raise ValueError(
+                    "TokenEncoder: found negative indices in batch['pos']."
+                )
+            if bool((pos > self.max_positions).any()):
+                raise ValueError(
+                    f"TokenEncoder: batch['pos'] has max={int(pos.max())} > max_positions={self.max_positions}."
+                )
+            if bool((sid >= self.num_signals).any()):
+                raise ValueError(
+                    f"TokenEncoder: batch['id'] has max={int(sid.max())} >= num_signals={self.num_signals}."
+                )
+            if bool((mod >= self.num_modalities).any()):
+                raise ValueError(
+                    f"TokenEncoder: batch['mod'] has max={int(mod.max())} >= num_modalities={self.num_modalities}."
+                )
+            if bool((role >= 3).any()):
+                raise ValueError(
+                    f"TokenEncoder: batch['role'] has max={int(role.max())} >= 3."
+                )
+
+        pos_safe = pos.clamp(min=0, max=self.max_positions)
+        sid_safe = sid.clamp(min=0)
+        mod_safe = mod.clamp(min=0)
+        role_safe = role.clamp(min=0)
+
         pos_cls = torch.zeros(B, 1, dtype=torch.long, device=device)
         sid_cls = torch.full((B, 1), self.cls_id, dtype=torch.long, device=device)
 
-        pos_full = torch.cat([pos_cls, pos], dim=1)  # (B, L+1)
-        sid_full = torch.cat([sid_cls, sid], dim=1)  # (B, L+1)
+        pos_full = torch.cat([pos_cls, pos_safe], dim=1)  # (B, L+1)
+        sid_full = torch.cat([sid_cls, sid_safe], dim=1)  # (B, L+1)
 
-        tokens = tokens + self.pos_embed(pos_full) + self.id_embed(sid_full)
+        cls_mask = torch.ones(B, 1, dtype=torch.bool, device=device)
+        meta_keep_full = torch.cat([cls_mask, meta_keep], dim=1)  # (B, L+1)
 
-        # Non-CLS tokens also get modality and role embeddings
-        tokens[:, 1:, :] += self.mod_embed(mod) + self.role_embed(role)
+        tokens = tokens + (
+            self.pos_embed(pos_full) + self.id_embed(sid_full)
+        ) * meta_keep_full.unsqueeze(-1)
+
+        # Non-CLS tokens also get modality and role embeddings (masked)
+        tokens[:, 1:, :] += (
+            self.mod_embed(mod_safe) + self.role_embed(role_safe)
+        ) * meta_keep.unsqueeze(-1)
 
         # ---------------------------------------------------------------
         # Attention mask
         # ---------------------------------------------------------------
-        cls_mask = torch.ones(B, 1, dtype=torch.bool, device=device)
-        attn_keep = torch.cat([cls_mask, padding_mask], dim=1)
+        attn_keep = meta_keep_full
 
         return tokens, attn_keep
