@@ -19,7 +19,7 @@ from __future__ import annotations
 import argparse
 import logging
 
-from scripts_mast.mast_utils.benchmark_imports import (
+from mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
     initialize_model_dataset,
     get_task_metadata,

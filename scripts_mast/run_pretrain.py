@@ -18,14 +18,14 @@ from __future__ import annotations
 import argparse
 import logging
 
-from scripts_mast.mast_utils.benchmark_imports import (
+from mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
     initialize_model_dataset,
     get_task_metadata,
     get_train_test_val_shots,
 )
 
-from scripts_mast.mast_utils import (
+from mast_utils import (
     load_experiment_config,
     load_task_definition,
     build_signals_by_role_from_task_definition,

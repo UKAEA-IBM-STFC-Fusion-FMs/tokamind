@@ -25,7 +25,7 @@ from typing import Any, Dict
 import yaml
 
 from mmt.utils.paths import get_repo_root
-from scripts_mast.mast_utils.benchmark_imports import benchmark_get_task_config
+from .benchmark_imports import benchmark_get_task_config
 
 
 # Map: local task key -> YAML path relative to configs_root
