@@ -363,21 +363,33 @@ def run_one_epoch(
 
             # Gradient accumulation → optimizer step
             if (batch_idx + 1) % grad_accum_steps == 0:
+                did_step = True
+
                 if scaler is not None and scaler.is_enabled():
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
+
+                    prev_scale = scaler.get_scale()
                     scaler.step(optimizer)
                     scaler.update()
+
+                    # If scale decreased, step was skipped due to inf/nan grads
+                    did_step = scaler.get_scale() >= prev_scale
                 else:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
                     optimizer.step()
 
                 optimizer.zero_grad(set_to_none=True)
 
-                if scheduler is not None:
-                    scheduler.step()
-
-                global_step += 1
+                if did_step:
+                    if scheduler is not None:
+                        scheduler.step()
+                    global_step += 1
+                else:
+                    # Optional: log once in a while
+                    logger.warning(
+                        "AMP overflow detected: skipped optimizer/scheduler step."
+                    )
 
             t4 = time.perf_counter()
 
