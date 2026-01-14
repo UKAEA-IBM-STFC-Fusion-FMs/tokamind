@@ -11,6 +11,10 @@ This script:
 
     tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
 
+  and also archives a timestamped copy to:
+
+    tasks_overrides/<task>/embeddings_overrides/history/dct3d_<timestamp>.yaml
+
 This phase does not train the transformer; it tunes embedding parameters only.
 
 Notes
@@ -26,6 +30,7 @@ from __future__ import annotations
 import argparse
 import copy
 import logging
+import datetime
 from pathlib import Path
 
 import yaml
@@ -306,10 +311,18 @@ def main() -> None:
     out_path = Path(cfg_mmt.paths["run_dir"]) / "embeddings_overrides" / "dct3d.yaml"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with out_path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(overrides_out, f, sort_keys=False, default_flow_style=False)
+    # Also archive a timestamped copy for history (to avoid losing prior good runs).
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    hist_dir = out_path.parent / "history"
+    hist_dir.mkdir(parents=True, exist_ok=True)
+    hist_path = hist_dir / f"dct3d_{ts}.yaml"
+
+    for p in (out_path, hist_path):
+        with p.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(overrides_out, f, sort_keys=False, default_flow_style=False)
 
     logger.info("Wrote tuned embedding overrides to %s", out_path)
+    logger.info("Archived tuned embedding overrides to %s", hist_path)
 
 
 if __name__ == "__main__":
