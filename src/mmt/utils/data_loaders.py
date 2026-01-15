@@ -30,6 +30,18 @@ Key behaviour
 Exports
 -------
 - initialize_mmt_dataloaders
+
+Performance defaults
+--------------------
+When num_workers > 0, we force:
+
+  * prefetch_factor=1
+  * persistent_workers=True
+
+This reduces the number of in-flight batches (and therefore the number of
+shared storages / file descriptors) and avoids worker respawns every epoch.
+These defaults are especially helpful on cluster environments where the
+default ulimit for open file descriptors can be low.
 """
 
 from __future__ import annotations
@@ -202,6 +214,13 @@ def initialize_mmt_dataloaders(
                 f"shuffle={effective_shuffle}, num_workers={num_workers}"
             )
 
+        # Performance / robustness defaults for multiprocessing.
+        # NOTE: PyTorch only accepts these arguments when num_workers > 0.
+        dl_kwargs: Dict[str, object] = {}
+        if int(num_workers) > 0:
+            dl_kwargs["prefetch_factor"] = 1
+            dl_kwargs["persistent_workers"] = True
+
         # Actual DataLoader creation
         loader = DataLoader(
             dataset=ds,
@@ -213,6 +232,7 @@ def initialize_mmt_dataloaders(
             worker_init_fn=worker_fn,
             generator=generator,
             pin_memory=pin_memory,
+            **dl_kwargs,
         )
 
         # Tag loader with streaming info (Option A core)
