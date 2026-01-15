@@ -92,7 +92,7 @@ def compute_loss_pred_space(
     Returns
     -------
     loss : Tensor (scalar)
-        Aggregated loss on the same device/dtype as preds.
+        Aggregated loss in float32 on the same device as preds (AMP-safe).
 
     logs : Dict[output_key, float]
         Per-output loss values (coeff-space MSE), detached to Python
@@ -100,11 +100,11 @@ def compute_loss_pred_space(
     """
     if not preds:
         # No predictions → loss = 0 by convention
-        return torch.tensor(0.0), {}
+        return torch.tensor(0.0, dtype=torch.float32), {}
 
     # Use first prediction as reference for device/dtype
     ref = next(iter(preds.values()))
-    device, dtype = ref.device, ref.dtype
+    device, _dtype = ref.device, torch.float32
 
     per_out_losses: list[Tensor] = []
     per_out_weights: list[float] = []
@@ -134,7 +134,9 @@ def compute_loss_pred_space(
 
         # Per-sample MSE in coeff space
         # y_pred, y_t: (B, K) → per-sample: (B,)
-        per_sample = ((y_pred - y_t) ** 2).mean(dim=1)
+        # Compute loss in float32 for AMP stability.
+        diff = (y_pred - y_t).to(torch.float32)
+        per_sample = diff.square().mean(dim=1)
         L_o = per_sample[mask].mean()
 
         # Per-output weight (if provided)
@@ -148,10 +150,10 @@ def compute_loss_pred_space(
 
     if not per_out_losses:
         # No supervised outputs in this batch
-        return torch.zeros((), device=device, dtype=dtype), logs
+        return torch.zeros((), device=device, dtype=torch.float32), logs
 
     per_out = torch.stack(per_out_losses)  # (num_outputs_supervised,)
-    weights = torch.tensor(per_out_weights, device=device, dtype=dtype)
+    weights = torch.tensor(per_out_weights, device=device, dtype=torch.float32)
 
     if float(weights.sum()) > 0.0:
         # Normalised weighted average across outputs
