@@ -30,7 +30,7 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: null  # we evaluate on all the possible windows
+    window_stride_sec: null  # if null we evaluate on all the possible windows
 
 
 loader:
