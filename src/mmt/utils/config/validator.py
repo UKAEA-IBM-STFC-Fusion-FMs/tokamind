@@ -199,6 +199,18 @@ def _validate_loader(cfg: Dict[str, Any]) -> None:
                 "loader.batches_per_epoch must be set (int >= 1)."
             )
 
+    # Cached windows are already precomputed and collation is typically Python-heavy.
+    # In this mode, multi-worker DataLoaders rarely help and can be slower
+    # (and on some systems may increase file-descriptor pressure).
+    if cache_enable:
+        num_workers = int(loader_cfg.get("num_workers", 0) or 0)
+        if num_workers > 0:
+            warnings.warn(
+                "[MMT config] data.cache.enable=true: prefer loader.num_workers=0 (or at most 1). "
+                "Multi-workers rarely help when each item is already precomputed and collation is Python-heavy.",
+                stacklevel=2,
+            )
+
 
 # ---------------------------------------------------------------------------
 # model_source.load_parts normalization
