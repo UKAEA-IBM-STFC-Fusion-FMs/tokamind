@@ -27,6 +27,7 @@ from .transforms.compose import ComposeTransforms
 # Core utilities
 # -----------------------------
 from .collate import MMTCollate
+from .data_loaders import initialize_mmt_dataloaders
 from .signal_spec import (
     SignalSpec,
     build_signal_specs,
@@ -49,6 +50,7 @@ __all__ = [
     "TuneDCT3DTransform",
     "ComposeTransforms",
     "MMTCollate",
+    "initialize_mmt_dataloaders",
     "SignalSpec",
     "build_signal_specs",
     "infer_modality",

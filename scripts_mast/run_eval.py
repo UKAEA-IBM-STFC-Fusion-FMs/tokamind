@@ -42,11 +42,11 @@ from mmt.utils.config.validator import validate_config
 from mmt.utils import (
     set_seed,
     setup_logging,
-    initialize_mmt_dataloaders,
 )
 from mmt.data import (
     build_signal_specs,
     build_codecs,
+    initialize_mmt_dataloaders,
 )
 from mmt.models import MultiModalTransformer
 from mmt.eval import evaluate_metrics, save_traces_for_subset
