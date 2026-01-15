@@ -24,11 +24,11 @@
 seed: 54
 
 runtime:
-  debug_logging: true
+  debug_logging: false
 
 data:
-  local: false         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: 2   # None / null → uses all shots;
+  local: true         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: 8   # None / null → uses all shots;
 
 preprocess:
   chunk:
@@ -40,23 +40,23 @@ preprocess:
 
 model:
   backbone:
-    d_model: 128  # 256
-    n_layers: 2   # 4
-    n_heads: 2    # 8
-    dim_ff: 256   # 1024
+    d_model: 192  # 128
+    n_layers: 4   # 2
+    n_heads: 4    # 2
+    dim_ff: 768   # 256
     dropout: 0.1
-    activation: "relu"
+    activation: relu
 
   modality_heads:
     timeseries:
-      hidden: 128
-      out_dim: 128
-    profile:
-      hidden: 128
-      out_dim: 128
-    video:
       hidden: 192
-      out_dim: 128
+      out_dim: 192
+    profile:
+      hidden: 192
+      out_dim: 192
+    video:
+      hidden: 256
+      out_dim: 192
 
   output_adapters:
     hidden_default: 0

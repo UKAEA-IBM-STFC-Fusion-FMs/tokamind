@@ -10,20 +10,20 @@
 
 
 collate:
-  p_drop_inputs: 0.08
+  p_drop_inputs: 0.1
   p_drop_inputs_overrides: {}
 #    pf_active-solenoid_current: 0.1
   p_drop_outputs: 0.0
   p_drop_outputs_overrides: {}
   p_drop_actuators: 0.0
   p_drop_actuators_overrides: {}
-  p_drop_inputs_chunks: 0.08
+  p_drop_inputs_chunks: 0.1
   p_drop_actuators_chunks: 0.0
 
 data:
   cache:
     enable: true
-    num_workers: 4
+    num_workers: 16
   keep_output_native: false
 
 preprocess:
@@ -37,7 +37,7 @@ preprocess:
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
 
 loader:
-  batch_size: 100
+  batch_size: 256
   num_workers: 0
   shuffle: true
   drop_last: false
@@ -78,7 +78,7 @@ train:
   resume: false
 
   early_stop:
-    patience: 5
+    patience: 8
     delta: 0.0
 
   loss:
@@ -100,13 +100,13 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 5e-4        # null: inherit from backbone
-          backbone: 5e-4  # 5e-4
-          modality_heads: 2e-3
-          output_adapters: 2e-3
+          token_encoder: 3e-4          # null: inherit from backbone
+          backbone: 2e-4
+          modality_heads: 5e-4
+          output_adapters: 5e-4
         wd:
-          token_encoder: 0.05        # null: inherit from backbone
-          backbone: 0.05  # 0.05
+          token_encoder: 0.05          # null: inherit from backbone
+          backbone: 0.05
           modality_heads: 0.05
           output_adapters: 0.05
 
@@ -117,17 +117,17 @@ train:
         output_adapters: false
 
     - name: pretrain_main
-      epochs: 0
+      epochs: 30
 
       scheduler:
         grad_accum_steps: 2
 
       optimizer:
         lr:
-          token_encoder: 5e-4        # null: inherit from backbone
-          backbone: 5e-5
-          modality_heads: 1e-3
-          output_adapters: 1e-3
+          token_encoder: 3e-4        # null: inherit from backbone
+          backbone: 1e-4
+          modality_heads: 3e-4
+          output_adapters: 3e-4
         wd:
           token_encoder: 0.05        # null: inherit from backbone
           backbone: 0.05
