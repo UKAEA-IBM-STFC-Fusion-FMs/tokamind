@@ -20,6 +20,7 @@ high-level orchestration of stages, epochs, checkpoints, and metrics.
 
 from __future__ import annotations
 import logging
+import math
 from typing import Any, Dict, Mapping, Tuple, Hashable, Optional
 
 import torch
@@ -339,17 +340,56 @@ def run_one_epoch(
             out = model(batch)
             preds = out.get("pred", {})
 
-            loss_t, _ = compute_loss_pred_space(
-                preds=preds,
-                y_true=batch["output_emb"],
-                output_mask=output_mask,
-                output_weights=output_weights,
+        # Compute loss outside autocast. The loss function itself also forces
+        # float32 computation for AMP stability.
+        loss_t, loss_logs = compute_loss_pred_space(
+            preds=preds,
+            y_true=batch["output_emb"],
+            output_mask=output_mask,
+            output_weights=output_weights,
+        )
+
+        # Optional: per-output loss logging (enable with logger level DEBUG).
+        if loss_logs and logger.isEnabledFor(logging.DEBUG):
+            per_out_str = ", ".join(
+                f"{k}={v:.3e}"
+                for k, v in sorted(loss_logs.items(), key=lambda kv: str(kv[0]))
+            )
+            logger.debug(
+                "[LOSS] batch %d (%s) per-output: %s",
+                batch_idx,
+                "train" if train else "val",
+                per_out_str,
             )
 
-            if train and grad_accum_steps > 1:
-                loss_for_backprop = loss_t / float(grad_accum_steps)
-            else:
-                loss_for_backprop = loss_t
+        # Fail fast on non-finite loss to surface the offending output key.
+        if (not torch.isfinite(loss_t).item()) or any(
+            not math.isfinite(v) for v in loss_logs.values()
+        ):
+            bad_keys = [k for k, v in loss_logs.items() if not math.isfinite(v)]
+            first_bad = bad_keys[0] if bad_keys else None
+            per_out_str = ", ".join(
+                f"{k}={v:.3e}"
+                for k, v in sorted(loss_logs.items(), key=lambda kv: str(kv[0]))
+            )
+            logger.error(
+                "[LOSS] Non-finite loss detected at batch %d (%s). loss=%s first_bad=%r",
+                batch_idx,
+                "train" if train else "val",
+                float(loss_t.detach().cpu().item()),
+                first_bad,
+            )
+            if per_out_str:
+                logger.error("[LOSS] Per-output losses: %s", per_out_str)
+            raise RuntimeError(
+                f"Non-finite loss detected (batch={batch_idx}, train={train}, "
+                f"first_bad={first_bad!r})."
+            )
+
+        if train and grad_accum_steps > 1:
+            loss_for_backprop = loss_t / float(grad_accum_steps)
+        else:
+            loss_for_backprop = loss_t
         t2 = time.perf_counter()
 
         # ----------------------- BACKWARD ----------------------
@@ -363,33 +403,21 @@ def run_one_epoch(
 
             # Gradient accumulation → optimizer step
             if (batch_idx + 1) % grad_accum_steps == 0:
-                did_step = True
-
                 if scaler is not None and scaler.is_enabled():
                     scaler.unscale_(optimizer)
                     torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
-
-                    prev_scale = scaler.get_scale()
                     scaler.step(optimizer)
                     scaler.update()
-
-                    # If scale decreased, step was skipped due to inf/nan grads
-                    did_step = scaler.get_scale() >= prev_scale
                 else:
                     torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
                     optimizer.step()
 
                 optimizer.zero_grad(set_to_none=True)
 
-                if did_step:
-                    if scheduler is not None:
-                        scheduler.step()
-                    global_step += 1
-                else:
-                    # Optional: log once in a while
-                    logger.warning(
-                        "AMP overflow detected: skipped optimizer/scheduler step."
-                    )
+                if scheduler is not None:
+                    scheduler.step()
+
+                global_step += 1
 
             t4 = time.perf_counter()
 
