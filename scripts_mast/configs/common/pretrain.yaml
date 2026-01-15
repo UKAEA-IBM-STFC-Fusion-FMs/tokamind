@@ -96,7 +96,7 @@ train:
       epochs: 2   # if resume = true, total number of epochs, not number of new epochs
 
       scheduler:
-        grad_accum_steps: 2
+        grad_accum_steps: 1
 
       optimizer:
         lr:
@@ -120,7 +120,7 @@ train:
       epochs: 30
 
       scheduler:
-        grad_accum_steps: 2
+        grad_accum_steps: 1
 
       optimizer:
         lr:
