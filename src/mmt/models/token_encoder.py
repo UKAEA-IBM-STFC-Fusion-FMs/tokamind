@@ -1,7 +1,7 @@
 """
 Token encoder for MMT.
 
-The TokenEncoder converts ragged per-token embeddings produced by the data
+The TokenEncoder converts packed token embeddings produced by the data
 pipeline (BuildTokensTransform + MMTCollate) into a dense token tensor of shape
 (B, L+1, d_model) suitable for the transformer backbone.
 
@@ -62,11 +62,12 @@ class TokenEncoder(nn.Module):
     Batch structure expected from MMTCollate
     -------------------------------------------------------------------
     batch = {
-        "emb":  List[List[Tensor]]        # emb[b][t] has shape (D_i,)
-        "pos":  LongTensor(B, L)
-        "id":   LongTensor(B, L)          # physical signal id
-        "mod":  LongTensor(B, L)          # modality id
-        "role": LongTensor(B, L)          # 0=input, 1=actuator, 2=output
+        "emb":       Dict[int, Tensor]         # emb[sid] has shape (N_sid, D_sid)
+        "emb_index": Dict[int, LongTensor]     # flat indices (b * L + t), shape (N_sid,)
+        "pos":       LongTensor(B, L)
+        "id":        LongTensor(B, L)          # signal id (PAD_ID = -1)
+        "mod":       LongTensor(B, L)          # modality id (PAD_MOD = -1)
+        "role":      LongTensor(B, L)          # 0=input, 1=actuator, 2=output (PAD_ROLE = -1)
         "padding_mask": BoolTensor(B, L)
     }
 
@@ -88,12 +89,6 @@ class TokenEncoder(nn.Module):
     • Device semantics follow the model: projection layers are moved to
       the model device via `model.to(device)`, and input vectors are
       cast to the correct device automatically in forward().
-
-    • Padding and token-drop semantics: MMTCollate may use negative sentinel
-      values (e.g., -1) in `id`/`mod`/`role` for padded or dropped tokens.
-      TokenEncoder clamps these indices for embedding lookup and masks their
-      metadata embeddings so they contribute nothing and are excluded from
-      attention.
     """
 
     def __init__(
@@ -197,114 +192,105 @@ class TokenEncoder(nn.Module):
     # ------------------------------------------------------------------
     def forward(self, batch: Dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
         emb = batch["emb"]
+        emb_index = batch["emb_index"]
         pos = batch["pos"]
         sid = batch["id"]
         mod = batch["mod"]
         role = batch["role"]
         padding_mask = batch["padding_mask"]
 
-        if not isinstance(emb, list):
-            raise TypeError("batch['emb'] must be a list-of-lists of tensors.")
+        if not isinstance(emb, dict):
+            raise TypeError("batch['emb'] must be a dict[int, Tensor] (packed by sid).")
+        if not isinstance(emb_index, dict):
+            raise TypeError("batch['emb_index'] must be a dict[int, LongTensor].")
 
         B, L = pos.shape
         device = pos.device
 
         # ---------------------------------------------------------------
-        # Project token content
+        # Project token content (scatter by sid → dense (B, L, d_model))
         # ---------------------------------------------------------------
-        tokens = torch.zeros(B, L, self.d_model, dtype=torch.float32, device=device)
+        tokens_flat = torch.zeros(
+            B * L, self.d_model, dtype=torch.float32, device=device
+        )
 
-        for b in range(B):
-            for t in range(L):
-                if not padding_mask[b, t]:
-                    continue
+        for sid_i, vecs in emb.items():
+            if not isinstance(vecs, torch.Tensor):
+                raise TypeError(
+                    f"emb[{sid_i!r}] must be a torch.Tensor, got {type(vecs)}"
+                )
+            if vecs.ndim != 2:
+                raise ValueError(
+                    f"emb[{sid_i!r}] must be 2D (N_sid, D_sid), got shape={tuple(vecs.shape)}"
+                )
 
-                vec = emb[b][t]
-                if not isinstance(vec, torch.Tensor):
-                    raise TypeError("emb[b][t] must be a torch.Tensor.")
+            idx = emb_index.get(sid_i)
+            if idx is None:
+                raise KeyError(f"Missing emb_index for sid={sid_i}")
+            if not isinstance(idx, torch.Tensor):
+                idx = torch.as_tensor(idx, dtype=torch.long, device=device)
+            else:
+                idx = idx.to(device=device, dtype=torch.long)
 
-                if vec.ndim != 1:
-                    raise ValueError(
-                        f"emb[{b}][{t}] must be a 1D vector, got shape={tuple(vec.shape)}."
-                    )
+            if idx.ndim != 1:
+                raise ValueError(
+                    f"emb_index[{sid_i!r}] must be 1D (N_sid,), got shape={tuple(idx.shape)}"
+                )
+            if vecs.shape[0] != idx.shape[0]:
+                raise ValueError(
+                    f"Row mismatch for sid={sid_i}: emb has N={vecs.shape[0]} rows, "
+                    f"emb_index has N={idx.shape[0]} indices."
+                )
 
-                in_dim = vec.shape[0]
-                sid_bt = int(sid[b, t].item())
+            canonical = self.sid_to_key.get(int(sid_i))
+            if canonical is None:
+                raise KeyError(f"No canonical key found for signal_id={sid_i}.")
+            if canonical not in self.proj_layers:
+                raise KeyError(
+                    f"No projection layer found for canonical_key={canonical!r}. "
+                    "Only token roles (input/actuator) should appear in batch['emb']."
+                )
 
-                if sid_bt >= 0 and in_dim > 0:
-                    canonical = self.sid_to_key.get(sid_bt)
-                    if canonical is None:
-                        raise KeyError(
-                            f"No canonical key found for signal_id={sid_bt}."
-                        )
+            proj = self._get_proj(canonical, int(vecs.shape[1]))
+            y = proj(vecs.to(device=device, dtype=torch.float32))
+            tokens_flat.index_copy_(0, idx, y)
 
-                    proj = self._get_proj(canonical, in_dim)
-                    tokens[b, t] = proj(
-                        vec.to(device=tokens.device, dtype=torch.float32)
-                    )
+        tokens = tokens_flat.view(B, L, self.d_model)
 
         # ---------------------------------------------------------------
         # CLS token
         # ---------------------------------------------------------------
         cls_tok = self.cls_content.view(1, 1, -1).expand(B, 1, -1)
-        tokens = torch.cat([cls_tok, tokens], dim=1)
+        tokens = torch.cat([cls_tok, tokens], dim=1)  # (B, L+1, d_model)
 
         # ---------------------------------------------------------------
-        # Metadata embeddings
+        # Attention keep mask (exclude PAD/dropped tokens)
         # ---------------------------------------------------------------
-        # MMTCollate uses negative sentinel values (e.g., -1) for padded or
-        # dropped tokens. Clamp to valid indices for embedding lookup and mask
-        # them out so they contribute nothing and are excluded from attention.
-        meta_keep = padding_mask & (sid >= 0) & (mod >= 0) & (role >= 0)
+        keep = padding_mask.to(dtype=torch.bool) & (sid >= 0)
+        cls_keep = torch.ones(B, 1, dtype=torch.bool, device=device)
+        attn_keep = torch.cat([cls_keep, keep], dim=1)  # (B, L+1)
 
-        if self.debug_checks:
-            if bool((pos < 0).any()):
-                raise ValueError(
-                    "TokenEncoder: found negative indices in batch['pos']."
-                )
-            if bool((pos > self.max_positions).any()):
-                raise ValueError(
-                    f"TokenEncoder: batch['pos'] has max={int(pos.max())} > max_positions={self.max_positions}."
-                )
-            if bool((sid >= self.num_signals).any()):
-                raise ValueError(
-                    f"TokenEncoder: batch['id'] has max={int(sid.max())} >= num_signals={self.num_signals}."
-                )
-            if bool((mod >= self.num_modalities).any()):
-                raise ValueError(
-                    f"TokenEncoder: batch['mod'] has max={int(mod.max())} >= num_modalities={self.num_modalities}."
-                )
-            if bool((role >= 3).any()):
-                raise ValueError(
-                    f"TokenEncoder: batch['role'] has max={int(role.max())} >= 3."
-                )
-
-        pos_safe = pos.clamp(min=0, max=self.max_positions)
-        sid_safe = sid.clamp(min=0)
-        mod_safe = mod.clamp(min=0)
-        role_safe = role.clamp(min=0)
-
+        # ---------------------------------------------------------------
+        # Metadata embeddings (clamped indices, then masked by `keep`)
+        # ---------------------------------------------------------------
         pos_cls = torch.zeros(B, 1, dtype=torch.long, device=device)
         sid_cls = torch.full((B, 1), self.cls_id, dtype=torch.long, device=device)
 
-        pos_full = torch.cat([pos_cls, pos_safe], dim=1)  # (B, L+1)
-        sid_full = torch.cat([sid_cls, sid_safe], dim=1)  # (B, L+1)
+        pos_safe = pos.clamp(min=0, max=self.max_positions)
+        sid_safe = sid.clamp(min=0, max=self.num_signals)
 
-        cls_mask = torch.ones(B, 1, dtype=torch.bool, device=device)
-        meta_keep_full = torch.cat([cls_mask, meta_keep], dim=1)  # (B, L+1)
+        # For PAD slots we clamp to 0, then mask out below.
+        max_mod = max(self.num_modalities - 1, 0)
+        mod_safe = mod.clamp(min=0, max=max_mod)
+        role_safe = role.clamp(min=0, max=2)
 
-        tokens = tokens + (
-            self.pos_embed(pos_full) + self.id_embed(sid_full)
-        ) * meta_keep_full.unsqueeze(-1)
+        pos_full = torch.cat([pos_cls, pos_safe], dim=1)
+        sid_full = torch.cat([sid_cls, sid_safe], dim=1)
 
-        # Non-CLS tokens also get modality and role embeddings (masked)
-        tokens[:, 1:, :] += (
-            self.mod_embed(mod_safe) + self.role_embed(role_safe)
-        ) * meta_keep.unsqueeze(-1)
+        tokens = tokens + self.pos_embed(pos_full) + self.id_embed(sid_full)
+        tokens[:, 1:, :] += self.mod_embed(mod_safe) + self.role_embed(role_safe)
 
-        # ---------------------------------------------------------------
-        # Attention mask
-        # ---------------------------------------------------------------
-        attn_keep = meta_keep_full
+        # Mask out PAD/dropped token vectors (non-CLS positions only).
+        tokens[:, 1:, :] = tokens[:, 1:, :] * keep.unsqueeze(-1).to(tokens.dtype)
 
         return tokens, attn_keep

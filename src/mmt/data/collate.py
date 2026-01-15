@@ -4,7 +4,7 @@ Batch collation for the MMT window-level dataloaders.
 MMTCollate takes a list of per-window dictionaries (produced by the transforms
 pipeline) and builds a padded, model-ready batch by:
 
-- padding variable-length token sequences and keeping embeddings ragged,
+x- padding variable-length token sequences and packing token embeddings by signal_id,
 - applying per-token and per-chunk dropout for inputs/actuators (and optional
   per-output dropout),
 - producing masks for padding and dropped tokens,
@@ -42,7 +42,7 @@ class MMTCollate:
       • Pads variable-length token sequences
       • Applies input, actuator, chunk, and output dropout
       • Builds masks for padding and dropped tokens
-      • Preserves ragged embeddings (per-token projection happens in the model)
+      • Packs token embeddings by signal_id (per-token projection happens in the model)
       • Uses explicit PAD semantics so that PAD tokens are never confused
         with real signals (sid = -1, role = -1, mod = -1, pos = 0)
 
@@ -83,11 +83,20 @@ class MMTCollate:
 
     Token-level inputs
     ------------------
-    "emb"            : List[List[torch.Tensor]]
-                       Ragged embeddings before projection:
-                         emb[b][t] is a 1D tensor (D_i,)
-                       Padded positions (t >= length_b) are left as empty
-                       tensors (shape (0,)).
+    "emb"            : Dict[int, torch.Tensor]
+                       Packed token embeddings by signal_id (sid).
+                       For each sid, emb[sid] has shape (N_sid, D_sid), where
+                       N_sid is the number of kept tokens of that sid in this batch.
+
+    "emb_index"      : Dict[int, LongTensor]
+                       For each sid, emb_index[sid] has shape (N_sid,) and contains
+                       flattened indices into the padded (B, L) token grid:
+                           flat_index = b * L + t
+                       aligned row-by-row with emb[sid].
+
+                       This representation drastically reduces the number of
+                       torch.Storage objects crossing process boundaries (fixes
+                       "Too many open files" issues with multi-worker DataLoaders).
 
     "pos"            : LongTensor (B, L)
     "id"             : LongTensor (B, L)
@@ -207,7 +216,7 @@ class MMTCollate:
         id_to_output_name: Dict[int, str] = {}
 
         for w in flat_windows:
-            # Keep embeddings ragged (list-of-arrays)
+            # Token embeddings are a ragged list-of-arrays per window (we pack them by sid at the end).
             emb_lists.append(w["emb_chunks"])
 
             # Force signed dtypes (prevents any accidental uint wrap)
@@ -247,7 +256,7 @@ class MMTCollate:
         input_mask = np.ones((B, L_max), dtype=np.int8)
         actuator_mask = np.ones((B, L_max), dtype=np.int8)
 
-        # Ragged embeddings kept as Python nested lists of np.ndarrays
+        # Per-token embeddings (NumPy) during collation. These are packed by sid before returning.
         emb_batch: List[List[np.ndarray]] = [
             [self._empty_emb for _ in range(L_max)] for _ in range(B)
         ]
@@ -263,7 +272,7 @@ class MMTCollate:
             mod_batch[i, :Li] = mod_lists[i]
             role_batch[i, :Li] = role_lists[i]
 
-            # Ragged fill
+            # Fill token embeddings / names
             for t in range(Li):
                 emb_batch[i][t] = emb_lists[i][t]
                 name_batch[i][t] = name_lists[i][t]
@@ -466,15 +475,39 @@ class MMTCollate:
         input_mask_t = torch.from_numpy(input_mask.astype(bool))
         actuator_mask_t = torch.from_numpy(actuator_mask.astype(bool))
 
-        # Ragged embeddings
-        emb_t: List[List[torch.Tensor]] = [
-            [torch.empty(0) for _ in range(L_max)] for _ in range(B)
-        ]
+        # Packed embeddings by signal_id (sid).
+        #
+        # Instead of returning a nested List[List[Tensor]] (one tensor per token),
+        # we pack embeddings by sid to avoid creating thousands of small tensor
+        # storages per batch (which can trigger "Too many open files" errors when
+        # using multiprocessing DataLoaders).
+        emb_by_sid_np: Dict[int, List[np.ndarray]] = {}
+        emb_index_np: Dict[int, List[int]] = {}
+
         for i in range(B):
             for t in range(L_max):
+                sid_i = int(id_batch[i, t])
+                if sid_i == PAD_ID:
+                    continue
                 arr = emb_batch[i][t]
-                if arr is not None:
-                    emb_t[i][t] = torch.from_numpy(arr)
+                if arr is None or arr.size == 0:
+                    continue
+                emb_by_sid_np.setdefault(sid_i, []).append(arr)
+                emb_index_np.setdefault(sid_i, []).append(i * L_max + t)
+
+        emb_by_sid_t: Dict[int, torch.Tensor] = {}
+        emb_index_t: Dict[int, torch.Tensor] = {}
+
+        for sid_i, arr_list in emb_by_sid_np.items():
+            try:
+                stacked = np.stack(arr_list, axis=0)
+            except Exception as e:
+                shapes = [tuple(a.shape) for a in arr_list]
+                raise ValueError(
+                    f"Cannot stack embeddings for signal_id={sid_i}. shapes={shapes}"
+                ) from e
+            emb_by_sid_t[sid_i] = torch.from_numpy(stacked)
+            emb_index_t[sid_i] = torch.as_tensor(emb_index_np[sid_i], dtype=torch.long)
 
         # Outputs: embeddings (dense tensors of shape (B, D))
         output_emb_t: Dict[int, torch.Tensor] = {}
@@ -497,7 +530,8 @@ class MMTCollate:
         # 10. Assemble final batch dict (torch)
         # --------------------------------------------------------------- #
         batch_out: Dict[str, Any] = {
-            "emb": emb_t,
+            "emb": emb_by_sid_t,
+            "emb_index": emb_index_t,
             "pos": pos_t,
             "id": id_t,
             "mod": mod_t,

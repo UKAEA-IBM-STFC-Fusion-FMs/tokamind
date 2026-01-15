@@ -55,7 +55,7 @@ class MultiModalTransformer(nn.Module):
      -------------------------------------------------------------------------------
      1. TokenEncoder
      -------------------------------------------------------------------------------
-     The TokenEncoder receives batched per-token embeddings and metadata produced by
+     The TokenEncoder receives packed token embeddings (by signal_id) and metadata produced by
      `MMTCollate`. For each token it:
 
        • selects the correct projection layer for its signal_id and maps the
@@ -128,7 +128,8 @@ class MultiModalTransformer(nn.Module):
     -------------------------------------------------------------------------------
      The forward pass expects a batch dictionary containing at least:
 
-         batch["emb"]           : ragged List[List[Tensor]] per-token embeddings
+         batch["emb"]           : Dict[int, Tensor] packed by signal_id (sid)
+         batch["emb_index"]     : Dict[int, LongTensor] flat indices (b*L+t) aligned with emb[sid]
          batch["pos"]           : LongTensor (B, L)
          batch["id"]            : LongTensor (B, L)  — physical signal IDs
          batch["role"]          : LongTensor (B, L)
@@ -374,7 +375,8 @@ class MultiModalTransformer(nn.Module):
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """
         batch: output of MMTCollate, with at least:
-          * "emb"           : ragged embeddings (List[List[Tensor]])
+          * "emb"           : packed embeddings (Dict[int, Tensor])
+          * "emb_index"     : packed indices (Dict[int, LongTensor])
           * "pos", "id", "role" : LongTensor (B, L)
           * "padding_mask"  : BoolTensor (B, L)
         """
