@@ -252,7 +252,12 @@ class TokenEncoder(nn.Module):
                 )
 
             proj = self._get_proj(canonical, int(vecs.shape[1]))
+            # NOTE: under AMP autocast on CUDA, `proj(...)` may return bf16 even
+            # if we pass float32 inputs. `index_copy_` requires the same dtype
+            # on both sides, so we cast explicitly to the token buffer dtype.
             y = proj(vecs.to(device=device, dtype=torch.float32))
+            if y.dtype != tokens_flat.dtype:
+                y = y.to(dtype=tokens_flat.dtype)
             tokens_flat.index_copy_(0, idx, y)
 
         tokens = tokens_flat.view(B, L, self.d_model)
