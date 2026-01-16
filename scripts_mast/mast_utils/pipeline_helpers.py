@@ -64,6 +64,7 @@ from mmt.data import (
     TrimChunksTransform,
     EmbedChunksTransform,
     BuildTokensTransform,
+    FinalizeWindowTransform,
     ComposeTransforms,
     WindowStreamedDataset,
     WindowCachedDataset,
@@ -168,8 +169,9 @@ def build_default_transform(
     codecs:
         Codec mapping (signal_id -> codec).
     keep_output_native:
-        If True, EmbedChunksTransform will also keep the native output payloads
-        inside each window dict (needed for eval metrics/traces).
+        If True, the final window dict will keep native output payloads
+        (needed for eval metrics/traces). If False, native outputs are dropped
+        by FinalizeWindowTransform to reduce RAM usage (especially when caching).
 
     Returns
     -------
@@ -199,9 +201,9 @@ def build_default_transform(
             EmbedChunksTransform(
                 signal_specs=signal_specs,
                 codecs=codecs,
-                keep_output_native=keep_output_native,
             ),
             BuildTokensTransform(signal_specs=signal_specs),
+            FinalizeWindowTransform(keep_output_native=keep_output_native),
         ]
     )
 
@@ -217,6 +219,7 @@ def build_window_datasets(
     enable_cache: bool,
     num_workers_cache: int,
     seed: int,
+    shuffle_train: bool = True,
     cache_splits: Sequence[str] = ("train", "val"),
     max_windows_per_split: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -232,6 +235,9 @@ def build_window_datasets(
         Number of workers used by the caching materialisation.
     seed:
         Random seed (used by WindowStreamedDataset when shuffle_shots is enabled).
+    shuffle_train:
+        Either a bool applied to all splits, or a dict split->bool.
+        Note: this is *shot-level* shuffling for streaming datasets.
     cache_splits:
         Which splits to cache when enable_cache=True.
     max_windows_per_split:
@@ -269,7 +275,7 @@ def build_window_datasets(
             # DataLoader(shuffle=...) is ignored. To avoid repeatedly training on
             # the same prefix, we shuffle shots *here* for the training split.
             # Validation/test remain deterministic by default.
-            do_shuffle_shots = split.lower() == "train"
+            do_shuffle_shots = (split.lower() == "train") and shuffle_train
             ds = WindowStreamedDataset(
                 ds_stream,
                 shuffle_shots=do_shuffle_shots,

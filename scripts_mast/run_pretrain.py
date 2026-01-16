@@ -225,6 +225,7 @@ def main() -> None:
         enable_cache=enable_cache,
         num_workers_cache=num_workers_cache,
         seed=cfg_mmt.seed,
+        shuffle_train=cfg_loader["shuffle_train"],
         cache_splits=("train", "val"),
     )
 
