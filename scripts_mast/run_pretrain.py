@@ -91,13 +91,12 @@ def main() -> None:
     validate_config(cfg_mmt)
 
     cfg_data = cfg_mmt.data
+    cfg_cache = cfg_data["cache"]
     cfg_model = cfg_mmt.model
     cfg_loader = cfg_mmt.loader
     cfg_collate = cfg_mmt.collate
     cfg_train = cfg_mmt.train
 
-    enable_cache = cfg_data["cache"].get("enable", False)
-    num_workers_cache = cfg_data["cache"].get("num_workers", 0)
     keep_output_native = cfg_data.get("keep_output_native", False)
     local_flag = cfg_data.get("local", True)
     debug_mode = cfg_mmt.runtime["debug_logging"]
@@ -220,13 +219,17 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Window-level datasets (cached or streaming)
     # ------------------------------------------------------------------
+    mw = cfg_cache.get("max_windows") or {}
     datasets_windows = build_window_datasets(
         model_datasets=model_datasets,
-        enable_cache=enable_cache,
-        num_workers_cache=num_workers_cache,
+        enable_cache=cfg_cache.get("enable", False),
+        num_workers_cache=cfg_cache.get("num_workers", 0),
         seed=cfg_mmt.seed,
         shuffle_train=cfg_loader["shuffle_train"],
         cache_splits=("train", "val"),
+        cache_max_windows_train=mw.get("train", None),
+        cache_max_windows_val=mw.get("val", None),
+        cache_dtype=cfg_cache.get("dtype", None),
     )
 
     # ------------------------------------------------------------------

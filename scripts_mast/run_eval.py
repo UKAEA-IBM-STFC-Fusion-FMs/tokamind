@@ -92,12 +92,11 @@ def main() -> None:
     validate_config(cfg_mmt)
 
     cfg_data = cfg_mmt.data
+    cfg_cache = cfg_data["cache"]
     cfg_model = cfg_mmt.model
     cfg_loader = cfg_mmt.loader
     cfg_eval = cfg_mmt.eval
 
-    enable_cache = cfg_data["cache"].get("enable", False)
-    num_workers_cache = cfg_data["cache"].get("num_workers", 0)
     keep_output_native = cfg_data.get("keep_output_native", False)
     local_flag = cfg_data.get("local", True)
     debug_mode = cfg_mmt.runtime["debug_logging"]
@@ -210,10 +209,11 @@ def main() -> None:
     # ------------------------------------------------------------------
     datasets_windows = build_window_datasets(
         model_datasets=model_datasets,
-        enable_cache=enable_cache,
-        num_workers_cache=num_workers_cache,
+        enable_cache=cfg_cache.get("enable", False),
+        num_workers_cache=cfg_cache.get("num_workers", 0),
         seed=cfg_mmt.seed,
         cache_splits=("test",),  # eval uses test split only
+        cache_dtype=cfg_cache.get("dtype", None),
     )
 
     # ------------------------------------------------------------------

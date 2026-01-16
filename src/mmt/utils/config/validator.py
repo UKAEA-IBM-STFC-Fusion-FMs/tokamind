@@ -259,6 +259,7 @@ def validate_config(cfg: Union[Dict[str, Any], Any]) -> None:
             f"Unsupported phase: {phase} (allowed: {sorted(ALLOWED_PHASES)})"
         )
 
+    # validate phase-specific config
     if phase in ("pretrain", "finetune"):
         validate_train_config(cfgd)
     elif phase == "eval":
@@ -267,6 +268,18 @@ def validate_config(cfg: Union[Dict[str, Any], Any]) -> None:
         validate_tune_dct3d_config(cfgd)
     else:
         raise ValueError(f"Unsupported phase: {phase}")
+
+    # validate common fields
+    data = cfgd.get("data") or {}
+    cache = data.get("cache") or {}
+    if bool(cache.get("enable", False)):
+        dt = cache.get("dtype", None)
+        if dt is None:
+            cache["dtype"] = "float32"
+        elif dt not in ("float16", "float32"):
+            raise ValueError(
+                "data.cache.dtype must be 'float16' or 'float32' (or null)."
+            )
 
 
 def validate_train_config(cfg: Dict[str, Any]) -> None:

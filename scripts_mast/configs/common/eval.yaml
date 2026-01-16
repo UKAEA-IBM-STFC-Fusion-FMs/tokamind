@@ -19,10 +19,15 @@ model_source:
 eval_id: null
 
 data:
+  keep_output_native: false
   cache:
     enable: true
-    num_workers: 4
-  keep_output_native: true  # required for metrics/traces
+    dtype: float16          # or float32; default behavior if omitted is “no cast”
+    num_workers: 8
+    max_windows:
+      train: null
+      val: null
+
 
 
 preprocess:

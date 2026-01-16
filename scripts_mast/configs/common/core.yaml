@@ -27,7 +27,7 @@ runtime:
   debug_logging: false
 
 data:
-  local: true         # True = uses local dataset, False = HPC / remote
+  local: false         # True = uses local dataset, False = HPC / remote
   subset_of_shots: 8   # None / null → uses all shots;
 
 preprocess:
@@ -40,23 +40,23 @@ preprocess:
 
 model:
   backbone:
-    d_model: 192  # 128
-    n_layers: 4   # 2
-    n_heads: 4    # 2
-    dim_ff: 768   # 256
+    d_model: 256 # 192  # 128 256
+    n_layers: 6 # 6 4   # 2
+    n_heads: 8 # 8 4    # 2
+    dim_ff: 1024 # 1024 768   # 256
     dropout: 0.1
     activation: relu
 
   modality_heads:
     timeseries:
-      hidden: 192
-      out_dim: 192
+      hidden: 256  # 192
+      out_dim: 256  # 192
     profile:
-      hidden: 192
-      out_dim: 192
+      hidden: 256  # 192
+      out_dim: 256  # 192
     video:
-      hidden: 256
-      out_dim: 192
+      hidden: 384  # 256
+      out_dim: 256  # 192
 
   output_adapters:
     hidden_default: 0

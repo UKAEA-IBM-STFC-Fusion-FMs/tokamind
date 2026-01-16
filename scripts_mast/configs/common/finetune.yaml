@@ -22,10 +22,15 @@ collate:
   p_drop_actuators_chunks: 0.0
 
 data:
+  keep_output_native: false
   cache:
     enable: true
-    num_workers: 4
-  keep_output_native: false
+    dtype: float16          # or float32; default behavior if omitted is “no cast”
+    num_workers: 8
+    max_windows:
+      train: null
+      val: null
+
 
 preprocess:
   valid_windows:

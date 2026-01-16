@@ -45,7 +45,6 @@ Key properties:
 - **Low memory**: windows are produced on the fly.
 - **IterableDataset**: `DataLoader(shuffle=True)` is *not* applied by PyTorch for iterable datasets.
 - Shuffling happens at the **shot index** level (`shuffle_shots=True`) inside the dataset.
-- In the MMT entrypoints, `shuffle_shots` is enabled for the **train** split and disabled for **val/test** to keep evaluation deterministic.
 - Multi-worker support: each worker gets a slice of shot indices; shuffling is per-worker and seeded.
 
 Important caveat:
@@ -68,7 +67,7 @@ Key properties:
 
 - **Fastest per-step**: no per-window preprocessing in the training loop after caching.
 - **Map-style Dataset**: `len(dataset) == num_windows` (true window count).
-- `DataLoader(shuffle=True)` performs **window-level shuffling** (typically enabled for the **train** split only; controlled by `loader.shuffle_train`).
+- `DataLoader(shuffle=True)` performs **window-level shuffling**.
 - Easy to reason about epochs: one epoch = one pass over cached windows.
 
 When to use:
@@ -83,7 +82,7 @@ When to use:
 
 Caching is performed by:
 
-- `materialize_tokenized_split_to_ram(streaming_dataset, num_workers_cache=..., max_windows=...)`
+- `materialize_tokenized_split_to_ram(streaming_dataset, num_workers_cache=..., max_windows=..., dtype=..., shuffle_shots=..., seed=...)`
 
 Requirements for the input `streaming_dataset`:
 
@@ -95,6 +94,9 @@ Requirements for the input `streaming_dataset`:
 
 Parallel caching:
 
+- `prefetch_factor` is set to 1 when `num_workers_cache > 0` to reduce RAM spikes.
+- If `dtype` is set (e.g. float16), token embeddings and output embeddings are cast before storing windows in RAM.
+
 - PyTorch DataLoader workers cannot pickle generators.
 - To support `num_workers_cache > 0`, caching wraps the shot dataset with
   `FlattenedStreamingDataset`, which converts each `__getitem__` output into a **plain list**
@@ -102,15 +104,13 @@ Parallel caching:
 
 ---
 
-## Shuffling semantics
+## Shuffling semantics (important)
 
 ### Cached path
-- Shuffling is **window-level**, handled by `DataLoader(shuffle=True)` for the **train** split (controlled by `loader.train_shuffle`).
-- Validation/test loaders are **not shuffled** (deterministic).
+- Shuffling is **window-level**, handled by `DataLoader(shuffle=True)`.
 
 ### Streaming path
-- Shuffling is **shot-level**, handled by `WindowStreamedDataset(shuffle_shots=True)` for the **train** split.
-- Validation/test use `shuffle_shots=False` (deterministic).
+- Shuffling is **shot-level**, handled by `WindowStreamedDataset(shuffle_shots=True)`.
 - Within each shot, windows are yielded in the order produced by the upstream window generator.
 
 Practical implication:
@@ -127,7 +127,6 @@ Practical implication:
 For most users:
 
 - Start with **cached windows** for train/val because it’s simpler and faster.
-- Keep `loader.shuffle_train: true` for cached **training** (val/test remain deterministic).
 - Use **streaming windows** only when you hit RAM limits.
 
 
@@ -141,6 +140,6 @@ Use `loader.batches_per_epoch` (and/or cache windows).
 
 ### “Caching uses too much RAM”
 Reduce:
-- `max_windows_per_split` (or split-specific caps like `max_windows_train` / `max_windows_val`),
+- `data.cache.max_windows.train` / `data.cache.max_windows.val` (for debugging),
 - chunk counts (`preprocess.trim.max_chunks`),
 - embedding sizes (via `embeddings.yaml` / tuned overrides).

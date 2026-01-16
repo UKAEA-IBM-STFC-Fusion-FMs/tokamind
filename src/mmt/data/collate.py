@@ -385,30 +385,33 @@ class MMTCollate:
             raw_list: List[Optional[np.ndarray]] = []
             mask = np.ones((B,), dtype=np.int8)
             ref_shape: Optional[Tuple[int, ...]] = None
+            ref_dtype: Optional[np.dtype] = None
 
-            # First pass: collect embeddings and remember a reference shape
+            # First pass: collect embeddings and remember a reference shape + dtype
             for i in range(B):
                 emb = out_dicts[i].get(sig_id, None)
                 if emb is None:
                     mask[i] = 0
                     raw_list.append(None)
                 else:
-                    arr = np.asarray(emb, dtype=np.float32).reshape(-1)
+                    arr = np.asarray(emb)
+                    arr = arr.reshape(-1)
                     raw_list.append(arr)
                     if ref_shape is None:
                         ref_shape = arr.shape
+                        ref_dtype = arr.dtype
 
             # Given how all_target_ids is built, this should always hold.
-            if ref_shape is None:
+            if (ref_shape is None) or (ref_dtype is None):
                 raise AssertionError(
                     "MMTCollate invariant broken: no output embedding found for sig_id."
                 )
 
-            # Second pass: fill missing with zeros of the right shape
+            # Second pass: fill missing with zeros of the right shape + dtype
             emb_list: List[np.ndarray] = []
             for arr in raw_list:
                 if arr is None:
-                    arr = np.zeros(ref_shape, dtype=np.float32)
+                    arr = np.zeros(ref_shape, dtype=ref_dtype)
                 emb_list.append(arr)
 
             # Per-output dropout (mask only, embedding left as-is / zeros)

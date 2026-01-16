@@ -10,21 +10,25 @@
 
 
 collate:
-  p_drop_inputs: 0.1
+  p_drop_inputs: 0.15
   p_drop_inputs_overrides: {}
 #    pf_active-solenoid_current: 0.1
   p_drop_outputs: 0.0
   p_drop_outputs_overrides: {}
   p_drop_actuators: 0.0
   p_drop_actuators_overrides: {}
-  p_drop_inputs_chunks: 0.1
+  p_drop_inputs_chunks: 0.15
   p_drop_actuators_chunks: 0.0
 
 data:
+  keep_output_native: false
   cache:
     enable: true
+    dtype: float16          # or float32; default behavior if omitted is “no cast”
     num_workers: 8
-  keep_output_native: false
+    max_windows:
+      train: null
+      val: null
 
 preprocess:
   valid_windows:

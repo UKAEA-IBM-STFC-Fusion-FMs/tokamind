@@ -221,7 +221,9 @@ def build_window_datasets(
     seed: int,
     shuffle_train: bool = True,
     cache_splits: Sequence[str] = ("train", "val"),
-    max_windows_per_split: Optional[int] = None,
+    cache_max_windows_train: Optional[int] = None,
+    cache_max_windows_val: Optional[int] = None,
+    cache_dtype: Optional[str] = None,
 ) -> Dict[str, Any]:
     """Create window-level datasets from shot-level wrapped datasets.
 
@@ -234,14 +236,20 @@ def build_window_datasets(
     num_workers_cache:
         Number of workers used by the caching materialisation.
     seed:
-        Random seed (used by WindowStreamedDataset when shuffle_shots is enabled).
+        Random seed (used by WindowStreamedDataset when shuffle_shots is enabled),
+        and also used for deterministic shot shuffling during caching.
     shuffle_train:
-        Either a bool applied to all splits, or a dict split->bool.
-        Note: this is *shot-level* shuffling for streaming datasets.
+        Shot-level shuffling for streaming train only (IterableDataset path).
+        Cached datasets are shuffled at the DataLoader level.
     cache_splits:
         Which splits to cache when enable_cache=True.
-    max_windows_per_split:
-        Optional hard cap passed to WindowCachedDataset.from_streaming.
+    cache_max_windows_train:
+        Optional cap on the number of cached windows for the train split.
+    cache_max_windows_val:
+        Optional cap on the number of cached windows for the val split.
+    cache_dtype:
+        Optional dtype cast applied during caching to reduce RAM.
+        Typical values: "float16" or "float32". If None, keep original dtypes.
 
     Returns
     -------
@@ -260,21 +268,43 @@ def build_window_datasets(
         use_cache_for_split = bool(enable_cache) and (split in cache_splits_set)
 
         if use_cache_for_split:
+            split_l = split.lower()
+
+            # Per-split cap.
+            if split_l == "train":
+                max_windows = cache_max_windows_train
+            elif split_l == "val":
+                max_windows = cache_max_windows_val
+            else:
+                max_windows = None
+
+            # If we cap, shuffle shots during caching so the subset isn't biased.
+            # (Still deterministic because we pass seed.)
+            shuffle_cache_shots = bool(max_windows is not None)
+
             logger = logging.getLogger("mmt.Cache")
-            logger.info("Starting caching split=%s", split)
+            logger.info(
+                "Starting caching split=%s | max_windows=%s | dtype=%s | shuffle_shots=%s",
+                split,
+                str(max_windows) if max_windows is not None else "none",
+                cache_dtype if cache_dtype is not None else "none",
+                shuffle_cache_shots,
+            )
             t0 = time.perf_counter()
             ds = WindowCachedDataset.from_streaming(
                 ds_stream,
-                max_windows=max_windows_per_split,
+                max_windows=max_windows,
                 num_workers_cache=num_workers_cache,
+                dtype=cache_dtype,
+                shuffle_shots=shuffle_cache_shots,
+                seed=seed,
             )
             t1 = time.perf_counter()
             logger.info("Finished caching %s in %.3f seconds", split, t1 - t0)
+
         else:
             # IMPORTANT: WindowStreamedDataset is an IterableDataset, so
-            # DataLoader(shuffle=...) is ignored. To avoid repeatedly training on
-            # the same prefix, we shuffle shots *here* for the training split.
-            # Validation/test remain deterministic by default.
+            # DataLoader(shuffle=...) is ignored. Shuffle shots here for train only.
             do_shuffle_shots = (split.lower() == "train") and shuffle_train
             ds = WindowStreamedDataset(
                 ds_stream,
