@@ -12,13 +12,11 @@ This transform writes the following fields to `window`:
     window["emb_chunks"]   = emb_list                       (List[np.ndarray])
     window["pos"]          = pos                            (np.ndarray int32)
     window["id"]           = np.asarray(sig_list, int32)    (np.ndarray)
-    window["signal_name"]  = np.asarray(name_list, object)  (np.ndarray)
     window["mod"]          = np.asarray(mod_list, int16)    (np.ndarray)
     window["role"]         = np.asarray(role_list, int8)    (np.ndarray)
 
     window["output_emb"]   = output_emb                     (Dict[int, np.ndarray])
-    window["output_shapes"]= output_shapes                  (Dict[int, tuple])
-    window["output_names"] = output_names                   (Dict[int, str])
+    # (native output values are carried separately as window["output"] if enabled)
 
 Simplified logic (v0)
 --------------------
@@ -56,7 +54,6 @@ class BuildTokensTransform:
 
     window must contain:
       - "embedded_output"        : Dict[int, np.ndarray]
-      - "embedded_output_shapes" : Dict[int, tuple]
 
     Output
     ------
@@ -108,7 +105,6 @@ class BuildTokensTransform:
 
         emb_list: List[np.ndarray] = []
         sig_list: List[int] = []
-        name_list: List[str] = []
         role_list: List[int] = []
         mod_list: List[int] = []
         pos_list: List[int] = []
@@ -122,13 +118,12 @@ class BuildTokensTransform:
 
             for sig_id in sorted(emb_map.keys()):
                 emb = emb_map[sig_id]
-                spec = self.signal_specs.get_by_id(sig_id)
+                sid = int(sig_id)
 
                 emb_list.append(emb)
-                sig_list.append(int(sig_id))
-                name_list.append(spec.name)
+                sig_list.append(sid)
                 role_list.append(ROLE_CONTEXT)
-                mod_list.append(int(self._signal_id_to_mod_id[sig_id]))
+                mod_list.append(int(self._signal_id_to_mod_id[sid]))
                 pos_list.append(pos)
 
         # -------------------------
@@ -140,13 +135,12 @@ class BuildTokensTransform:
 
             for sig_id in sorted(emb_map.keys()):
                 emb = emb_map[sig_id]
-                spec = self.signal_specs.get_by_id(sig_id)
+                sid = int(sig_id)
 
                 emb_list.append(emb)
-                sig_list.append(int(sig_id))
-                name_list.append(spec.name)
+                sig_list.append(sid)
                 role_list.append(ROLE_ACTUATOR)
-                mod_list.append(int(self._signal_id_to_mod_id[sig_id]))
+                mod_list.append(int(self._signal_id_to_mod_id[sid]))
                 pos_list.append(pos)
 
         pos = np.asarray(pos_list, dtype=np.int32)
@@ -155,20 +149,14 @@ class BuildTokensTransform:
         # 3) OUTPUTS (window-level)
         # -------------------------
         output_emb: Dict[int, np.ndarray] = {}
-        output_shapes: Dict[int, Any] = {}
-        output_names: Dict[int, str] = {}
 
         embedded_output = window.get("embedded_output") or {}
-        output_shapes_all = window.get("embedded_output_shapes") or {}
 
         for sig_id, emb in embedded_output.items():
-            spec = self.signal_specs.get_by_id(int(sig_id))
-            output_emb[int(sig_id)] = emb
-            output_names[int(sig_id)] = spec.name
-
-            if int(sig_id) not in output_shapes_all:
-                raise KeyError(f"Missing output shape for signal_id={sig_id}")
-            output_shapes[int(sig_id)] = output_shapes_all[int(sig_id)]
+            sid = int(sig_id)
+            # Defensive: ensure the signal exists in the registry.
+            _ = self.signal_specs.get_by_id(sid)
+            output_emb[sid] = emb
 
         # -------------------------
         # 4) WRITE BACK (contract)
@@ -176,13 +164,10 @@ class BuildTokensTransform:
         window["emb_chunks"] = emb_list
         window["pos"] = pos
         window["id"] = np.asarray(sig_list, dtype=np.int32)
-        window["signal_name"] = np.asarray(name_list, dtype=object)
         window["mod"] = np.asarray(mod_list, dtype=np.int16)
         window["role"] = np.asarray(role_list, dtype=np.int8)
 
         window["output_emb"] = output_emb
-        window["output_shapes"] = output_shapes
-        window["output_names"] = output_names
 
         logger.debug(
             "win %s (shot %s) | tokens=%d (context=%d, act=%d) | pos=[%s..%s]",

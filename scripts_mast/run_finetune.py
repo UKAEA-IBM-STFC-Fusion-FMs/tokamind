@@ -235,6 +235,7 @@ def main() -> None:
     # Dataloaders (always window-level batches)
     # ------------------------------------------------------------------
     collate_fn = make_collate_fn(
+        signal_specs=signal_specs,
         base_cfg=cfg_collate,
         keep_output_native=keep_output_native,
     )

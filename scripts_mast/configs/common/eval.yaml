@@ -19,7 +19,7 @@ model_source:
 eval_id: null
 
 data:
-  keep_output_native: false
+  keep_output_native: true
   cache:
     enable: true
     dtype: float16          # or float32; default behavior if omitted is “no cast”

@@ -67,11 +67,8 @@ class MMTCollate:
             "id": np.ndarray(L,),                   # signal IDs
             "mod": np.ndarray(L,),                  # modality IDs
             "role": np.ndarray(L,),                 # role IDs
-            "signal_name": np.ndarray(L,),          # human-friendly names
 
             "output_emb": {signal_id: np.ndarray(D_out), ...},
-            "output_shapes": {signal_id: shape, ...},
-            "output_names": {signal_id: name, ...},
 
             # Optionally (e.g. eval, if enabled in transforms):
             # "output": {... native output payloads ...}
@@ -102,8 +99,6 @@ class MMTCollate:
     "id"             : LongTensor (B, L)
     "mod"            : LongTensor (B, L)
     "role"           : LongTensor (B, L)
-    "signal_name"    : List[List[str]]
-
     "padding_mask"   : BoolTensor (B, L)
                        True where there is a *real* token (not padding),
                        i.e. where original length > t.
@@ -130,22 +125,26 @@ class MMTCollate:
 
     Configuration
     -------------
-    `cfg_collate` is expected to follow the structure in `finetune_default.yaml`:
+    Public config still specifies override keys by *signal name* (human-friendly).
+    The run pipeline converts those override dicts to be keyed by numeric
+    `signal_id` once at startup (see `pipeline_helpers.make_collate_fn`).
+
+    This class expects the post-conversion form:
 
     .code-block:: yaml
 
         collate:
           # INPUT DROPOUT
           p_drop_inputs: 0.08
-          p_drop_inputs_overrides: {}          # keyed by signal_name
+          p_drop_inputs_overrides: {}          # keyed by signal_id (after conversion)
 
           # OUTPUT DROPOUT
           p_drop_outputs: 0.0
-          p_drop_outputs_overrides: {}         # keyed by output signal_name
+          p_drop_outputs_overrides: {}         # keyed by output signal_id (after conversion)
 
           # ACTUATORS DROPOUT
           p_drop_actuators: 0.0
-          p_drop_actuators_overrides: {}       # keyed by signal_name
+          p_drop_actuators_overrides: {}       # keyed by signal_id (after conversion)
 
           # CHUNK DROPOUT (coarse time-based masking)
           p_drop_inputs_chunks: 0.08
@@ -160,10 +159,68 @@ class MMTCollate:
         self.cfg = cfg_collate
         self.keep_output_native = bool(cfg_collate.get("keep_output_native", False))
 
-        # Override dicts (keyed by *names* now)
-        self.drop_inputs_overrides = cfg_collate.get("p_drop_inputs_overrides", {})
-        self.drop_act_overrides = cfg_collate.get("p_drop_actuators_overrides", {})
-        self.drop_outputs_overrides = cfg_collate.get("p_drop_outputs_overrides", {})
+        def _require_int_keys(d: Any, *, field: str) -> Dict[int, float]:
+            """Return a copy of `d` with int keys and float values.
+
+            We keep config name-based at the boundary (YAML), but once we're in
+            the hot path we want signal_id keys for compactness and speed.
+            """
+
+            if d is None:
+                return {}
+            if not isinstance(d, dict):
+                raise TypeError(
+                    f"MMTCollate expects cfg_collate['{field}'] to be a dict, got {type(d)}"
+                )
+
+            out: Dict[int, float] = {}
+            for k, v in d.items():
+                if isinstance(k, int):
+                    sid = int(k)
+                elif isinstance(k, str) and k.isdigit():
+                    sid = int(k)
+                else:
+                    raise TypeError(
+                        f"MMTCollate expects cfg_collate['{field}'] to be keyed by "
+                        f"signal_id (int). Got key={k!r}. "
+                        "Did you forget to pass the config through "
+                        "pipeline_helpers.make_collate_fn (name->id conversion)?"
+                    )
+
+                out[sid] = float(v)
+
+            return out
+
+        # Override dicts (keyed by signal_id, post-conversion)
+        self.drop_inputs_overrides = _require_int_keys(
+            cfg_collate.get("p_drop_inputs_overrides", {}),
+            field="p_drop_inputs_overrides",
+        )
+        self.drop_act_overrides = _require_int_keys(
+            cfg_collate.get("p_drop_actuators_overrides", {}),
+            field="p_drop_actuators_overrides",
+        )
+        self.drop_outputs_overrides = _require_int_keys(
+            cfg_collate.get("p_drop_outputs_overrides", {}),
+            field="p_drop_outputs_overrides",
+        )
+
+        # Needed only for `keep_output_native`: native outputs are still stored
+        # by name in window["output"], while the training graph is keyed by id.
+        id_to_name = cfg_collate.get("output_id_to_name", {}) or {}
+        if not isinstance(id_to_name, dict):
+            raise TypeError(
+                "MMTCollate expects cfg_collate['output_id_to_name'] to be a dict "
+                f"(signal_id -> output_name), got {type(id_to_name)}"
+            )
+        self.output_id_to_name: Dict[int, str] = {
+            int(k): str(v) for k, v in id_to_name.items()
+        }
+        if self.keep_output_native and (not self.output_id_to_name):
+            raise ValueError(
+                "MMTCollate.keep_output_native=True requires cfg_collate['output_id_to_name'] "
+                "(signal_id -> output_name)."
+            )
 
         # Reusable empty embedding for padded slots
         self._empty_emb = np.empty((0,), dtype=np.float32)
@@ -207,13 +264,8 @@ class MMTCollate:
         id_lists: List[np.ndarray] = []
         mod_lists: List[np.ndarray] = []
         role_lists: List[np.ndarray] = []
-        name_lists: List[List[str]] = []
-
         out_dicts: List[Dict[int, Any]] = []
-        out_shapes_dicts: List[Dict[int, Any]] = []
-
         all_target_ids: set[int] = set()
-        id_to_output_name: Dict[int, str] = {}
 
         for w in flat_windows:
             # Token embeddings are a ragged list-of-arrays per window (we pack them by sid at the end).
@@ -224,22 +276,10 @@ class MMTCollate:
             id_lists.append(np.asarray(w["id"], dtype=np.int32))
             mod_lists.append(np.asarray(w["mod"], dtype=np.int16))
             role_lists.append(np.asarray(w["role"], dtype=np.int8))
-            name_lists.append(list(w["signal_name"]))
 
-            out_dicts.append(w["output_emb"])
-            out_shapes_dicts.append(w["output_shapes"])
-
-            output_names = w.get("output_names", {})
-            all_target_ids.update(w["output_emb"].keys())
-
-            for sid, sname in output_names.items():
-                if sid not in id_to_output_name:
-                    id_to_output_name[sid] = sname
-                elif id_to_output_name[sid] != sname:
-                    raise ValueError(
-                        f"Inconsistent output name for signal_id={sid}: "
-                        f"'{id_to_output_name[sid]}' vs '{sname}'"
-                    )
+            out_dict = w.get("output_emb") or {}
+            out_dicts.append(out_dict)
+            all_target_ids.update(out_dict.keys())
 
         # --------------------------------------------------------------- #
         # 2. Determine max token length + allocate padded arrays (NumPy)
@@ -260,7 +300,6 @@ class MMTCollate:
         emb_batch: List[List[np.ndarray]] = [
             [self._empty_emb for _ in range(L_max)] for _ in range(B)
         ]
-        name_batch: List[List[str]] = [[""] * L_max for _ in range(B)]
 
         # --------------------------------------------------------------- #
         # 3. Fill padded arrays
@@ -272,10 +311,9 @@ class MMTCollate:
             mod_batch[i, :Li] = mod_lists[i]
             role_batch[i, :Li] = role_lists[i]
 
-            # Fill token embeddings / names
+            # Fill token embeddings
             for t in range(Li):
                 emb_batch[i][t] = emb_lists[i][t]
-                name_batch[i][t] = name_lists[i][t]
 
             padding_mask[i, :Li] = 1
 
@@ -309,8 +347,8 @@ class MMTCollate:
 
             idxs = np.where(role_batch[i, :Li] == ROLE_CONTEXT)[0]
             for t in idxs:
-                sig_name = name_batch[i][t]
-                p = float(self.drop_inputs_overrides.get(sig_name, p_drop_in))
+                sid = int(id_batch[i, t])
+                p = float(self.drop_inputs_overrides.get(sid, p_drop_in))
                 if random.random() < p:
                     _drop_token(i, int(t), kind="input")
 
@@ -325,8 +363,8 @@ class MMTCollate:
 
             idxs = np.where(role_batch[i, :Li] == ROLE_ACTUATOR)[0]
             for t in idxs:
-                sig_name = name_batch[i][t]
-                p = float(self.drop_act_overrides.get(sig_name, p_drop_act))
+                sid = int(id_batch[i, t])
+                p = float(self.drop_act_overrides.get(sid, p_drop_act))
                 if random.random() < p:
                     _drop_token(i, int(t), kind="actuator")
 
@@ -380,34 +418,40 @@ class MMTCollate:
         output_mask_batch_np: Dict[int, np.ndarray] = {}
 
         for sig_id in sorted(all_target_ids):
-            out_name = id_to_output_name.get(sig_id, str(sig_id))
-
             raw_list: List[Optional[np.ndarray]] = []
             mask = np.ones((B,), dtype=np.int8)
             ref_shape: Optional[Tuple[int, ...]] = None
             ref_dtype: Optional[np.dtype] = None
 
-            # First pass: collect embeddings and remember a reference shape + dtype
+            # First pass: collect embeddings and remember a reference shape/dtype.
             for i in range(B):
                 emb = out_dicts[i].get(sig_id, None)
                 if emb is None:
                     mask[i] = 0
                     raw_list.append(None)
                 else:
-                    arr = np.asarray(emb)
-                    arr = arr.reshape(-1)
+                    # IMPORTANT: do NOT force float32 here.
+                    # Keep the cached/streamed dtype (e.g. float16) all the way
+                    # through collate to avoid worker/prefetch memory spikes.
+                    arr = np.asarray(emb).reshape(-1)
+                    if ref_dtype is None:
+                        ref_dtype = arr.dtype
+                    elif arr.dtype != ref_dtype:
+                        arr = arr.astype(ref_dtype, copy=False)
+
                     raw_list.append(arr)
                     if ref_shape is None:
                         ref_shape = arr.shape
-                        ref_dtype = arr.dtype
 
             # Given how all_target_ids is built, this should always hold.
-            if (ref_shape is None) or (ref_dtype is None):
+            if ref_shape is None:
                 raise AssertionError(
                     "MMTCollate invariant broken: no output embedding found for sig_id."
                 )
+            if ref_dtype is None:
+                ref_dtype = np.dtype(np.float32)
 
-            # Second pass: fill missing with zeros of the right shape + dtype
+            # Second pass: fill missing with zeros of the right shape/dtype.
             emb_list: List[np.ndarray] = []
             for arr in raw_list:
                 if arr is None:
@@ -416,33 +460,51 @@ class MMTCollate:
 
             # Per-output dropout (mask only, embedding left as-is / zeros)
             for i in range(B):
-                p = float(self.drop_outputs_overrides.get(out_name, p_drop_outputs))
+                p = float(self.drop_outputs_overrides.get(int(sig_id), p_drop_outputs))
                 if random.random() < p:
                     mask[i] = 0
 
-            output_emb_batch[sig_id] = emb_list
-            output_mask_batch_np[sig_id] = mask
+            output_emb_batch[int(sig_id)] = emb_list
+            output_mask_batch_np[int(sig_id)] = mask
 
         # --------------------------------------------------------------- #
         # 8. Optional: native outputs
         # --------------------------------------------------------------- #
         output_native_batch_np: Dict[int, np.ndarray] = {}
         if self.keep_output_native:
-
-            def _find_shape(sig_id: int) -> Any:
-                # Prefer the shape from the same index; else fallback scan
-                for sd in out_shapes_dicts:
-                    if sig_id in sd:
-                        return sd[sig_id]
-                return None
-
             for sig_id in sorted(all_target_ids):
-                out_name = id_to_output_name.get(sig_id, str(sig_id))
-                per_sig_vals: List[np.ndarray] = []
+                sid = int(sig_id)
+                if sid not in self.output_id_to_name:
+                    raise KeyError(
+                        f"Missing output_id_to_name mapping for output signal_id={sid}."
+                    )
 
+                out_name = self.output_id_to_name[sid]
+
+                # Infer a reference native shape from the first non-missing value.
+                ref_shape: Optional[Tuple[int, ...]] = None
                 for i in range(B):
-                    w = flat_windows[i]
-                    out_group = w.get("output") or {}
+                    out_group = flat_windows[i].get("output") or {}
+                    out_info = out_group.get(out_name)
+                    val = None
+                    if isinstance(out_info, dict):
+                        val = out_info.get("values", None)
+                    elif out_info is not None:
+                        val = out_info
+
+                    if val is not None:
+                        ref_shape = tuple(np.asarray(val).shape)
+                        break
+
+                if ref_shape is None:
+                    raise ValueError(
+                        f"Missing native output values for output signal_id={sid} (name={out_name!r}). "
+                        "Make sure keep_output_native is enabled in the transforms pipeline."
+                    )
+
+                per_sig_vals: List[np.ndarray] = []
+                for i in range(B):
+                    out_group = flat_windows[i].get("output") or {}
                     out_info = out_group.get(out_name)
 
                     val = None
@@ -452,19 +514,18 @@ class MMTCollate:
                         val = out_info
 
                     if val is None:
-                        shape = _find_shape(sig_id)
-                        if shape is None:
-                            raise ValueError(
-                                f"Missing shape for output signal_id={sig_id} "
-                                f"while assembling output_native."
-                            )
-                        arr = np.zeros(shape, dtype=np.float32)
+                        arr = np.zeros(ref_shape, dtype=np.float32)
                     else:
                         arr = np.asarray(val, dtype=np.float32)
+                        if tuple(arr.shape) != ref_shape:
+                            raise ValueError(
+                                f"Inconsistent native output shape for output signal_id={sid} (name={out_name!r}): "
+                                f"expected {ref_shape}, got {tuple(arr.shape)}"
+                            )
 
                     per_sig_vals.append(arr)
 
-                output_native_batch_np[sig_id] = np.stack(per_sig_vals, axis=0)
+                output_native_batch_np[sid] = np.stack(per_sig_vals, axis=0)
 
         # --------------------------------------------------------------- #
         # 9. Convert everything to torch.Tensor
@@ -539,7 +600,6 @@ class MMTCollate:
             "id": id_t,
             "mod": mod_t,
             "role": role_t,
-            "signal_name": name_batch,  # still List[List[str]]
             "padding_mask": padding_mask_t,
             "input_mask": input_mask_t,
             "actuator_mask": actuator_mask_t,

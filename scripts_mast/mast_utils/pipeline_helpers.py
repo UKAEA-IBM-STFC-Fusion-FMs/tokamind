@@ -324,6 +324,7 @@ def build_window_datasets(
 
 def make_collate_fn(
     *,
+    signal_specs: Any,
     base_cfg: Optional[Mapping[str, Any]] = None,
     keep_output_native: bool,
     # force-drop lists (mostly used for eval ablations)
@@ -335,6 +336,10 @@ def make_collate_fn(
 
     Parameters
     ----------
+    signal_specs:
+        SignalSpecRegistry used to resolve (role,name) → signal_id for dropout
+        overrides, and to build a stable output_id_to_name mapping (needed for
+        `keep_output_native=True`).
     base_cfg:
         Base collate configuration (usually cfg_mmt.collate for train).
         For eval you can pass None.
@@ -359,11 +364,69 @@ def make_collate_fn(
     cfg: Dict[str, Any] = dict(base_cfg or {})
     cfg["keep_output_native"] = bool(keep_output_native)
 
+    def _convert_overrides(
+        role: str, d: Optional[Mapping[Any, Any]]
+    ) -> Dict[int, float]:
+        """Convert a name-keyed dropout override dict to id-keyed.
+
+        Public configs stay name-keyed (human-friendly). We convert once at
+        startup so `MMTCollate` can stay id-based and not depend on names.
+        """
+
+        if not d:
+            return {}
+
+        out: Dict[int, float] = {}
+        for k, v in d.items():
+            if isinstance(k, int):
+                sid = int(k)
+            elif isinstance(k, str) and k.isdigit():
+                sid = int(k)
+            elif isinstance(k, str):
+                spec = signal_specs.get(role, k)
+                if spec is None:
+                    raise KeyError(f"Unknown {role} signal name in overrides: {k!r}")
+                sid = int(spec.signal_id)
+            else:
+                raise TypeError(
+                    f"Override key must be a signal name (str) or signal_id (int), got {type(k)}"
+                )
+
+            out[sid] = float(v)
+
+        return out
+
     if drop_inputs:
-        cfg["p_drop_inputs_overrides"] = {k: 1.0 for k in drop_inputs}
+        d = dict(cfg.get("p_drop_inputs_overrides") or {})
+        for k in drop_inputs:
+            d[k] = 1.0
+        cfg["p_drop_inputs_overrides"] = d
     if drop_actuators:
-        cfg["p_drop_actuators_overrides"] = {k: 1.0 for k in drop_actuators}
+        d = dict(cfg.get("p_drop_actuators_overrides") or {})
+        for k in drop_actuators:
+            d[k] = 1.0
+        cfg["p_drop_actuators_overrides"] = d
     if drop_outputs:
-        cfg["p_drop_outputs_overrides"] = {k: 1.0 for k in drop_outputs}
+        d = dict(cfg.get("p_drop_outputs_overrides") or {})
+        for k in drop_outputs:
+            d[k] = 1.0
+        cfg["p_drop_outputs_overrides"] = d
+
+    # Convert name-keyed overrides to id-keyed overrides once.
+    cfg["p_drop_inputs_overrides"] = _convert_overrides(
+        "input", cfg.get("p_drop_inputs_overrides")
+    )
+    cfg["p_drop_actuators_overrides"] = _convert_overrides(
+        "actuator", cfg.get("p_drop_actuators_overrides")
+    )
+    cfg["p_drop_outputs_overrides"] = _convert_overrides(
+        "output", cfg.get("p_drop_outputs_overrides")
+    )
+
+    # Needed only for eval (`keep_output_native=True`): native outputs are
+    # still stored by *name* in window["output"], while the model graph is id-based.
+    cfg["output_id_to_name"] = {
+        int(spec.signal_id): spec.name for spec in signal_specs.specs_for_role("output")
+    }
 
     return MMTCollate(cfg_collate=cfg)

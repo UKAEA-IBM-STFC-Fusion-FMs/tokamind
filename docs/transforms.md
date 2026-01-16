@@ -22,7 +22,6 @@ A window dict goes through these stages:
 4. **Trimmed window** (keep last `max_chunks` and assign relative positions)
 5. **Embedded window** (codec embeddings + caching)
 6. **Tokenized window** (per-token arrays + output embeddings)
-7. **Finalized window** (pruned payload for caching/collate)
 
 ---
 
@@ -35,7 +34,6 @@ The default chain used by pretrain/finetune/eval is:
 3. `TrimChunksTransform`
 4. `EmbedChunksTransform`
 5. `BuildTokensTransform`
-6. `FinalizeWindowTransform`
 
 This chain is intentionally **index-based** to make caching and determinism robust.
 
@@ -167,6 +165,7 @@ pos = (N - 1 - chunk_index_in_window) + 1
 **Writes**
 - Per chunk:
   - `chunk["embeddings"][signal_id] = np.ndarray[D]`
+  - `chunk["orig_shapes"][signal_id] = tuple` (native shape used by decoders/metrics)
 
 - Per window outputs:
   - `window["embedded_output"]`
@@ -174,6 +173,7 @@ pos = (N - 1 - chunk_index_in_window) + 1
 
 - Memory reduction:
   - Drops `chunk["signals"]` on the returned copy
+  - Optionally drops output native `values` if `keep_output_native=False`
 
 **Caching key (v0)**
 ```text
@@ -192,7 +192,7 @@ This is why `chunk_index_global` is required.
 **Reads**
 - Chunk embeddings + `pos` and indexes
 - `SignalSpecRegistry` (for signal_id and modality mapping)
-- `window["embedded_output"]` and shapes
+- `window["embedded_output"]`
 
 **Writes**
 Token fields (must match collate):
@@ -203,40 +203,21 @@ window["id"]           : int32 array (signal_id)
 window["role"]         : int16 array (ROLE_CONTEXT / ROLE_ACTUATOR / ROLE_OUTPUT)
 window["mod"]          : int16 array (modality id)
 window["pos"]          : int32 array (relative position)
-window["signal_name"]  : object array (signal names)
 ```
 
 Output fields:
 
 ```text
-window["output_emb"]
-window["output_shapes"]
-window["output_names"]
+window["output_emb"]   : Dict[int, np.ndarray] (signal_id -> output embedding)
 ```
+
+Notes:
+- We deliberately do **not** carry per-token signal names or per-window output name/shape tables.
+  Configs remain name-based (human-friendly), but name→id resolution happens once at startup.
 
 **Deterministic ordering**
 - Chunks are ordered by `(pos, chunk_index_in_window)` (closest-to-output first)
 - Signals within a chunk are sorted by `signal_id`
-
----
-
-### 6) `FinalizeWindowTransform`
-
-**Purpose**
-- Prune the post-tokenized window dict to the minimal payload needed by collate/model.
-- Centralize the policy of whether to keep *native* output values (eval) or drop them (train).
-
-**Reads**
-- `window["emb_chunks"]`, `window["id"]`, `window["pos"]`, `window["mod"]`, `window["role"]`, ... (already built)
-- `window["output"]` (optional)
-
-**Writes / drops**
-- Drops heavy / intermediate fields that are never consumed after tokenization:
-  - raw groups: `window["input"]`, `window["actuator"]`
-  - chunk structures: `window["chunks"]`
-  - intermediate output buffers: `window["embedded_output"]`, `window["embedded_output_shapes"]`
-- If `keep_output_native=False`: drops `window["output"]` entirely.
-- If `keep_output_native=True`: keeps `window["output"]` so `MMTCollate` can build `output_native`.
 
 ---
 

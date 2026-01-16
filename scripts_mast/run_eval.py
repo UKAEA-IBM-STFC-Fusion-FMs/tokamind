@@ -225,6 +225,7 @@ def main() -> None:
     drop_outputs = cfg_drop.get("outputs", []) or []
 
     collate_fn = make_collate_fn(
+        signal_specs=signal_specs,
         keep_output_native=keep_output_native,
         drop_inputs=drop_inputs,
         drop_actuators=drop_actuators,

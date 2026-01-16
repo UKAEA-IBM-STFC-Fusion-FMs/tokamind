@@ -17,8 +17,7 @@ flowchart LR
   Valid --> Trim[TrimChunksTransform]
   Trim --> Embed[EmbedChunksTransform\n(+ caching)]
   Embed --> Tokens[BuildTokensTransform]
-  Tokens --> Finalize[FinalizeWindowTransform]
-  Finalize --> Collate[MMTCollate]
+  Tokens --> Collate[MMTCollate]
   Collate --> Model[MultiModalTransformer\n(TokenEncoder → Backbone → ModalityHeads → OutputAdapters)]
   Model --> Pred[pred: Dict[signal_id → embedding]]
 ```
@@ -129,13 +128,12 @@ pos = (N - 1 - chunk_index_in_window) + 1
 Purpose:
 - encode chunk signals to embeddings using the configured codec per signal
 - encode window-level outputs to embeddings
+- optionally keep or drop native output arrays
 
 Chunk outputs:
 - `chunk["embeddings"][signal_id] = embedding_vector`
+- `chunk["orig_shapes"][signal_id] = original_shape`
 - `chunk["signals"]` is dropped on the returned copy (to reduce memory)
-
-Native output values are **not** modified here anymore; whether to keep or drop
-them is handled by `FinalizeWindowTransform` at the end of the pipeline.
 
 Caching (v0):
 - **cache key** = `(shot_id, role, signal_id, chunk_index_global)`
@@ -152,28 +150,17 @@ It writes:
 - `window["id"]`: int `signal_id`s
 - `window["mod"]`: modality IDs (small ints)
 - `window["role"]`: role IDs (`ROLE_CONTEXT`, `ROLE_ACTUATOR`)
-- `window["signal_name"]`: human-friendly names (debug only)
 - `window["output_emb"]`: `{signal_id → output_embedding}`
-- `window["output_shapes"]`: `{signal_id → original_output_shape}`
-- `window["output_names"]`: `{signal_id → output_name}`
+
+Notes:
+- We intentionally do **not** carry per-token signal names or per-window output name/shape tables.
+  Configs remain name-based (human-friendly), but name→id resolution happens once at startup.
 
 Deterministic ordering:
 - chunks sorted by `(pos, chunk_index_in_window)` → closest-to-output first
 - signals within chunk sorted by `signal_id`
 
-### 6) `FinalizeWindowTransform` (prune window payload)
-
-Purpose:
-- drop intermediate / heavy fields after tokenization so cached windows stay small
-- centralize the decision of keeping native outputs for evaluation
-
-In practice, this transform drops:
-- raw groups (e.g. `window["input"]`, `window["actuator"]`)
-- chunk structures (`window["chunks"]`)
-- intermediate buffers (`window["embedded_output"]`, `window["embedded_output_shapes"]`)
-- native outputs (`window["output"]`) when not needed
-
-### 7) `MMTCollate` (batching + dropout masks)
+### 6) `MMTCollate` (batching + dropout masks)
 
 Purpose: turn a list of windows into a padded, model-ready batch.
 
@@ -188,7 +175,7 @@ Key features:
 
 Outputs include:
 - token tensors: `pos`, `id`, `mod`, `role`, `padding_mask`
-- ragged embeddings list: `emb[b][t]`
+- packed embeddings: `emb[sid]` and `emb_index[sid]` (ragged by signal_id)
 - `output_emb` tensors stacked by `signal_id`
 - optional `output_native` (eval) when enabled
 
