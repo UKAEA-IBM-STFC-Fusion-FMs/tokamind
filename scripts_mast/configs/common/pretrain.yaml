@@ -22,7 +22,7 @@ collate:
 
 data:
   cache:
-    enable: false
+    enable: true
     num_workers: 8
   keep_output_native: false
 

@@ -32,12 +32,11 @@ This transform:
 1) Encodes every signal in each chunk using the appropriate codec.
 2) Stores results as:
        chunk["embeddings"][signal_id]   = embedding_vector
-       chunk["orig_shapes"][signal_id]  = original_array_shape
 3) Encodes window-level outputs (if present) into:
        window["embedded_output"]
        window["embedded_output_shapes"]
-4) Optionally removes raw output "values" arrays if keep_output_native=False.
-5) Drops chunk raw "signals" on the returned copy to reduce memory.
+4) Drops chunk raw "signals" on the returned copy to reduce memory.
+
 
 Caching (v0)
 ------------
@@ -70,16 +69,15 @@ class EmbedChunksTransform:
         self,
         signal_specs: SignalSpecRegistry,
         codecs: Mapping[int, Any],
-        keep_output_native: bool = False,
     ) -> None:
         self.signal_specs = signal_specs
         self.codecs = dict(codecs)
-        self.keep_output_native = bool(keep_output_native)
 
         # Deterministic cache:
         # (shot_id, role, signal_id, chunk_index_global) -> embedding
         self._cache: Dict[Tuple[Any, str, int, int], np.ndarray] = {}
-        self._orig_shapes: Dict[Tuple[Any, str, int, int], Tuple[int, ...]] = {}
+        # We only need within-shot reuse; clear caches when shot_id changes.
+        self._last_shot_id: Any = None
 
     # ------------------------------------------------------------------
 
@@ -104,6 +102,15 @@ class EmbedChunksTransform:
         w_idx = window.get("window_index")
         if w_idx is None:
             raise ValueError("EmbedChunksTransform requires window['window_index']")
+
+        # ------------------------------------------------------------------
+        # Prevent unbounded cache growth across shots.
+        # The cache key includes shot_id, so cross-shot reuse is impossible;
+        # keeping old entries only wastes RAM during long streaming/caching runs.
+        # ------------------------------------------------------------------
+        if shot_id != self._last_shot_id:
+            self._cache.clear()
+            self._last_shot_id = shot_id
 
         chunks_dict = window.get("chunks") or {}
 
@@ -137,7 +144,6 @@ class EmbedChunksTransform:
                 signals = ch.get("signals") or {}
 
                 emb_map: Dict[int, np.ndarray] = {}
-                shape_map: Dict[int, Tuple[int, ...]] = {}
 
                 for name, values in signals.items():
                     if values is None:
@@ -156,14 +162,11 @@ class EmbedChunksTransform:
                     else:
                         emb = codec.encode(arr)
                         self._cache[key] = emb
-                        self._orig_shapes[key] = tuple(arr.shape)
                         n_signal_emb_new += 1
 
                     emb_map[sid] = emb
-                    shape_map[sid] = tuple(arr.shape)
 
                 ch2["embeddings"] = emb_map
-                ch2["orig_shapes"] = shape_map
 
                 # Drop raw values on the returned copy (reduces memory)
                 ch2["signals"] = None
@@ -183,9 +186,6 @@ class EmbedChunksTransform:
         # Embed output-level signals (not cached in v0)
         # ------------------------------------------------------------------
         outputs = window.get("output") or {}
-        new_outputs: Dict[str, Any] = (
-            dict(outputs) if isinstance(outputs, dict) else outputs
-        )
 
         emb_out: Dict[int, np.ndarray] = {}
         shape_out: Dict[int, Any] = {}
@@ -211,13 +211,6 @@ class EmbedChunksTransform:
 
                 n_out_signals += 1
                 n_out_emb_new += 1
-
-                if not self.keep_output_native:
-                    info2 = dict(info)
-                    info2["values"] = None
-                    new_outputs[name] = info2
-
-        out_window["output"] = new_outputs
 
         if emb_out:
             out_window["embedded_output"] = emb_out
