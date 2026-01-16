@@ -217,7 +217,6 @@ def build_window_datasets(
     enable_cache: bool,
     num_workers_cache: int,
     seed: int,
-    shuffle_shots: bool = True,
     cache_splits: Sequence[str] = ("train", "val"),
     max_windows_per_split: Optional[int] = None,
 ) -> Dict[str, Any]:
@@ -233,9 +232,6 @@ def build_window_datasets(
         Number of workers used by the caching materialisation.
     seed:
         Random seed (used by WindowStreamedDataset when shuffle_shots is enabled).
-    shuffle_shots:
-        Either a bool applied to all splits, or a dict split->bool.
-        Note: this is *shot-level* shuffling for streaming datasets.
     cache_splits:
         Which splits to cache when enable_cache=True.
     max_windows_per_split:
@@ -269,9 +265,14 @@ def build_window_datasets(
             t1 = time.perf_counter()
             logger.info("Finished caching %s in %.3f seconds", split, t1 - t0)
         else:
+            # IMPORTANT: WindowStreamedDataset is an IterableDataset, so
+            # DataLoader(shuffle=...) is ignored. To avoid repeatedly training on
+            # the same prefix, we shuffle shots *here* for the training split.
+            # Validation/test remain deterministic by default.
+            do_shuffle_shots = split.lower() == "train"
             ds = WindowStreamedDataset(
                 ds_stream,
-                shuffle_shots=shuffle_shots,
+                shuffle_shots=do_shuffle_shots,
                 seed=seed,
             )
 

@@ -213,7 +213,6 @@ def main() -> None:
         enable_cache=enable_cache,
         num_workers_cache=num_workers_cache,
         seed=cfg_mmt.seed,
-        shuffle_shots=False,  # deterministic for eval
         cache_splits=("test",),  # eval uses test split only
     )
 
@@ -237,7 +236,6 @@ def main() -> None:
         collate_fn,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],
-        shuffle=False,
         drop_last=cfg_loader["drop_last"],
         seed=cfg_mmt.seed,
     )["test"]

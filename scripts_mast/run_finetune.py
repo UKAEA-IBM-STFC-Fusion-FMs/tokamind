@@ -224,7 +224,6 @@ def main() -> None:
         enable_cache=enable_cache,
         num_workers_cache=num_workers_cache,
         seed=cfg_mmt.seed,
-        shuffle_shots=cfg_loader["shuffle"],
         cache_splits=("train", "val"),
     )
 
@@ -241,7 +240,7 @@ def main() -> None:
         collate_fn,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],
-        shuffle=cfg_loader["shuffle"],
+        shuffle_train=cfg_loader["shuffle_train"],
         drop_last=cfg_loader["drop_last"],
         seed=cfg_mmt.seed,
     )

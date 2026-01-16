@@ -46,7 +46,7 @@ Notes
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, Iterator, Sequence
+from typing import Any, Dict, Iterator, Sequence
 import logging
 import random
 
@@ -90,7 +90,10 @@ class WindowStreamedDataset(IterableDataset):
         Optional base seed used when `shuffle_shots=True` to initialise a
         per-worker Random instance.  If None, a deterministic default seed
         (0) is used.  You can change this between epochs by constructing a
-        new dataset instance, or by passing epoch-dependent seeds.
+        new dataset instance. When using persistent workers, this class also
+        mixes an internal epoch counter into the shuffle seed so that shot
+        order changes between epochs even if the same dataset instance is
+        reused across epochs.
 
     Yields
     ------
@@ -117,7 +120,12 @@ class WindowStreamedDataset(IterableDataset):
         self.shuffle_shots = shuffle_shots
         self.seed = 0 if seed is None else int(seed)
 
-    def _iter_shot_indices(self) -> Iterable[int]:
+        # Epoch counter used to make streaming shot shuffling change between epochs.
+        # This is important when DataLoader(persistent_workers=True) is used, because
+        # otherwise each worker would see the same shot order every epoch.
+        self._epoch: int = 0
+
+    def _iter_shot_indices(self, *, epoch: int) -> Sequence[int]:
         """
         Yield the shot indices assigned to the current worker.
 
@@ -143,12 +151,17 @@ class WindowStreamedDataset(IterableDataset):
         indices = list(range(start, end))
 
         if self.shuffle_shots and indices:
-            # Per-worker deterministic RNG
-            # We offset the seed by worker ID if present, so different workers
-            # still see different permutations of their local slice.
-            worker = get_worker_info()
+            # Per-worker deterministic RNG.
+            #
+            # NOTE: With persistent workers, each worker's dataset instance is reused
+            # across epochs. If we seeded only with (self.seed + worker_id), each
+            # worker would see the exact same shot order every epoch.
+            #
+            # We therefore mix in an epoch counter to force epoch-to-epoch reshuffling.
             worker_id = 0 if worker is None else worker.id
-            rng = random.Random(self.seed + worker_id)
+            # Large odd constant (prime) to reduce collisions for small epoch values.
+            rng_seed = self.seed + worker_id + epoch * 1_000_003
+            rng = random.Random(rng_seed)
             rng.shuffle(indices)
 
         return indices
@@ -171,7 +184,10 @@ class WindowStreamedDataset(IterableDataset):
         """
         # WindowStreamedDataset.__iter__
 
-        for idx_shot in self._iter_shot_indices():
+        epoch = self._epoch
+        self._epoch += 1
+
+        for idx_shot in self._iter_shot_indices(epoch=epoch):
             try:
                 item = self.shot_dataset[idx_shot]
             except Exception:

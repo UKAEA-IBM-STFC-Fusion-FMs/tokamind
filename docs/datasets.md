@@ -45,6 +45,7 @@ Key properties:
 - **Low memory**: windows are produced on the fly.
 - **IterableDataset**: `DataLoader(shuffle=True)` is *not* applied by PyTorch for iterable datasets.
 - Shuffling happens at the **shot index** level (`shuffle_shots=True`) inside the dataset.
+- In the MMT entrypoints, `shuffle_shots` is enabled for the **train** split and disabled for **val/test** to keep evaluation deterministic.
 - Multi-worker support: each worker gets a slice of shot indices; shuffling is per-worker and seeded.
 
 Important caveat:
@@ -67,7 +68,7 @@ Key properties:
 
 - **Fastest per-step**: no per-window preprocessing in the training loop after caching.
 - **Map-style Dataset**: `len(dataset) == num_windows` (true window count).
-- `DataLoader(shuffle=True)` performs **window-level shuffling**.
+- `DataLoader(shuffle=True)` performs **window-level shuffling** (typically enabled for the **train** split only; controlled by `loader.shuffle_train`).
 - Easy to reason about epochs: one epoch = one pass over cached windows.
 
 When to use:
@@ -101,13 +102,15 @@ Parallel caching:
 
 ---
 
-## Shuffling semantics (important)
+## Shuffling semantics
 
 ### Cached path
-- Shuffling is **window-level**, handled by `DataLoader(shuffle=True)`.
+- Shuffling is **window-level**, handled by `DataLoader(shuffle=True)` for the **train** split (controlled by `loader.train_shuffle`).
+- Validation/test loaders are **not shuffled** (deterministic).
 
 ### Streaming path
-- Shuffling is **shot-level**, handled by `WindowStreamedDataset(shuffle_shots=True)`.
+- Shuffling is **shot-level**, handled by `WindowStreamedDataset(shuffle_shots=True)` for the **train** split.
+- Validation/test use `shuffle_shots=False` (deterministic).
 - Within each shot, windows are yielded in the order produced by the upstream window generator.
 
 Practical implication:
@@ -124,6 +127,7 @@ Practical implication:
 For most users:
 
 - Start with **cached windows** for train/val because it’s simpler and faster.
+- Keep `loader.shuffle_train: true` for cached **training** (val/test remain deterministic).
 - Use **streaming windows** only when you hit RAM limits.
 
 
@@ -137,6 +141,6 @@ Use `loader.batches_per_epoch` (and/or cache windows).
 
 ### “Caching uses too much RAM”
 Reduce:
-- `max_windows_per_split` (for debugging),
+- `max_windows_per_split` (or split-specific caps like `max_windows_train` / `max_windows_val`),
 - chunk counts (`preprocess.trim.max_chunks`),
 - embedding sizes (via `embeddings.yaml` / tuned overrides).

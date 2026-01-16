@@ -82,7 +82,7 @@ def initialize_mmt_dataloaders(
     collate_fn,
     batch_size: int,
     num_workers: int,
-    shuffle: bool = True,
+    shuffle_train: bool = True,
     drop_last: bool = False,
     verbose: bool = False,
     seed: Optional[int] = None,
@@ -99,7 +99,9 @@ def initialize_mmt_dataloaders(
     Behaviour
     ---------
     - For **map-style datasets**:
-        * `shuffle` is forwarded to the DataLoader.
+        * Only training splits are shuffled by default.
+          Concretely, DataLoader-level shuffling is enabled only when:
+          ``split.lower().startswith('train')`` and ``shuffle=True``.
         * A torch.Generator (if `seed` is provided) controls the shuffle
           order deterministically.
 
@@ -125,9 +127,10 @@ def initialize_mmt_dataloaders(
     num_workers : int
         Number of DataLoader workers.
 
-    shuffle : bool, default True
-        Global shuffle flag:
-        - Map-style datasets → passed through to DataLoader.
+    shuffle_train : bool, default True
+        Training-shuffle flag:
+        - Map-style datasets → applied only to training splits
+          (``split.lower().startswith('train')``).
         - IterableDataset → ignored at DataLoader level (always False);
           dataset is responsible for shuffling.
 
@@ -199,8 +202,12 @@ def initialize_mmt_dataloaders(
         # Detect streaming mode
         is_streaming = isinstance(ds, IterableDataset)
 
-        # IterableDataset → DataLoader shuffle MUST be False
-        effective_shuffle = False if is_streaming else bool(shuffle)
+        # IterableDataset → DataLoader shuffle MUST be False.
+        # Map-style datasets → shuffle only train splits by default.
+        is_train_split = split.lower().startswith("train")
+        effective_shuffle = (
+            (not is_streaming) and is_train_split and bool(shuffle_train)
+        )
 
         if verbose:
             ds_type = (

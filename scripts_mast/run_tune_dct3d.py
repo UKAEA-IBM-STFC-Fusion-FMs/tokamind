@@ -232,7 +232,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     ds_windows = WindowStreamedDataset(
         model_dataset,
-        shuffle_shots=False,
+        shuffle_shots=False,  # we shuffle when loading using get_train_test_val_shots
         seed=cfg_mmt.seed,
     )
 

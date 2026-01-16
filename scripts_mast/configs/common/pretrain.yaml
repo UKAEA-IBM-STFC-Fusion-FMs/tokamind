@@ -22,8 +22,8 @@ collate:
 
 data:
   cache:
-    enable: true
-    num_workers: 16
+    enable: false
+    num_workers: 8
   keep_output_native: false
 
 preprocess:
@@ -37,11 +37,11 @@ preprocess:
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
 
 loader:
-  batch_size: 256
-  num_workers: 0
-  shuffle: true
+  batch_size: 1024
+  num_workers: 2
+  shuffle_train: true
   drop_last: false
-  batches_per_epoch: null  # Required only when data.cache.enable=false (streaming)
+  batches_per_epoch: 100  # Required only when data.cache.enable=false (streaming)
 
 model_source:
   # Optional warm-start source run directory.
@@ -117,7 +117,7 @@ train:
         output_adapters: false
 
     - name: pretrain_main
-      epochs: 30
+      epochs: 2
 
       scheduler:
         grad_accum_steps: 1

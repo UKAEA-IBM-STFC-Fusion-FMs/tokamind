@@ -40,7 +40,7 @@ preprocess:
 loader:
   batch_size: 100
   num_workers: 0
-  shuffle: true
+  shuffle_train: true
   drop_last: false
   batches_per_epoch: null  # Required only when data.cache.enable=false (streaming)
 
