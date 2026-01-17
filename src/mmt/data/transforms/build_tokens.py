@@ -3,68 +3,67 @@ BuildTokensTransform
 ====================
 
 Convert embedded chunks into the final per-token representation consumed by
-the MMT model and collate.
+MMT collation and the model.
 
 Contract (must match downstream collate/train)
 ----------------------------------------------
-This transform writes the following fields to `window`:
+This transform writes the following fields to ``window``:
 
-    window["emb_chunks"]   = emb_list                       (List[np.ndarray])
-    window["pos"]          = pos                            (np.ndarray int32)
-    window["id"]           = np.asarray(sig_list, int32)    (np.ndarray)
-    window["mod"]          = np.asarray(mod_list, int16)    (np.ndarray)
-    window["role"]         = np.asarray(role_list, int8)    (np.ndarray)
+    window["emb_chunks"]   : List[np.ndarray]
+        Ragged list of token embeddings (one array per token).
 
-    window["output_emb"]   = output_emb                     (Dict[int, np.ndarray])
-    # (native output values are carried separately as window["output"] if enabled)
+    window["pos"]          : np.ndarray[int32] shape (L,)
+        Relative token positions (1 = closest-to-output).
+
+    window["id"]           : np.ndarray[int32] shape (L,)
+        Token signal IDs (SignalSpec.signal_id).
+
+    window["mod"]          : np.ndarray[int16] shape (L,)
+        Modality IDs (small ints, stable within a registry).
+
+    window["role"]         : np.ndarray[int8] shape (L,)
+        Token roles (ROLE_CONTEXT / ROLE_ACTUATOR).
+
+    window["output_emb"]   : Dict[int, np.ndarray]
+        Window-level output embeddings keyed by output signal_id.
+
+Notes (v0)
+----------
+- We **do not store per-token signal names** in the window anymore.
+  Name-based dropout overrides are converted to id-based once at startup.
+- We **do not store per-window output_names/output_shapes** in the window.
+  The output signal_id is sufficient for training; eval code can map id→name
+  using the SignalSpecRegistry.
 
 Simplified logic (v0)
 --------------------
 - Positions are NOT computed from time here.
-- Each chunk is expected to carry an integer `pos` computed upstream by
-  `TrimChunksTransform`.
+- Each chunk is expected to carry an integer ``pos`` computed upstream by
+  ``TrimChunksTransform``.
 - Deterministic ordering is done by (pos, chunk_index_in_window), then signal_id.
 """
 
 from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
-import numpy as np
 import logging
 
+import numpy as np
+
 from mmt.data.signal_spec import SignalSpecRegistry
-from mmt.constants import (
-    ROLE_CONTEXT,
-    ROLE_ACTUATOR,
-)
+from mmt.constants import ROLE_CONTEXT, ROLE_ACTUATOR
 
 logger = logging.getLogger("mmt.BuildTokens")
 
 
 class BuildTokensTransform:
-    """
-    Construct a deterministic, aligned token sequence for a window.
-
-    Input requirements
-    ------------------
-    Each chunk in window["chunks"][role] must contain:
-      - "pos"                 : int (computed upstream)
-      - "chunk_index_in_window": int (deterministic tie-breaker)
-      - "embeddings"          : Dict[int, np.ndarray] mapping signal_id → embedding
-
-    window must contain:
-      - "embedded_output"        : Dict[int, np.ndarray]
-
-    Output
-    ------
-    Writes the exact arrays/dicts expected by collate/train (see module header).
-    """
+    """Construct a deterministic, aligned token sequence for a window."""
 
     def __init__(self, signal_specs: SignalSpecRegistry) -> None:
         self.signal_specs = signal_specs
 
-        # Stable modality_id table
-        modalities = signal_specs.modalities  # sorted by registry
+        # Stable modality_id table (sorted for determinism).
+        modalities = signal_specs.modalities
         self._modality_to_id = {m: i for i, m in enumerate(modalities)}
 
         # signal_id -> modality_id
@@ -72,13 +71,11 @@ class BuildTokensTransform:
         for spec in signal_specs.specs:
             if spec.modality not in self._modality_to_id:
                 raise KeyError(f"Unknown modality {spec.modality!r}")
-            self._signal_id_to_mod_id[spec.signal_id] = self._modality_to_id[
-                spec.modality
-            ]
+            self._signal_id_to_mod_id[int(spec.signal_id)] = int(
+                self._modality_to_id[spec.modality]
+            )
 
-    # ------------------------------------------------------------------ main API
-
-    def __call__(self, window: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def __call__(self, window: Dict[str, Any] | None) -> Optional[Dict[str, Any]]:
         if window is None:
             return None
 
@@ -117,13 +114,14 @@ class BuildTokensTransform:
             emb_map = ch.get("embeddings") or {}
 
             for sig_id in sorted(emb_map.keys()):
-                emb = emb_map[sig_id]
                 sid = int(sig_id)
+                if sid not in self._signal_id_to_mod_id:
+                    raise KeyError(f"Unknown signal_id={sid} (missing from registry)")
 
-                emb_list.append(emb)
+                emb_list.append(emb_map[sig_id])
                 sig_list.append(sid)
                 role_list.append(ROLE_CONTEXT)
-                mod_list.append(int(self._signal_id_to_mod_id[sid]))
+                mod_list.append(self._signal_id_to_mod_id[sid])
                 pos_list.append(pos)
 
         # -------------------------
@@ -134,39 +132,32 @@ class BuildTokensTransform:
             emb_map = ch.get("embeddings") or {}
 
             for sig_id in sorted(emb_map.keys()):
-                emb = emb_map[sig_id]
                 sid = int(sig_id)
+                if sid not in self._signal_id_to_mod_id:
+                    raise KeyError(f"Unknown signal_id={sid} (missing from registry)")
 
-                emb_list.append(emb)
+                emb_list.append(emb_map[sig_id])
                 sig_list.append(sid)
                 role_list.append(ROLE_ACTUATOR)
-                mod_list.append(int(self._signal_id_to_mod_id[sid]))
+                mod_list.append(self._signal_id_to_mod_id[sid])
                 pos_list.append(pos)
-
-        pos = np.asarray(pos_list, dtype=np.int32)
 
         # -------------------------
         # 3) OUTPUTS (window-level)
         # -------------------------
-        output_emb: Dict[int, np.ndarray] = {}
-
         embedded_output = window.get("embedded_output") or {}
-
-        for sig_id, emb in embedded_output.items():
-            sid = int(sig_id)
-            # Defensive: ensure the signal exists in the registry.
-            _ = self.signal_specs.get_by_id(sid)
-            output_emb[sid] = emb
+        output_emb: Dict[int, np.ndarray] = {
+            int(k): v for k, v in embedded_output.items()
+        }
 
         # -------------------------
         # 4) WRITE BACK (contract)
         # -------------------------
         window["emb_chunks"] = emb_list
-        window["pos"] = pos
+        window["pos"] = np.asarray(pos_list, dtype=np.int32)
         window["id"] = np.asarray(sig_list, dtype=np.int32)
         window["mod"] = np.asarray(mod_list, dtype=np.int16)
         window["role"] = np.asarray(role_list, dtype=np.int8)
-
         window["output_emb"] = output_emb
 
         logger.debug(
@@ -176,8 +167,8 @@ class BuildTokensTransform:
             len(emb_list),
             sum(r == ROLE_CONTEXT for r in role_list),
             sum(r == ROLE_ACTUATOR for r in role_list),
-            int(pos.min()) if pos.size else None,
-            int(pos.max()) if pos.size else None,
+            int(window["pos"].min()) if window["pos"].size else None,
+            int(window["pos"].max()) if window["pos"].size else None,
         )
 
         return window

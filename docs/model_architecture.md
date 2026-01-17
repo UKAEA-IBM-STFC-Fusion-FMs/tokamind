@@ -152,10 +152,6 @@ It writes:
 - `window["role"]`: role IDs (`ROLE_CONTEXT`, `ROLE_ACTUATOR`)
 - `window["output_emb"]`: `{signal_id → output_embedding}`
 
-Notes:
-- We intentionally do **not** carry per-token signal names or per-window output name/shape tables.
-  Configs remain name-based (human-friendly), but name→id resolution happens once at startup.
-
 Deterministic ordering:
 - chunks sorted by `(pos, chunk_index_in_window)` → closest-to-output first
 - signals within chunk sorted by `signal_id`
@@ -175,7 +171,7 @@ Key features:
 
 Outputs include:
 - token tensors: `pos`, `id`, `mod`, `role`, `padding_mask`
-- packed embeddings: `emb[sid]` and `emb_index[sid]` (ragged by signal_id)
+- packed embeddings: `emb` and `emb_index` dicts keyed by signal_id (see `mmt/data/collate.py`)
 - `output_emb` tensors stacked by `signal_id`
 - optional `output_native` (eval) when enabled
 

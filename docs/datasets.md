@@ -24,7 +24,6 @@ A *window* is a single model sample cut from a shot. It contains:
 After preprocessing + embedding + token building, a window dict contains token fields like:
 
 - `emb_chunks`, `id`, `role`, `mod`, `pos`, `signal_name`
-- `output_emb`, `output_shapes`, `output_names`
 - (optionally) native output payload under `output` when `keep_output_native=True`
 
 ---

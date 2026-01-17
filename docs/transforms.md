@@ -192,7 +192,7 @@ This is why `chunk_index_global` is required.
 **Reads**
 - Chunk embeddings + `pos` and indexes
 - `SignalSpecRegistry` (for signal_id and modality mapping)
-- `window["embedded_output"]`
+- `window["embedded_output"]` (output embeddings)
 
 **Writes**
 Token fields (must match collate):
@@ -200,7 +200,7 @@ Token fields (must match collate):
 ```text
 window["emb_chunks"]   : list of embeddings (ragged, one per token)
 window["id"]           : int32 array (signal_id)
-window["role"]         : int16 array (ROLE_CONTEXT / ROLE_ACTUATOR / ROLE_OUTPUT)
+window["role"]         : int8 array (ROLE_CONTEXT / ROLE_ACTUATOR)
 window["mod"]          : int16 array (modality id)
 window["pos"]          : int32 array (relative position)
 ```
@@ -208,12 +208,10 @@ window["pos"]          : int32 array (relative position)
 Output fields:
 
 ```text
-window["output_emb"]   : Dict[int, np.ndarray] (signal_id -> output embedding)
+window["output_emb"]
 ```
 
-Notes:
-- We deliberately do **not** carry per-token signal names or per-window output name/shape tables.
-  Configs remain name-based (human-friendly), but name→id resolution happens once at startup.
+Note: per-token signal names and per-window output name/shape metadata are not stored; name-based dropout overrides are converted to id-based once at startup.
 
 **Deterministic ordering**
 - Chunks are ordered by `(pos, chunk_index_in_window)` (closest-to-output first)

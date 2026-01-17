@@ -317,7 +317,6 @@ def build_window_datasets(
     return out
 
 
-# -----------------------------------------------------------------------------
 # Collate
 # -----------------------------------------------------------------------------
 
@@ -334,12 +333,18 @@ def make_collate_fn(
 ) -> MMTCollate:
     """Create an MMTCollate configured for train/eval.
 
+    Important: Step-5 change
+    ------------------------
+
+    To keep YAML configs user-friendly, dropout overrides are still specified
+    by *signal name* in config, but we convert them **once at startup** to
+    id-based dicts (keyed by ``SignalSpec.signal_id``) before constructing the
+    collate.
+
     Parameters
     ----------
     signal_specs:
-        SignalSpecRegistry used to resolve (role,name) → signal_id for dropout
-        overrides, and to build a stable output_id_to_name mapping (needed for
-        `keep_output_native=True`).
+        SignalSpec registry for the *current task*.
     base_cfg:
         Base collate configuration (usually cfg_mmt.collate for train).
         For eval you can pass None.
@@ -348,12 +353,6 @@ def make_collate_fn(
     drop_inputs / drop_actuators / drop_outputs:
         If provided, these signals are *forced dropped* by setting per-signal
         dropout overrides to 1.0.
-    drop_inputs:
-        Optional list of input signal names to force-drop (p=1.0).
-    drop_actuators:
-        Optional list of actuator signal names to force-drop (p=1.0).
-    drop_outputs:
-        Optional list of output signal names to force-drop (p=1.0).
 
     Returns
     -------
@@ -364,69 +363,68 @@ def make_collate_fn(
     cfg: Dict[str, Any] = dict(base_cfg or {})
     cfg["keep_output_native"] = bool(keep_output_native)
 
+    def _name_to_id(role: str, name: str) -> int:
+        spec = signal_specs.get(role, name)
+        if spec is None:
+            raise KeyError(f"Unknown {role} signal name {name!r}")
+        return int(spec.signal_id)
+
     def _convert_overrides(
-        role: str, d: Optional[Mapping[Any, Any]]
+        role: str, overrides: Any, *, label: str
     ) -> Dict[int, float]:
-        """Convert a name-keyed dropout override dict to id-keyed.
-
-        Public configs stay name-keyed (human-friendly). We convert once at
-        startup so `MMTCollate` can stay id-based and not depend on names.
-        """
-
-        if not d:
+        if overrides is None:
             return {}
+        if not isinstance(overrides, Mapping):
+            raise TypeError(
+                f"{label} must be a dict keyed by signal name (str) or signal_id (int); "
+                f"got {type(overrides).__name__}."
+            )
 
         out: Dict[int, float] = {}
-        for k, v in d.items():
+        for k, v in overrides.items():
             if isinstance(k, int):
                 sid = int(k)
-            elif isinstance(k, str) and k.isdigit():
-                sid = int(k)
-            elif isinstance(k, str):
-                spec = signal_specs.get(role, k)
-                if spec is None:
-                    raise KeyError(f"Unknown {role} signal name in overrides: {k!r}")
-                sid = int(spec.signal_id)
             else:
-                raise TypeError(
-                    f"Override key must be a signal name (str) or signal_id (int), got {type(k)}"
-                )
-
+                sid = _name_to_id(role, str(k))
             out[sid] = float(v)
-
         return out
 
+    # Convert any configured overrides (name -> id). If user passes ids directly,
+    # we keep them as-is (useful for programmatic callers).
+    in_over = _convert_overrides(
+        "input", cfg.get("p_drop_inputs_overrides", {}), label="p_drop_inputs_overrides"
+    )
+    act_over = _convert_overrides(
+        "actuator",
+        cfg.get("p_drop_actuators_overrides", {}),
+        label="p_drop_actuators_overrides",
+    )
+    out_over = _convert_overrides(
+        "output",
+        cfg.get("p_drop_outputs_overrides", {}),
+        label="p_drop_outputs_overrides",
+    )
+
+    # Force-drop lists (names) -> id overrides.
     if drop_inputs:
-        d = dict(cfg.get("p_drop_inputs_overrides") or {})
-        for k in drop_inputs:
-            d[k] = 1.0
-        cfg["p_drop_inputs_overrides"] = d
+        for name in drop_inputs:
+            in_over[_name_to_id("input", str(name))] = 1.0
     if drop_actuators:
-        d = dict(cfg.get("p_drop_actuators_overrides") or {})
-        for k in drop_actuators:
-            d[k] = 1.0
-        cfg["p_drop_actuators_overrides"] = d
+        for name in drop_actuators:
+            act_over[_name_to_id("actuator", str(name))] = 1.0
     if drop_outputs:
-        d = dict(cfg.get("p_drop_outputs_overrides") or {})
-        for k in drop_outputs:
-            d[k] = 1.0
-        cfg["p_drop_outputs_overrides"] = d
+        for name in drop_outputs:
+            out_over[_name_to_id("output", str(name))] = 1.0
 
-    # Convert name-keyed overrides to id-keyed overrides once.
-    cfg["p_drop_inputs_overrides"] = _convert_overrides(
-        "input", cfg.get("p_drop_inputs_overrides")
-    )
-    cfg["p_drop_actuators_overrides"] = _convert_overrides(
-        "actuator", cfg.get("p_drop_actuators_overrides")
-    )
-    cfg["p_drop_outputs_overrides"] = _convert_overrides(
-        "output", cfg.get("p_drop_outputs_overrides")
-    )
+    cfg["p_drop_inputs_overrides"] = in_over
+    cfg["p_drop_actuators_overrides"] = act_over
+    cfg["p_drop_outputs_overrides"] = out_over
 
-    # Needed only for eval (`keep_output_native=True`): native outputs are
-    # still stored by *name* in window["output"], while the model graph is id-based.
-    cfg["output_id_to_name"] = {
-        int(spec.signal_id): spec.name for spec in signal_specs.specs_for_role("output")
-    }
+    # For eval-only native output collation, collate needs id->name mapping once.
+    if keep_output_native:
+        cfg["output_id_to_name"] = {
+            int(spec.signal_id): spec.name
+            for spec in signal_specs.specs_for_role("output")
+        }
 
     return MMTCollate(cfg_collate=cfg)
