@@ -4,4 +4,4 @@
 # LR/epochs, warm-start settings, etc.).
 
 # Optional: name the eval subfolder. If omitted, loader uses run_<timestamp>.
-run_id: pretrain_inputs_actuators_to_outputs_test
+run_id: pretrain_inputs_actuators_to_outputs
