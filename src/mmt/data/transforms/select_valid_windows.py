@@ -194,7 +194,7 @@ class SelectValidWindowsTransform:
         for role in ("input", "actuator"):
             new_role_chunks = []
             for ch in chunks.get(role) or []:
-                ch2 = dict(ch)
+                ch2: Dict[str, Any] = dict(ch)
                 sigs = ch.get("signals") or {}
 
                 sigs2: Dict[str, Any] = {}

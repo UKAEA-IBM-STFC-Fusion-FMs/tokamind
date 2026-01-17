@@ -133,7 +133,7 @@ class EmbedChunksTransform:
 
             new_role_chunks = []
             for ch in role_chunks:
-                ch2 = dict(ch)
+                ch2: Dict[str, Any] = dict(ch)
 
                 if "chunk_index_global" not in ch:
                     raise KeyError(
