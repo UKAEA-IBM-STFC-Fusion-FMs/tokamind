@@ -53,12 +53,9 @@ class FinalizeWindowTransform:
 
     Notes
     -----
-    This transform intentionally removes fields that are *never* consumed by
-    `MMTCollate` / the model once tokenization has completed:
-
-    - raw groups: "input", "actuator" (large, redundant after embedding)
-    - chunk structures: "chunks" (large, redundant after emb_chunks)
-    - intermediate output embedding buffers: "embedded_output", "embedded_output_shapes"
+    This is a *contract enforcer*: by default it keeps only the fields that
+    are required by collation/model (plus a tiny amount of debug metadata).
+    This makes it robust to datasets that carry additional per-window keys.
     """
 
     def __init__(self, *, keep_output_native: bool) -> None:
@@ -68,18 +65,29 @@ class FinalizeWindowTransform:
         if window is None:
             return None
 
-        # Mutate in-place: the pipeline already mutates windows (e.g. BuildTokens).
-        # This avoids extra dict allocations per window.
-        window.pop("chunks", None)
-        window.pop("embedded_output", None)
-        window.pop("embedded_output_shapes", None)
+        # ------------------------------------------------------------------
+        # Keep-only policy
+        # ------------------------------------------------------------------
+        # Required by MMTCollate / model:
+        keep_keys = {
+            "emb_chunks",
+            "pos",
+            "id",
+            "mod",
+            "role",
+            "output_emb",
+        }
 
-        # Raw groups are never used after tokenization.
-        window.pop("input", None)
-        window.pop("actuator", None)
+        # Small debug metadata (cheap, useful in logs/metrics).
+        keep_keys.update({"shot_id", "window_index", "t_cut"})
 
         # Native outputs are only needed for eval/traces.
-        if not self.keep_output_native:
-            window.pop("output", None)
+        if self.keep_output_native:
+            keep_keys.add("output")
+
+        # Mutate in-place to avoid extra dict allocations per window.
+        for k in list(window.keys()):
+            if k not in keep_keys:
+                window.pop(k, None)
 
         return window
