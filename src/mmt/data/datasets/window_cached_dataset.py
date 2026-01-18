@@ -56,6 +56,8 @@ from torch.utils.data import DataLoader, Dataset
 
 logger = logging.getLogger("mmt.Cache")
 
+# We print the number of total preprocessed windows every _LOG_INTERVAL windows.
+_LOG_INTERVAL = 10000
 
 # -----------------------------------------------------------------------------
 # Small RAM helper
@@ -269,7 +271,6 @@ def materialize_tokenized_split_to_ram(
                 yield w
 
     flat_windows: List[Dict[str, Any]] = []
-    log_interval = 1000
 
     for n, w in enumerate(_iter_windows(), start=1):
         if dtype_np is not None:
@@ -280,7 +281,7 @@ def materialize_tokenized_split_to_ram(
         if max_windows is not None and n >= int(max_windows):
             break
 
-        if n % log_interval == 0:
+        if n % _LOG_INTERVAL == 0:
             logger.info(
                 "Cached %d windows so far (RAM: %.3f GB)",
                 len(flat_windows),

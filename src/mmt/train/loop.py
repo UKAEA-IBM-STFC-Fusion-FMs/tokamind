@@ -283,7 +283,6 @@ def train_finetune(
             epochs + 1,
         ):
             epoch_global = total_epochs_run + epoch_in_stage
-
             # ---------------------------- TRAIN ----------------------------
             train_loss, global_step = run_one_epoch(
                 model,
@@ -299,6 +298,7 @@ def train_finetune(
                 train=True,
                 global_step=global_step,
                 max_batches=train_batches_per_epoch,
+                epoch_global=epoch_global,
             )
 
             # ---------------------------- VALIDATION -----------------------
@@ -316,29 +316,7 @@ def train_finetune(
                 train=False,
                 global_step=global_step,
                 max_batches=None,  # always full validation
-            )
-
-            bb_lr = backbone_lr(optimizer)
-            bb_lr_str = f"{bb_lr:.3e}" if bb_lr is not None else "n/a"
-
-            logger.info(
-                f"Stage {name} | Epoch {epoch_in_stage}/{epochs} "
-                f"(global={epoch_global}) | "
-                f"train={train_loss:.6f}, val={val_loss:.6f}, "
-                f"best={best_val:.6f}, lr_backbone={bb_lr_str}"
-            )
-
-            # ---------------------------- HISTORY UPDATE -------------------
-            history["stages"][name].append(
-                {
-                    "epoch_global": epoch_global,
-                    "epoch_in_stage": epoch_in_stage,
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                    "lr_backbone": bb_lr,
-                    "best_val": best_val,
-                    "global_step": global_step,
-                }
+                epoch_global=epoch_global,
             )
 
             # ---------------------------- BEST CHECKPOINT ------------------
@@ -365,6 +343,36 @@ def train_finetune(
                 )
             else:
                 bad_epochs += 1
+
+            # ---------------------------- EPOCH LOG ------------------------
+            if early_patience > 0:
+                no_improve_str = f"{bad_epochs}/{early_patience}"
+            else:
+                no_improve_str = f"{bad_epochs}"
+
+            logger.info(
+                f"Stage {name} | Epoch {epoch_in_stage}/{epochs} "
+                f"(global={epoch_global}) | step={global_step} | "
+                f"train={train_loss:.6f}, val={val_loss:.6f}, best={best_val:.6f} | "
+                f"no_improve={no_improve_str}"
+            )
+
+            bb_lr = backbone_lr(optimizer)
+
+            # ---------------------------- HISTORY UPDATE -------------------
+            history["stages"][name].append(
+                {
+                    "epoch_global": epoch_global,
+                    "epoch_in_stage": epoch_in_stage,
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                    "lr_backbone": bb_lr,
+                    "best_val": best_val,
+                    "global_step": global_step,
+                    "bad_epochs": bad_epochs,
+                    "improved": improved,
+                }
+            )
 
             # ---------------------------- LATEST CHECKPOINT ---------------
             save_latest(

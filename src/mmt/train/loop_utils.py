@@ -38,6 +38,59 @@ logger = logging.getLogger("mmt.Train")
 _MAX_GRAD_NORM = 1.0
 
 
+# How many batch-level timing lines to show at INFO during the *first* global epoch.
+# If DEBUG logging is enabled, we will log timing for every batch at DEBUG.
+_LOG_FIRST_EPOCH_BATCHES_INFO = 5
+
+
+def _maybe_log_batch_timing(
+    *,
+    batch_idx: int,
+    epoch_global: Optional[int],
+    train: bool,
+    dt_dataloader: float,
+    dt_move: float,
+    dt_forward: float,
+    dt_backward: Optional[float],
+    dt_opt: Optional[float],
+) -> None:
+    """Log per-batch timing without spamming INFO logs.
+
+    Behavior
+    --------
+    - If DEBUG logging is enabled: log every batch at DEBUG.
+    - Otherwise: log only the first few batches of the first global epoch at INFO.
+
+    Notes
+    -----
+    - `epoch_global` is optional to preserve backwards compatibility; if omitted,
+      we treat it as the first epoch (so you still get a small amount of timing
+      information at INFO).
+    """
+    if logger.isEnabledFor(logging.DEBUG):
+        level = logging.DEBUG
+    else:
+        eg = 1 if epoch_global is None else int(epoch_global)
+        if eg <= 1 and batch_idx < _LOG_FIRST_EPOCH_BATCHES_INFO:
+            level = logging.INFO
+        else:
+            return
+
+    phase = "TRAIN" if train else "VAL"
+    parts: list[str] = [
+        f"time dataloader={dt_dataloader:.4f}s",
+        f"move={dt_move:.4f}s",
+        f"forward={dt_forward:.4f}s",
+    ]
+    if train:
+        if dt_backward is not None:
+            parts.append(f"backward={dt_backward:.4f}s")
+        if dt_opt is not None:
+            parts.append(f"opt={dt_opt:.4f}s")
+
+    logger.log(level, "[TIMING %s] batch %d: %s", phase, batch_idx, "  ".join(parts))
+
+
 # ======================================================================
 # Batch → device helpers
 # ======================================================================
@@ -250,6 +303,7 @@ def run_one_epoch(
     train: bool,
     global_step: int,
     max_batches: Optional[int] = None,
+    epoch_global: Optional[int] = None,
 ) -> Tuple[float, int]:
     """
     Run one epoch over a DataLoader, in either train or eval mode.
@@ -291,6 +345,9 @@ def run_one_epoch(
         number of batches rather than a full pass over an IterableDataset.
         In cached mode, this should be left as None to process the full
         dataloader.
+    epoch_global : int or None, optional
+        Global epoch index (1-based). Used only to control *logging verbosity*
+        for per-batch timing lines.
 
     Returns
     -------
@@ -393,22 +450,16 @@ def run_one_epoch(
         running_loss += float(loss_t.detach().cpu())
         n_batches += 1
 
-        if train:
-            logger.info(
-                f"[TIMING TRAIN] batch {batch_idx}: "
-                f"time dataloader={t_after_next - t_before_next:.4f}s  "
-                f"move={t1 - t0:.4f}s  "
-                f"forward={t2 - t1:.4f}s  "
-                f"backward={t3 - t2:.4f}s  "
-                f"opt={t4 - t3:.4f}s"
-            )
-        else:
-            logger.info(
-                f"[TIMING VAL] batch {batch_idx}: "
-                f"time dataloader={t_after_next - t_before_next:.4f}s  "
-                f"move={t1 - t0:.4f}s  "
-                f"forward={t2 - t1:.4f}s  "
-            )
+        _maybe_log_batch_timing(
+            batch_idx=batch_idx,
+            epoch_global=epoch_global,
+            train=train,
+            dt_dataloader=t_after_next - t_before_next,
+            dt_move=t1 - t0,
+            dt_forward=t2 - t1,
+            dt_backward=(t3 - t2) if train else None,
+            dt_opt=(t4 - t3) if train else None,
+        )
 
         # update t before next loading
         t_before_next = time.perf_counter()
