@@ -33,7 +33,7 @@ from scripts_mast.mast_utils import (
     setup_device_and_mp,
     extract_signal_stats,
     build_default_transform,
-    build_window_datasets,
+    build_window_dataset,
     make_collate_fn,
 )
 
@@ -46,7 +46,7 @@ from mmt.utils import (
 from mmt.data import (
     build_signal_specs,
     build_codecs,
-    initialize_mmt_dataloaders,
+    initialize_mmt_dataloader,
 )
 from mmt.models import MultiModalTransformer
 from mmt.eval import evaluate_metrics, save_traces_for_subset
@@ -187,32 +187,29 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model-level dataset (shot-based wrapper)
     # ------------------------------------------------------------------
-    model_datasets = {
-        "test": initialize_model_dataset(
-            test_mast_dataset,
-            dict_task_metadata,
-            cfg_task,
-            model_specific_transform=mmt_transform_map,
-            verbose=True,
-        ),
-    }
+    model_dataset_test = initialize_model_dataset(
+        test_mast_dataset,
+        dict_task_metadata,
+        cfg_task,
+        model_specific_transform=mmt_transform_map,
+        verbose=True,
+    )
 
     # Optional debug: iterate a single shot to exercise wrapper + transforms
-    if debug_mode and model_datasets["test"] is not None:
-        ds = model_datasets["test"]
-        shot = ds[0]
+    if debug_mode and model_dataset_test is not None:
+        shot = model_dataset_test[0]
         for _ in shot:
             continue
 
     # ------------------------------------------------------------------
     # Window-level dataset for EVAL (test only)
     # ------------------------------------------------------------------
-    datasets_windows = build_window_datasets(
-        model_datasets=model_datasets,
+    dataset_windows_test = build_window_dataset(
+        model_dataset=model_dataset_test,
         enable_cache=cfg_cache.get("enable", False),
         num_workers_cache=cfg_cache.get("num_workers", 0),
         seed=cfg_mmt.seed,
-        cache_splits=("test",),  # eval uses test split only
+        shuffle=False,
         cache_dtype=cfg_cache.get("dtype", None),
     )
 
@@ -232,14 +229,15 @@ def main() -> None:
         drop_outputs=drop_outputs,
     )
 
-    eval_loader = initialize_mmt_dataloaders(
-        datasets_windows,
+    eval_loader = initialize_mmt_dataloader(
+        dataset_windows_test,
         collate_fn,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],
+        shuffle=False,
         drop_last=cfg_loader["drop_last"],
         seed=cfg_mmt.seed,
-    )["test"]
+    )
 
     # ------------------------------------------------------------------
     # Model

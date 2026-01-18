@@ -46,7 +46,7 @@ default ulimit for open file descriptors can be low.
 
 from __future__ import annotations
 
-from typing import Dict, Mapping, Optional
+from typing import Dict, Optional
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset, Dataset
@@ -77,17 +77,17 @@ def _make_data_generator(seed: int) -> torch.Generator:
 # ----------------------------------------------------------------------------- #
 # DataLoader init
 # ----------------------------------------------------------------------------- #
-def initialize_mmt_dataloaders(
-    datasets: Mapping[str, Optional[Dataset]],
+def initialize_mmt_dataloader(
+    dataset: Optional[Dataset],
     collate_fn,
     batch_size: int,
     num_workers: int,
-    shuffle_train: bool = True,
+    shuffle: bool = True,
     drop_last: bool = False,
     verbose: bool = False,
     seed: Optional[int] = None,
     pin_memory: Optional[bool] = None,
-) -> Dict[str, Optional[DataLoader]]:
+) -> Optional[DataLoader]:
     """
     Build PyTorch DataLoaders for the MMT pipeline (window-level).
 
@@ -113,9 +113,8 @@ def initialize_mmt_dataloaders(
 
     Parameters
     ----------
-    datasets :
-        Mapping from split name (e.g. "train", "val", "test") to a Dataset
-        or IterableDataset instance, or None.
+    dataset :
+        Dataset or IterableDataset instance, or None.
 
     collate_fn :
         Collate function (e.g. MMTCollate) that merges a list of window
@@ -127,10 +126,8 @@ def initialize_mmt_dataloaders(
     num_workers : int
         Number of DataLoader workers.
 
-    shuffle_train : bool, default True
-        Training-shuffle flag:
-        - Map-style datasets → applied only to training splits
-          (``split.lower().startswith('train')``).
+    shuffle : bool, default True
+        shuffle flag:
         - IterableDataset → ignored at DataLoader level (always False);
           dataset is responsible for shuffling.
 
@@ -152,8 +149,7 @@ def initialize_mmt_dataloaders(
 
     Returns
     -------
-    dict
-        Mapping from split name to DataLoader or None.
+    DataLoader or None.
 
     NOTES:
     --------------
@@ -171,8 +167,6 @@ def initialize_mmt_dataloaders(
 
     if verbose:
         print("\n\n---------- MMT DATASET & DATALOADER INITIALIZATION ----------\n")
-
-    loaders: Dict[str, Optional[DataLoader]] = {k: None for k in datasets.keys()}
 
     # ----------------------------------------------------------------------
     # Optional deterministic seeding
@@ -192,59 +186,51 @@ def initialize_mmt_dataloaders(
     # ----------------------------------------------------------------------
     # Build loaders
     # ----------------------------------------------------------------------
-    for split, ds in datasets.items():
-        if ds is None:
-            loaders[split] = None
-            if verbose:
-                print(f"[MMT] Split '{split}': dataset is None → no DataLoader.")
-            continue
 
-        # Detect streaming mode
-        is_streaming = isinstance(ds, IterableDataset)
+    if dataset is None:
+        return None
 
-        # IterableDataset → DataLoader shuffle MUST be False.
-        # Map-style datasets → shuffle only train splits by default.
-        is_train_split = split.lower().startswith("train")
-        effective_shuffle = (
-            (not is_streaming) and is_train_split and bool(shuffle_train)
+    # Detect streaming mode
+    is_streaming = isinstance(dataset, IterableDataset)
+
+    # IterableDataset → DataLoader shuffle MUST be False.
+    # Map-style datasets → shuffle only train splits by default.
+    effective_shuffle = (not is_streaming) and bool(shuffle)
+
+    if verbose:
+        ds_type = (
+            "IterableDataset (STREAMING)"
+            if is_streaming
+            else "Map-style Dataset (CACHED)"
+        )
+        print(
+            f"[MMT] Building DataLoader' "
+            f"→ {ds_type}, batch_size={batch_size}, "
+            f"shuffle={effective_shuffle}, num_workers={num_workers}"
         )
 
-        if verbose:
-            ds_type = (
-                "IterableDataset (STREAMING)"
-                if is_streaming
-                else "Map-style Dataset (CACHED)"
-            )
-            print(
-                f"[MMT] Building DataLoader for split='{split}' "
-                f"→ {ds_type}, batch_size={batch_size}, "
-                f"shuffle={effective_shuffle}, num_workers={num_workers}"
-            )
+    # Performance / robustness defaults for multiprocessing.
+    # NOTE: PyTorch only accepts these arguments when num_workers > 0.
+    dl_kwargs: Dict[str, object] = {}
+    if int(num_workers) > 0:
+        dl_kwargs["prefetch_factor"] = 1
+        dl_kwargs["persistent_workers"] = True
 
-        # Performance / robustness defaults for multiprocessing.
-        # NOTE: PyTorch only accepts these arguments when num_workers > 0.
-        dl_kwargs: Dict[str, object] = {}
-        if int(num_workers) > 0:
-            dl_kwargs["prefetch_factor"] = 1
-            dl_kwargs["persistent_workers"] = True
+    # Actual DataLoader creation
+    loader = DataLoader(
+        dataset=dataset,
+        batch_size=batch_size,
+        num_workers=num_workers,
+        shuffle=effective_shuffle,
+        drop_last=drop_last,
+        collate_fn=collate_fn,
+        worker_init_fn=worker_fn,
+        generator=generator,
+        pin_memory=pin_memory,
+        **dl_kwargs,
+    )
 
-        # Actual DataLoader creation
-        loader = DataLoader(
-            dataset=ds,
-            batch_size=batch_size,
-            num_workers=num_workers,
-            shuffle=effective_shuffle,
-            drop_last=drop_last,
-            collate_fn=collate_fn,
-            worker_init_fn=worker_fn,
-            generator=generator,
-            pin_memory=pin_memory,
-            **dl_kwargs,
-        )
+    # Tag loader with streaming info (Option A core)
+    loader.is_streaming = is_streaming
 
-        # Tag loader with streaming info (Option A core)
-        loader.is_streaming = is_streaming
-
-        loaders[split] = loader
-
-    return loaders
+    return loader

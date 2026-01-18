@@ -21,7 +21,7 @@ from .pipeline_helpers import (
     setup_device_and_mp,
     extract_signal_stats,
     build_default_transform,
-    build_window_datasets,
+    build_window_dataset,
     make_collate_fn,
 )
 
@@ -35,6 +35,6 @@ __all__ = [
     "setup_device_and_mp",
     "extract_signal_stats",
     "build_default_transform",
-    "build_window_datasets",
+    "build_window_dataset",
     "make_collate_fn",
 ]

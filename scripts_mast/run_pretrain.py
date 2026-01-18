@@ -31,7 +31,7 @@ from mast_utils import (
     build_signals_by_role_from_task_definition,
     setup_device_and_mp,
     build_default_transform,
-    build_window_datasets,
+    build_window_dataset,
     make_collate_fn,
 )
 
@@ -45,7 +45,7 @@ from mmt.utils import (
 from mmt.data import (
     build_signal_specs,
     build_codecs,
-    initialize_mmt_dataloaders,
+    initialize_mmt_dataloader,
 )
 
 from mmt.models import MultiModalTransformer
@@ -192,27 +192,24 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model-level datasets (shot-based wrappers)
     # ------------------------------------------------------------------
-    model_datasets = {
-        "train": initialize_model_dataset(
-            train_mast_dataset,
-            dict_task_metadata,
-            cfg_task,
-            model_specific_transform=mmt_transform_map,
-            verbose=True,
-        ),
-        "val": initialize_model_dataset(
-            val_mast_dataset,
-            dict_task_metadata,
-            cfg_task,
-            model_specific_transform=mmt_transform_map,
-            verbose=False,
-        ),
-    }
+    model_dataset_train = initialize_model_dataset(
+        train_mast_dataset,
+        dict_task_metadata,
+        cfg_task,
+        model_specific_transform=mmt_transform_map,
+        verbose=True,
+    )
+    model_dataset_val = initialize_model_dataset(
+        val_mast_dataset,
+        dict_task_metadata,
+        cfg_task,
+        model_specific_transform=mmt_transform_map,
+        verbose=False,
+    )
 
     # Optional debug: iterate a single shot to exercise wrapper + transforms
-    if debug_mode and model_datasets["train"] is not None:
-        ds = model_datasets["train"]
-        shot = ds[0]
+    if debug_mode and model_dataset_train is not None:
+        shot = model_dataset_train[0]
         for _ in shot:
             continue
 
@@ -220,33 +217,57 @@ def main() -> None:
     # Window-level datasets (cached or streaming)
     # ------------------------------------------------------------------
     mw = cfg_cache.get("max_windows") or {}
-    datasets_windows = build_window_datasets(
-        model_datasets=model_datasets,
+    dataset_windows_train = build_window_dataset(
+        model_dataset=model_dataset_train,
         enable_cache=cfg_cache.get("enable", False),
         num_workers_cache=cfg_cache.get("num_workers", 0),
         seed=cfg_mmt.seed,
-        shuffle_train=cfg_loader["shuffle_train"],
-        cache_splits=("train", "val"),
-        cache_max_windows_train=mw.get("train", None),
-        cache_max_windows_val=mw.get("val", None),
+        shuffle=cfg_loader["shuffle_train"],
+        cache_max_windows=mw.get("train", None),
+        cache_dtype=cfg_cache.get("dtype", None),
+    )
+
+    dataset_windows_val = build_window_dataset(
+        model_dataset=model_dataset_val,
+        enable_cache=cfg_cache.get("enable", False),
+        num_workers_cache=cfg_cache.get("num_workers", 0),
+        seed=cfg_mmt.seed,
+        shuffle=False,
+        cache_max_windows=mw.get("val", None),
         cache_dtype=cfg_cache.get("dtype", None),
     )
 
     # ------------------------------------------------------------------
     # Dataloaders (always window-level batches)
     # ------------------------------------------------------------------
-    collate_fn = make_collate_fn(
+    collate_fn_train = make_collate_fn(
         signal_specs=signal_specs,
         base_cfg=cfg_collate,
         keep_output_native=keep_output_native,
     )
 
-    dataloaders_mmt = initialize_mmt_dataloaders(
-        datasets_windows,
-        collate_fn,
+    # we do not pass cfg_collate: for validation, we keep all inputs/outputs
+    collate_fn_val = make_collate_fn(
+        signal_specs=signal_specs,
+        keep_output_native=keep_output_native,
+    )
+
+    dataloader_mmt_train = initialize_mmt_dataloader(
+        dataset_windows_train,
+        collate_fn_train,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],
-        shuffle_train=cfg_loader["shuffle_train"],
+        shuffle=cfg_loader["shuffle_train"],
+        drop_last=cfg_loader["drop_last"],
+        seed=cfg_mmt.seed,
+    )
+
+    dataloader_mmt_val = initialize_mmt_dataloader(
+        dataset_windows_val,
+        collate_fn_val,
+        batch_size=cfg_loader["batch_size"],
+        num_workers=cfg_loader["num_workers"],
+        shuffle=False,
         drop_last=cfg_loader["drop_last"],
         seed=cfg_mmt.seed,
     )
@@ -294,8 +315,8 @@ def main() -> None:
     logger.info("Starting pretraining...")
     history = train_finetune(
         model=model,
-        train_loader=dataloaders_mmt["train"],
-        val_loader=dataloaders_mmt["val"],
+        train_loader=dataloader_mmt_train,
+        val_loader=dataloader_mmt_val,
         run_dir=cfg_mmt.paths["run_dir"],
         train_cfg=cfg_train,
         loader_cfg=cfg_loader,

@@ -213,43 +213,34 @@ def build_default_transform(
 # -----------------------------------------------------------------------------
 
 
-def build_window_datasets(
+def build_window_dataset(
     *,
-    model_datasets: Mapping[str, Any],
+    model_dataset: Any,
     enable_cache: bool,
     num_workers_cache: int,
     seed: int,
-    shuffle_train: bool = True,
-    cache_splits: Sequence[str] = ("train", "val"),
-    cache_max_windows_train: Optional[int] = None,
-    cache_max_windows_val: Optional[int] = None,
+    shuffle: Optional[bool] = False,
+    cache_max_windows: Optional[int] = None,
     cache_dtype: Optional[str] = None,
-) -> Dict[str, Any]:
+) -> Any:
     """Create window-level datasets from shot-level wrapped datasets.
 
     Parameters
     ----------
-    model_datasets:
-        Mapping split -> shot-level dataset wrapper.
+    model_dataset:
+        shot-level dataset wrapper.
     enable_cache:
         If True, cache selected splits to RAM using WindowCachedDataset.
     num_workers_cache:
         Number of workers used by the caching materialisation.
     seed:
-        Random seed (used by WindowStreamedDataset when shuffle_shots is enabled),
-        and also used for deterministic shot shuffling during caching.
-    shuffle_train:
-        Shot-level shuffling for streaming train only (IterableDataset path).
-        Cached datasets are shuffled at the DataLoader level.
-    cache_splits:
-        Which splits to cache when enable_cache=True.
-    cache_max_windows_train:
-        Optional cap on the number of cached windows for the train split.
-    cache_max_windows_val:
-        Optional cap on the number of cached windows for the val split.
+        Random seed (used by WindowStreamedDataset when shuffle_shots is enabled).
+    shuffle:
+        Shot-level shuffling for streaming datasets
+    cache_max_windows:
+        Optional hard cap passed to WindowCachedDataset.from_streaming.
     cache_dtype:
-        Optional dtype cast applied during caching to reduce RAM.
-        Typical values: "float16" or "float32". If None, keep original dtypes.
+        str, "float16" or "float32"
 
     Returns
     -------
@@ -257,68 +248,87 @@ def build_window_datasets(
         Mapping split -> window-level dataset (cached or streaming), or None.
     """
 
-    cache_splits_set = set(cache_splits)
-    out: Dict[str, Any] = {}
+    if model_dataset is None:
+        return None
 
-    for split, ds_stream in model_datasets.items():
-        if ds_stream is None:
-            out[split] = None
-            continue
+    if enable_cache:
+        logger = logging.getLogger("mmt.Cache")
+        logger.info("Starting caching")
+        t0 = time.perf_counter()
+        cache_kwargs: Dict[str, Any] = {
+            "max_windows": cache_max_windows,
+            "num_workers_cache": num_workers_cache,
+        }
 
-        use_cache_for_split = bool(enable_cache) and (split in cache_splits_set)
+        # Newer versions support dtype casting at cache time (float16/float32).
+        if cache_dtype is not None:
+            cache_kwargs["dtype"] = cache_dtype
 
-        if use_cache_for_split:
-            split_l = split.lower()
+        try:
+            ds = WindowCachedDataset.from_streaming(model_dataset, **cache_kwargs)
+        except TypeError:
+            # Backwards-compat: older WindowCachedDataset.from_streaming
+            # doesn't accept dtype.
+            cache_kwargs.pop("dtype", None)
+            ds = WindowCachedDataset.from_streaming(model_dataset, **cache_kwargs)
+        t1 = time.perf_counter()
+        logger.info("Finished caching in %.3f seconds", t1 - t0)
+    else:
+        ds = WindowStreamedDataset(model_dataset, shuffle_shots=shuffle, seed=seed)
 
-            # Per-split cap.
-            if split_l == "train":
-                max_windows = cache_max_windows_train
-            elif split_l == "val":
-                max_windows = cache_max_windows_val
-            else:
-                max_windows = None
-
-            # If we cap, shuffle shots during caching so the subset isn't biased.
-            # (Still deterministic because we pass seed.)
-            shuffle_cache_shots = bool(max_windows is not None)
-
-            logger = logging.getLogger("mmt.Cache")
-            logger.info(
-                "Starting caching split=%s | max_windows=%s | dtype=%s | shuffle_shots=%s",
-                split,
-                str(max_windows) if max_windows is not None else "none",
-                cache_dtype if cache_dtype is not None else "none",
-                shuffle_cache_shots,
-            )
-            t0 = time.perf_counter()
-            ds = WindowCachedDataset.from_streaming(
-                ds_stream,
-                max_windows=max_windows,
-                num_workers_cache=num_workers_cache,
-                dtype=cache_dtype,
-                shuffle_shots=shuffle_cache_shots,
-                seed=seed,
-            )
-            t1 = time.perf_counter()
-            logger.info("Finished caching %s in %.3f seconds", split, t1 - t0)
-
-        else:
-            # IMPORTANT: WindowStreamedDataset is an IterableDataset, so
-            # DataLoader(shuffle=...) is ignored. Shuffle shots here for train only.
-            do_shuffle_shots = (split.lower() == "train") and shuffle_train
-            ds = WindowStreamedDataset(
-                ds_stream,
-                shuffle_shots=do_shuffle_shots,
-                seed=seed,
-            )
-
-        out[split] = ds
-
-    return out
+    return ds
 
 
+# -----------------------------------------------------------------------------
 # Collate
 # -----------------------------------------------------------------------------
+
+
+def make_collate_fn(
+    *,
+    base_cfg: Optional[Mapping[str, Any]] = None,
+    keep_output_native: bool,
+    # force-drop lists (mostly used for eval ablations)
+    drop_inputs: Optional[Sequence[str]] = None,
+    drop_actuators: Optional[Sequence[str]] = None,
+    drop_outputs: Optional[Sequence[str]] = None,
+) -> MMTCollate:
+    """Create an MMTCollate configured for train/eval.
+
+    Parameters
+    ----------
+    base_cfg:
+        Base collate configuration (usually cfg_mmt.collate for train).
+        For eval you can pass None.
+    keep_output_native:
+        Whether to include native output payloads in batches.
+    drop_inputs / drop_actuators / drop_outputs:
+        If provided, these signals are *forced dropped* by setting per-signal
+        dropout overrides to 1.0.
+    drop_inputs:
+        Optional list of input signal names to force-drop (p=1.0).
+    drop_actuators:
+        Optional list of actuator signal names to force-drop (p=1.0).
+    drop_outputs:
+        Optional list of output signal names to force-drop (p=1.0).
+
+    Returns
+    -------
+    MMTCollate
+        Ready to be used as DataLoader.collate_fn.
+    """
+
+    cfg: Dict[str, Any] = dict(base_cfg or {})
+    cfg["keep_output_native"] = bool(keep_output_native)
+
+    if drop_inputs:
+        cfg["p_drop_inputs_overrides"] = {k: 1.0 for k in drop_inputs}
+    if drop_actuators:
+        cfg["p_drop_actuators_overrides"] = {k: 1.0 for k in drop_actuators}
+    if drop_outputs:
+        cfg["p_drop_outputs_overrides"] = {k: 1.0 for k in drop_outputs}
+
+    return MMTCollate(cfg_collate=cfg)
 
 
 def make_collate_fn(
@@ -333,7 +343,7 @@ def make_collate_fn(
 ) -> MMTCollate:
     """Create an MMTCollate configured for train/eval.
 
-    Important: Step-5 change
+    Important:
     ------------------------
 
     To keep YAML configs user-friendly, dropout overrides are still specified
@@ -353,6 +363,12 @@ def make_collate_fn(
     drop_inputs / drop_actuators / drop_outputs:
         If provided, these signals are *forced dropped* by setting per-signal
         dropout overrides to 1.0.
+    drop_inputs:
+        Optional list of input signal names to force-drop (p=1.0).
+    drop_actuators:
+        Optional list of actuator signal names to force-drop (p=1.0).
+    drop_outputs:
+        Optional list of output signal names to force-drop (p=1.0).
 
     Returns
     -------
@@ -392,7 +408,9 @@ def make_collate_fn(
     # Convert any configured overrides (name -> id). If user passes ids directly,
     # we keep them as-is (useful for programmatic callers).
     in_over = _convert_overrides(
-        "input", cfg.get("p_drop_inputs_overrides", {}), label="p_drop_inputs_overrides"
+        "input",
+        cfg.get("p_drop_inputs_overrides", {}),
+        label="p_droxp_inputs_overrides",
     )
     act_over = _convert_overrides(
         "actuator",
