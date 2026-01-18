@@ -244,8 +244,8 @@ def build_window_dataset(
 
     Returns
     -------
-    dict
-        Mapping split -> window-level dataset (cached or streaming), or None.
+    Any
+        window-level dataset (cached or streaming), or None.
     """
 
     if model_dataset is None:
@@ -282,53 +282,6 @@ def build_window_dataset(
 # -----------------------------------------------------------------------------
 # Collate
 # -----------------------------------------------------------------------------
-
-
-def make_collate_fn(
-    *,
-    base_cfg: Optional[Mapping[str, Any]] = None,
-    keep_output_native: bool,
-    # force-drop lists (mostly used for eval ablations)
-    drop_inputs: Optional[Sequence[str]] = None,
-    drop_actuators: Optional[Sequence[str]] = None,
-    drop_outputs: Optional[Sequence[str]] = None,
-) -> MMTCollate:
-    """Create an MMTCollate configured for train/eval.
-
-    Parameters
-    ----------
-    base_cfg:
-        Base collate configuration (usually cfg_mmt.collate for train).
-        For eval you can pass None.
-    keep_output_native:
-        Whether to include native output payloads in batches.
-    drop_inputs / drop_actuators / drop_outputs:
-        If provided, these signals are *forced dropped* by setting per-signal
-        dropout overrides to 1.0.
-    drop_inputs:
-        Optional list of input signal names to force-drop (p=1.0).
-    drop_actuators:
-        Optional list of actuator signal names to force-drop (p=1.0).
-    drop_outputs:
-        Optional list of output signal names to force-drop (p=1.0).
-
-    Returns
-    -------
-    MMTCollate
-        Ready to be used as DataLoader.collate_fn.
-    """
-
-    cfg: Dict[str, Any] = dict(base_cfg or {})
-    cfg["keep_output_native"] = bool(keep_output_native)
-
-    if drop_inputs:
-        cfg["p_drop_inputs_overrides"] = {k: 1.0 for k in drop_inputs}
-    if drop_actuators:
-        cfg["p_drop_actuators_overrides"] = {k: 1.0 for k in drop_actuators}
-    if drop_outputs:
-        cfg["p_drop_outputs_overrides"] = {k: 1.0 for k in drop_outputs}
-
-    return MMTCollate(cfg_collate=cfg)
 
 
 def make_collate_fn(
