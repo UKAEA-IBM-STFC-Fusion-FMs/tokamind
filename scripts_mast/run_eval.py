@@ -204,7 +204,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Window-level dataset for EVAL (test only)
     # ------------------------------------------------------------------
-    dataset_windows_test = build_window_dataset(
+    window_dataset_test = build_window_dataset(
         model_dataset=model_dataset_test,
         enable_cache=cfg_cache.get("enable", False),
         num_workers_cache=cfg_cache.get("num_workers", 0),
@@ -230,7 +230,7 @@ def main() -> None:
     )
 
     eval_loader = initialize_mmt_dataloader(
-        dataset_windows_test,
+        window_dataset_test,
         collate_fn,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],

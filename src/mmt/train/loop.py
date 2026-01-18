@@ -100,7 +100,7 @@ def train_finetune(
     ----------
     model : MultiModalTransformer
     train_loader, val_loader : DataLoader
-        DataLoaders returned by initialize_mmt_dataloaders()
+        DataLoaders returned by initialize_mmt_dataloader()
     run_dir : str
         Directory used for checkpoints and logs.
     train_cfg : dict

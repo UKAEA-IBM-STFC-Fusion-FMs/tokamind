@@ -23,7 +23,7 @@ dataloader is exhausted. Therefore:
 
 - `WindowStreamedDataset` is also finite for one pass because it iterates over a
   finite range of shot indices and yields their windows. Additionally,
-  `initialize_mmt_dataloaders` forces `shuffle=False` for `IterableDataset`, so you
+  `initialize_mmt_dataloader` forces `shuffle=False` for `IterableDataset`, so you
   won’t “miss” data due to DataLoader shuffle.
 
 Public API

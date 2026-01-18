@@ -29,7 +29,7 @@ Key behaviour
 
 Exports
 -------
-- initialize_mmt_dataloaders
+- initialize_mmt_dataloader
 
 Performance defaults
 --------------------
@@ -52,9 +52,6 @@ import torch
 from torch.utils.data import DataLoader, IterableDataset, Dataset
 
 from mmt.utils.seed import make_worker_seed_fn
-
-
-__all__ = ["initialize_mmt_dataloaders"]
 
 
 # ----------------------------------------------------------------------------- #

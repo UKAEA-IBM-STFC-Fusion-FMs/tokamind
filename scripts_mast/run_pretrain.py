@@ -217,7 +217,7 @@ def main() -> None:
     # Window-level datasets (cached or streaming)
     # ------------------------------------------------------------------
     mw = cfg_cache.get("max_windows") or {}
-    dataset_windows_train = build_window_dataset(
+    window_dataset_train = build_window_dataset(
         model_dataset=model_dataset_train,
         enable_cache=cfg_cache.get("enable", False),
         num_workers_cache=cfg_cache.get("num_workers", 0),
@@ -227,7 +227,7 @@ def main() -> None:
         cache_dtype=cfg_cache.get("dtype", None),
     )
 
-    dataset_windows_val = build_window_dataset(
+    window_dataset_val = build_window_dataset(
         model_dataset=model_dataset_val,
         enable_cache=cfg_cache.get("enable", False),
         num_workers_cache=cfg_cache.get("num_workers", 0),
@@ -253,7 +253,7 @@ def main() -> None:
     )
 
     dataloader_mmt_train = initialize_mmt_dataloader(
-        dataset_windows_train,
+        window_dataset_train,
         collate_fn_train,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],
@@ -263,7 +263,7 @@ def main() -> None:
     )
 
     dataloader_mmt_val = initialize_mmt_dataloader(
-        dataset_windows_val,
+        window_dataset_val,
         collate_fn_val,
         batch_size=cfg_loader["batch_size"],
         num_workers=cfg_loader["num_workers"],
