@@ -204,9 +204,9 @@ def _validate_loader(cfg: Dict[str, Any]) -> None:
     # (and on some systems may increase file-descriptor pressure).
     if cache_enable:
         num_workers = int(loader_cfg.get("num_workers", 0) or 0)
-        if num_workers > 4:
+        if num_workers > 0:
             warnings.warn(
-                "[MMT config] data.cache.enable=true: prefer small loader.num_workers=0 (< 5). "
+                "[MMT config] data.cache.enable=true: prefer loader.num_workers=0 (or at most 1). "
                 "Multi-workers rarely help when each item is already precomputed and collation is Python-heavy.",
                 stacklevel=2,
             )
