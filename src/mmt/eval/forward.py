@@ -39,6 +39,7 @@ def forward_decode_native(
     stats: Dict[str, Dict[str, float]],
     codecs: Dict[str, Any],
     id_to_name: Dict[int, str],
+    amp_enabled: bool = True
 ) -> Tuple[
     Dict[str, np.ndarray],  # y_true_native
     Dict[str, np.ndarray],  # y_pred_native
@@ -83,7 +84,7 @@ def forward_decode_native(
 
     model.eval()
     with torch.no_grad():
-        with amp_ctx_for_model(model, enable=True):
+        with amp_ctx_for_model(model, enable=amp_enabled):
             out = model(batch)
 
     y_pred_std_id = out.get("pred", {})  # Dict[int, Tensor] (standardised coeffs)

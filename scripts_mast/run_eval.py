@@ -100,6 +100,7 @@ def main() -> None:
     keep_output_native = cfg_data.get("keep_output_native", False)
     local_flag = cfg_data.get("local", True)
     debug_mode = cfg_mmt.runtime["debug_logging"]
+    amp_enabled = cfg_eval.get("amp", {}).get("enable", True)
 
     cfg_backbone = cfg_model["backbone"]
     cfg_modality_heads = cfg_model["modality_heads"]
@@ -322,6 +323,7 @@ def main() -> None:
             codecs=output_codecs,
             id_to_name=id_to_name,
             run_dir=run_dir,
+            amp_enabled=amp_enabled,
             compute_metrics_cfg=cfg_compute_metrics,
         )
         logger.info("Summary metrics: %s", summary_metrics)
@@ -341,6 +343,7 @@ def main() -> None:
             codecs=output_codecs,
             id_to_name=id_to_name,
             traces_cfg=cfg_traces,
+            amp_enabled=amp_enabled,
         )
 
     logger.info("Done.")

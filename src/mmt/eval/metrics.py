@@ -66,6 +66,7 @@ def evaluate_metrics(
     codecs: Dict[str, Any],
     id_to_name: Dict[int, str],
     run_dir: Path,
+    amp_enabled: bool,
     compute_metrics_cfg: Dict[str, Any] | None = None,
 ) -> Dict[str, Dict[str, float]]:
     """
@@ -138,6 +139,7 @@ def evaluate_metrics(
                 stats=stats,
                 codecs=codecs,
                 id_to_name=id_to_name,
+                amp_enabled=amp_enabled,
             )
 
             B = len(shot_ids)
@@ -234,6 +236,7 @@ def save_traces_for_subset(
     codecs: Dict[str, Any],
     id_to_name: Dict[int, str],
     run_dir: Path,
+    amp_enabled: bool,
     traces_cfg: Dict[str, Any],
 ) -> None:
     """
@@ -282,6 +285,7 @@ def save_traces_for_subset(
             stats=stats,
             codecs=codecs,
             id_to_name=id_to_name,
+            amp_enabled=amp_enabled,
         )
 
         B = len(shot_ids)
