@@ -25,6 +25,7 @@ data:
   cache:
     enable: true
     dtype: float16          # or float32
+
     num_workers: 8
     max_windows:
       train: null
@@ -35,14 +36,14 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: 0.005
+    window_stride_sec: null
 
 # "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
 
 loader:
   batch_size: 1024
-  num_workers: 2
+  num_workers: 0
   shuffle_train: true
   drop_last: false
   batches_per_epoch: 100  # Required only when data.cache.enable=false (streaming)
@@ -85,6 +86,9 @@ train:
     patience: 8
     delta: 0.0
 
+  amp:
+    enable: true
+
   loss:
     output_weights: {}
 #      summary-ip: 1.2
@@ -96,32 +100,8 @@ train:
     warmup_steps_fraction: 0.02
 
   stages:
-    - name: pretrain_warm
-      epochs: 2   # if resume = true, total number of epochs, not number of new epochs
-
-      scheduler:
-        grad_accum_steps: 1
-
-      optimizer:
-        lr:
-          token_encoder: 3e-4          # null: inherit from backbone
-          backbone: 2e-4
-          modality_heads: 5e-4
-          output_adapters: 5e-4
-        wd:
-          token_encoder: 0.05          # null: inherit from backbone
-          backbone: 0.05
-          modality_heads: 0.05
-          output_adapters: 0.05
-
-      freeze:
-        token_encoder: false
-        backbone: false
-        modality_heads: false
-        output_adapters: false
-
     - name: pretrain_main
-      epochs: 2
+      epochs: 30
 
       scheduler:
         grad_accum_steps: 1

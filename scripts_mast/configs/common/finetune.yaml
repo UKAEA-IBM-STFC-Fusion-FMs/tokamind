@@ -87,6 +87,9 @@ train:
     patience: 5
     delta: 0.0
 
+  amp:
+    enable: true
+
   loss:
     output_weights:
 #      summary-ip: 1.2

@@ -41,9 +41,9 @@ preprocess:
 model:
   backbone:
     d_model: 256 # 192  # 128 256
-    n_layers: 6 # 6 4   # 2
-    n_heads: 8 # 8 4    # 2
-    dim_ff: 1024 # 1024 768   # 256
+    n_layers: 6 #  4   # 2
+    n_heads: 8 # 4    # 2
+    dim_ff: 1024 # 768   # 256
     dropout: 0.1
     activation: relu
 

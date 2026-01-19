@@ -134,6 +134,8 @@ def train_finetune(
     warmup_frac = float(train_cfg["scheduler"]["warmup_steps_fraction"])
     warmup_frac = float(max(0.0, min(1.0, warmup_frac)))
 
+    amp_enabled = train_cfg.get("amp", {}).get("enable", True)
+
     bpe = loader_cfg.get("batches_per_epoch", None)
     if bpe is not None:
         train_batches_per_epoch = int(cast(Any, bpe))
@@ -143,7 +145,7 @@ def train_finetune(
     # -------------------------------------------------------------------------
     # Device, AMP, scaler
     # -------------------------------------------------------------------------
-    device, amp_enabled, amp_dtype = get_amp_config(model, enable=True)
+    device, amp_enabled, amp_dtype = get_amp_config(model, enable=amp_enabled)
     scaler = torch.amp.GradScaler(
         "cuda", enabled=(device.type == "cuda" and amp_enabled)
     )
