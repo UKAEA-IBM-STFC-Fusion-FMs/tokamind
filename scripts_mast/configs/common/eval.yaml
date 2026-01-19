@@ -53,8 +53,9 @@ eval:
     actuators: null
     outputs: null # ["pf_active-solenoid_current", "summary-ip"]
 
-  metrics:
-    enable: true
+  compute_metrics:
+    per_window: true
+    per_timestamp: true
 
   traces:
     enable: false

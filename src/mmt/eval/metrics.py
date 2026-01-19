@@ -66,26 +66,63 @@ def evaluate_metrics(
     codecs: Dict[str, Any],
     id_to_name: Dict[int, str],
     run_dir: Path,
-    debug: bool = False,
+    compute_metrics_cfg: Dict[str, Any] | None = None,
 ) -> Dict[str, Dict[str, float]]:
     """
-    Compute per-window native-space error metrics for all outputs of the task.
+    Compute native-space error metrics for all outputs of the task.
 
     Writes:
       <run_dir>/metrics/metrics_full.csv     (per-shot, per-window, per-output)
+      <run_dir>/metrics/metrics_per_timestamp.csv (per-shot, per-window, per-time, per-output)
       <run_dir>/metrics/metrics_summary.csv  (per-output averages)
 
     metrics_full columns:
       shot_id, window_id, feature_name, RMSE, MSE, MAE
+
+    metrics_per_timestamp columns:
+      shot_id, window_id, time_idx, feature_name, RMSE, MSE, MAE
+
+    Config (compute_metrics_cfg)
+    ---------------------------
+    per_window : bool
+        If True, write metrics_full.csv (per-window aggregates).
+    per_timestamp : bool
+        If True, write metrics_per_timestamp.csv (per-time aggregates).
+    times_indexes : list[int] | None
+        Optional subset of time indices to write for per_timestamp.
     """
     metrics_dir = Path(run_dir) / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
-    # Full CSV (per window)
-    csv_full = metrics_dir / "metrics_full.csv"
-    f_full = csv_full.open("w", newline="")
-    wr = csv.writer(f_full)
-    wr.writerow(["shot_id", "window_id", "feature_name", "RMSE", "MSE", "MAE"])
+    cfg = compute_metrics_cfg or {}
+    per_window = bool(cfg.get("per_window", True))
+    per_timestamp = bool(cfg.get("per_timestamp", False))
+
+    if not (per_window or per_timestamp):
+        logger.info(
+            "[eval] compute_metrics: both per_window and per_timestamp are disabled; skipping metrics."
+        )
+        return {}
+
+    # Optional outputs
+    f_full = None
+    wr_full = None
+    f_ts = None
+    wr_ts = None
+
+    if per_window:
+        csv_full = metrics_dir / "metrics_per_window.csv"
+        f_full = csv_full.open("w", newline="")
+        wr_full = csv.writer(f_full)
+        wr_full.writerow(["shot_id", "window_id", "feature_name", "RMSE", "MSE", "MAE"])
+
+    if per_timestamp:
+        csv_ts = metrics_dir / "metrics_per_timestamp.csv"
+        f_ts = csv_ts.open("w", newline="")
+        wr_ts = csv.writer(f_ts)
+        wr_ts.writerow(
+            ["shot_id", "window_id", "time_idx", "feature_name", "RMSE", "MSE", "MAE"]
+        )
 
     # accum[feature] = [sum_rmse, sum_mse, sum_mae, count]
     accum: Dict[str, list[float]] = {
@@ -101,7 +138,6 @@ def evaluate_metrics(
                 stats=stats,
                 codecs=codecs,
                 id_to_name=id_to_name,
-                debug=debug,
             )
 
             B = len(shot_ids)
@@ -130,9 +166,37 @@ def evaluate_metrics(
                         accum[out][2] += mae_b
                         accum[out][3] += 1.0
 
-                    wr.writerow([shot_id, window_id, out, rmse_b, mse_b, mae_b])
+                    if wr_full is not None:
+                        wr_full.writerow(
+                            [shot_id, window_id, out, rmse_b, mse_b, mae_b]
+                        )
 
-    f_full.close()
+                    # Optional per-time metrics for this window/output.
+                    # Convention: time is the last axis (..., T).
+                    if wr_ts is not None and ok:
+                        diff2 = diff.reshape(-1, diff.shape[-1])
+                        mse_t = np.mean(diff2 * diff2, axis=0)  # (T,)
+                        rmse_t = np.sqrt(mse_t)
+                        mae_t = np.mean(np.abs(diff2), axis=0)
+                        time_idxs = range(mse_t.shape[0])
+
+                        for t in time_idxs:
+                            wr_ts.writerow(
+                                [
+                                    shot_id,
+                                    window_id,
+                                    int(t),
+                                    out,
+                                    float(rmse_t[t]),
+                                    float(mse_t[t]),
+                                    float(mae_t[t]),
+                                ]
+                            )
+
+    if f_full is not None:
+        f_full.close()
+    if f_ts is not None:
+        f_ts.close()
 
     # Summary CSV
     csv_sum = metrics_dir / "metrics_summary.csv"
@@ -218,7 +282,6 @@ def save_traces_for_subset(
             stats=stats,
             codecs=codecs,
             id_to_name=id_to_name,
-            debug=False,
         )
 
         B = len(shot_ids)
@@ -251,8 +314,9 @@ def save_traces_for_subset(
 
                 # Optional time sub-sampling inside each window
                 if time_idx is not None:
-                    true_arr = true_arr[time_idx]
-                    pred_arr = pred_arr[time_idx]
+                    # Convention: time is the last axis (..., T)
+                    true_arr = true_arr[..., time_idx]
+                    pred_arr = pred_arr[..., time_idx]
 
                 collected[sid].setdefault(out_name, []).append(
                     (widx, true_arr, pred_arr)

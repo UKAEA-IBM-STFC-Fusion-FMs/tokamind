@@ -39,7 +39,6 @@ def forward_decode_native(
     stats: Dict[str, Dict[str, float]],
     codecs: Dict[str, Any],
     id_to_name: Dict[int, str],
-    debug: bool = True,
 ) -> Tuple[
     Dict[str, np.ndarray],  # y_true_native
     Dict[str, np.ndarray],  # y_pred_native
@@ -93,7 +92,7 @@ def forward_decode_native(
     # Optional debug: MSE in *standardised coeff space*,
     # same space as training loss (pred vs output_emb).
     # ---------------------------------------------------------
-    if debug:
+    if logger.isEnabledFor(logging.DEBUG):
         if y_true_emb_id is not None:
             for sig_id, pred_std in y_pred_std_id.items():
                 if sig_id not in y_true_emb_id or sig_id not in y_mask_id:
@@ -113,7 +112,7 @@ def forward_decode_native(
                 mse_coeff = diff2.mean().item()
 
                 name = id_to_name.get(sig_id, f"id={sig_id}")
-                logger.info(f"[DEBUG] coeff-space MSE [{name}]: {mse_coeff:.6f}")
+                logger.debug(f"Coeff-space MSE [{name}]: {mse_coeff:.6f}")
 
     # 2) id-keyed → name-keyed (torch)
     y_true_t = {
@@ -153,12 +152,12 @@ def forward_decode_native(
             arr, mean=stats[name]["mean"], std=stats[name]["std"]
         )
 
-    if debug:
+    if logger.isEnabledFor(logging.DEBUG):
         for name in y_pred_native:
             yt = y_true_native[name]
             yp = y_pred_native[name]
-            logger.info(
-                f"[DEBUG] {name}: "
+            logger.debug(
+                f"min-max [{name}]: "
                 f"true min/max=({yt.min():.3f}, {yt.max():.3f}), "
                 f"pred min/max=({yp.min():.3f}, {yp.max():.3f})"
             )

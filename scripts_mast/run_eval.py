@@ -272,7 +272,7 @@ def main() -> None:
         best_val,
     )
     logger.info(
-        "[Eval] Forced drops: inputs=%s actuators=%s outputs=%s",
+        "Forced drops: inputs=%s actuators=%s outputs=%s",
         drop_inputs,
         drop_actuators,
         drop_outputs,
@@ -283,7 +283,7 @@ def main() -> None:
     # Evaluation: metrics + optional traces
     # ------------------------------------------------------------------
     run_dir = cfg_mmt.paths["run_dir"]
-    cfg_metrics = cfg_eval.get("metrics", {})
+    cfg_compute_metrics = cfg_eval.get("compute_metrics", {})
     cfg_traces = cfg_eval.get("traces", {})
 
     # All output specs for this task (excluding forced-dropped outputs)
@@ -307,7 +307,12 @@ def main() -> None:
         if spec.name in signal_stats
     }
 
-    if cfg_metrics.get("enable", True):
+    do_metrics = bool(
+        cfg_compute_metrics.get("per_window", False)
+        or cfg_compute_metrics.get("per_timestamp", False)
+    )
+
+    if do_metrics:
         logger.info("Computing metrics in: %s/metrics/", run_dir)
         summary_metrics = evaluate_metrics(
             model=model,
@@ -317,7 +322,7 @@ def main() -> None:
             codecs=output_codecs,
             id_to_name=id_to_name,
             run_dir=run_dir,
-            debug=True,
+            compute_metrics_cfg=cfg_compute_metrics,
         )
         logger.info("Summary metrics: %s", summary_metrics)
 
