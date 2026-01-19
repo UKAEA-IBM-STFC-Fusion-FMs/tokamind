@@ -46,7 +46,7 @@ loader:
   num_workers: 0
   shuffle_train: true
   drop_last: false
-  batches_per_epoch: 100  # Required only when data.cache.enable=false (streaming)
+  batches_per_epoch: null  # Required only when data.cache.enable=false (streaming)
 
 model_source:
   # Optional warm-start source run directory.
@@ -83,7 +83,7 @@ train:
   resume: false
 
   early_stop:
-    patience: 8
+    patience: 10
     delta: 0.0
 
   amp:
