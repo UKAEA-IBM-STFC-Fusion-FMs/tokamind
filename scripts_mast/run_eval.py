@@ -143,7 +143,7 @@ def main() -> None:
         max_index=cfg_data["subset_of_shots"],
     )
 
-    test_mast_dataset = initialize_MAST_dataset(
+    mast_dataset_test = initialize_MAST_dataset(
         cfg_task,
         test_shots_,
         local_flag=local_flag,
@@ -188,7 +188,7 @@ def main() -> None:
     # Model-level dataset (shot-based wrapper)
     # ------------------------------------------------------------------
     model_dataset_test = initialize_model_dataset(
-        test_mast_dataset,
+        mast_dataset_test,
         dict_task_metadata,
         cfg_task,
         model_specific_transform=mmt_transform_map,

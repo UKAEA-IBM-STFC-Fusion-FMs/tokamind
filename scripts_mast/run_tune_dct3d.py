@@ -162,7 +162,7 @@ def main() -> None:
         seed=cfg_mmt.seed,
     )
 
-    train_mast_dataset = initialize_MAST_dataset(
+    mast_dataset_train = initialize_MAST_dataset(
         cfg_task,
         train_shots_,
         local_flag=local_flag,
@@ -219,8 +219,8 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Shot-level dataset (wrapped) for tuning
     # ------------------------------------------------------------------
-    model_dataset = initialize_model_dataset(
-        train_mast_dataset,
+    model_dataset_train = initialize_model_dataset(
+        mast_dataset_train,
         dict_task_metadata,
         cfg_task,
         model_specific_transform=mmt_transform_map,
@@ -231,7 +231,7 @@ def main() -> None:
     # Window-level dataset (streaming)
     # ------------------------------------------------------------------
     ds_windows = WindowStreamedDataset(
-        model_dataset,
+        model_dataset_train,
         shuffle_shots=False,  # we shuffle when loading using get_train_test_val_shots
         seed=cfg_mmt.seed,
     )

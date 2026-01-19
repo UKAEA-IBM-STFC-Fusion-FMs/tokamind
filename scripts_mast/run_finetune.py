@@ -142,7 +142,7 @@ def main() -> None:
         max_index=cfg_data["subset_of_shots"],
     )
 
-    train_mast_dataset = initialize_MAST_dataset(
+    mast_dataset_train = initialize_MAST_dataset(
         cfg_task,
         train_shots_,
         local_flag=local_flag,
@@ -150,7 +150,7 @@ def main() -> None:
         return_incomplete_shots=True,
     )
 
-    val_mast_dataset = initialize_MAST_dataset(
+    mast_dataset_val = initialize_MAST_dataset(
         cfg_task,
         val_shots_,
         local_flag=cfg_data["local"],
@@ -192,14 +192,14 @@ def main() -> None:
     # Model-level datasets (shot-based wrappers)
     # ------------------------------------------------------------------
     model_dataset_train = initialize_model_dataset(
-        train_mast_dataset,
+        mast_dataset_train,
         dict_task_metadata,
         cfg_task,
         model_specific_transform=mmt_transform_map,
         verbose=True,
     )
     model_dataset_val = initialize_model_dataset(
-        val_mast_dataset,
+        mast_dataset_val,
         dict_task_metadata,
         cfg_task,
         model_specific_transform=mmt_transform_map,
