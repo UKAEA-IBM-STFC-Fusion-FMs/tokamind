@@ -3,12 +3,12 @@ task_name: _test
 
 sources_and_signals:
   input_name: &input_keys
-    - - magnetics                         # remote version needs to be fixed
-      - b_field_pol_probe_obr_field       # remote version needs to be fixed
-    - - pf_active
-      - coil_current
-    - - pf_active
-      - solenoid_current
+#    - - magnetics                         # remote version needs to be fixed
+#      - b_field_pol_probe_obr_field       # remote version needs to be fixed
+#    - - pf_active
+#      - coil_current
+#    - - pf_active
+#      - solenoid_current
     - - summary
       - ip
 
@@ -19,20 +19,22 @@ sources_and_signals:
       - power_nbi
 
   output_name: &output_keys
-#    - - pf_active
-#      - coil_current
-#    - - pf_active
-#      - solenoid_current
+    - - pf_active
+      - coil_current
+    - - pf_active
+      - solenoid_current
 #    - - summary
 #      - ip
-    - - equilibrium
-      - psi
-    - - thomson_scattering
-      - n_e
-    - - thomson_scattering
-      - t_e
-    - - soft_x_rays
-      - horizontal_cam_lower
+#    - - equilibrium
+#      - psi
+#    - - thomson_scattering
+#      - n_e
+#    - - thomson_scattering
+#      - t_e
+#    - - soft_x_rays
+#      - horizontal_cam_lower
+#    - - soft_x_rays
+#      - horizontal_cam_upper
 
 task_window_segmenter:
   input_keys: *input_keys
@@ -43,4 +45,7 @@ task_window_segmenter:
   delta: 0 # this is forecasting
   verbose: false
 
-stride_window: 0.001
+stride_window: 0.01
+
+#(18, 5677)
+#(18, 5677) 5677
