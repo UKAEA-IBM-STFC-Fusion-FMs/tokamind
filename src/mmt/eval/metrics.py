@@ -121,7 +121,7 @@ def evaluate_metrics(
         f_ts = csv_ts.open("w", newline="")
         wr_ts = csv.writer(f_ts)
         wr_ts.writerow(
-            ["shot_id", "window_id", "time_idx", "feature_name", "RMSE", "MSE", "MAE"]
+            ["shot_id", "window_id", "time_id", "feature_name", "RMSE", "MSE", "MAE"]
         )
 
     # accum[feature] = [sum_rmse, sum_mse, sum_mae, count]
@@ -178,9 +178,9 @@ def evaluate_metrics(
                         mse_t = np.mean(diff2 * diff2, axis=0)  # (T,)
                         rmse_t = np.sqrt(mse_t)
                         mae_t = np.mean(np.abs(diff2), axis=0)
-                        time_idxs = range(mse_t.shape[0])
+                        time_ids = range(mse_t.shape[0])
 
-                        for t in time_idxs:
+                        for t in time_ids:
                             wr_ts.writerow(
                                 [
                                     shot_id,
@@ -262,7 +262,7 @@ def save_traces_for_subset(
 
     n_max = int(traces_cfg.get("n_max", 10))
     signals_filter = traces_cfg.get("signals", None)
-    time_idx = traces_cfg.get("times_indexes", None)
+    time_id = traces_cfg.get("times_indexes", None)
 
     # shot_id -> {output_name -> [(window_index, true_arr, pred_arr), ...]}
     collected: Dict[int, Dict[str, list]] = {}
@@ -313,10 +313,10 @@ def save_traces_for_subset(
                 pred_arr = pred_out[b]
 
                 # Optional time sub-sampling inside each window
-                if time_idx is not None:
+                if time_id is not None:
                     # Convention: time is the last axis (..., T)
-                    true_arr = true_arr[..., time_idx]
-                    pred_arr = pred_arr[..., time_idx]
+                    true_arr = true_arr[..., time_id]
+                    pred_arr = pred_arr[..., time_id]
 
                 collected[sid].setdefault(out_name, []).append(
                     (widx, true_arr, pred_arr)
