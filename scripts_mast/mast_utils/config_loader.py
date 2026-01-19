@@ -129,7 +129,7 @@ def _compute_paths(
         model_dir = _resolve_from_repo_root(str(model_dir))
 
         eval_id = merged.get("eval_id") or f"{task}__eval__{timestamp}"
-        eval_dir = model_dir / "eval" / eval_id
+        eval_dir = model_dir / eval_id
         eval_dir.mkdir(parents=True, exist_ok=True)
         return {
             "repo_root": str(repo_root),
