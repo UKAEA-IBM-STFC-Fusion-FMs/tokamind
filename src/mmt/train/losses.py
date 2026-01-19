@@ -135,7 +135,9 @@ def compute_loss_pred_space(
         # Per-sample MSE in coeff space
         # y_pred, y_t: (B, K) → per-sample: (B,)
         # Compute loss in float32 for AMP stability.
-        diff = (y_pred - y_t).to(torch.float32)
+        y_pred_f = y_pred.to(torch.float32)
+        y_t_f = y_t.to(torch.float32)
+        diff = y_pred_f - y_t_f
         per_sample = diff.square().mean(dim=1)
         L_o = per_sample[mask].mean()
 
