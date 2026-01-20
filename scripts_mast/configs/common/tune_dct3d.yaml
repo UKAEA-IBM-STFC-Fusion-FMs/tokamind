@@ -19,14 +19,14 @@ preprocess:
 
 tune_dct3d:
   sampling:
-    n_shots: 100
+    n_shots: 10
     max_windows: 2000
 
   objective:
     thresholds:
       input: 0.999
       actuator: 0.999
-      output: 0.999
+      output: 0.995
     max_budget:
       input: 4096
       actuator: 4096
