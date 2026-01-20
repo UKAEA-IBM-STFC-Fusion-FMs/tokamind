@@ -118,7 +118,7 @@ def main() -> None:
     logger = setup_logging(
         cfg_mmt.paths["run_dir"],
         logger_name="mmt",
-        filename="eval.log",
+        filename=f"{cfg_mmt.eval_id}.log",
         console=True,
     )
     logger.setLevel("DEBUG" if debug_mode else "INFO")
