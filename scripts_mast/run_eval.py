@@ -150,6 +150,7 @@ def main() -> None:
         local_flag=local_flag,
         use_std_scaling=True,
         return_incomplete_shots=True,
+        verbose=False,
     )
 
     # ------------------------------------------------------------------

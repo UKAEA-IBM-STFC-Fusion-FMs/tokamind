@@ -148,6 +148,7 @@ def main() -> None:
         local_flag=local_flag,
         use_std_scaling=True,
         return_incomplete_shots=True,
+        verbose=False,
     )
 
     mast_dataset_val = initialize_MAST_dataset(
@@ -156,6 +157,7 @@ def main() -> None:
         local_flag=cfg_data["local"],
         use_std_scaling=True,
         return_incomplete_shots=True,
+        verbose=False,
     )
 
     # ------------------------------------------------------------------
