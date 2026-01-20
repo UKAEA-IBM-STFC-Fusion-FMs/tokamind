@@ -1,0 +1,217 @@
+2026-01-20 15:31:01 | INFO | mmt.TuneDCT3D | task=pretrain_inputs_actuators_to_inputs_outputs | phase=tune_dct3d | device=cuda | roles=input,actuator,output
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec | Built SignalSpecRegistry with 55 role-specific signals
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • gas_injection-total_injected   | role=actuator | id=  0 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • pf_active-coil_voltage         | role=actuator | id=  1 | modality=profile    | encoder=dct3d | dim=40
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • pulse_schedule-i_plasma        | role=actuator | id=  2 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • pulse_schedule-n_e_line        | role=actuator | id=  3 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • summary-power_nbi              | role=actuator | id=  4 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • interferometer-n_e_line        | role=input    | id=  5 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_ccbv_field | role=input    | id=  6 | modality=profile    | encoder=dct3d | dim=50
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obr_field | role=input    | id=  7 | modality=profile    | encoder=dct3d | dim=50
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obv_field | role=input    | id=  8 | modality=profile    | encoder=dct3d | dim=50
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_omv_voltage | role=input    | id=  9 | modality=profile    | encoder=dct3d | dim=30
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_cc_field | role=input    | id= 10 | modality=profile    | encoder=dct3d | dim=30
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_saddle_voltage | role=input    | id= 11 | modality=profile    | encoder=dct3d | dim=50
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-flux_loop_flux       | role=input    | id= 12 | modality=profile    | encoder=dct3d | dim=50
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • pf_active-coil_current         | role=input    | id= 13 | modality=profile    | encoder=dct3d | dim=50
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • pf_active-solenoid_current     | role=input    | id= 14 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • soft_x_rays-horizontal_cam_lower | role=input    | id= 15 | modality=profile    | encoder=dct3d | dim=50
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • soft_x_rays-horizontal_cam_upper | role=input    | id= 16 | modality=profile    | encoder=dct3d | dim=50
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • spectrometer_visible-filter_spectrometer_dalpha_voltage | role=input    | id= 17 | modality=profile    | encoder=dct3d | dim=30
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • summary-ip                     | role=input    | id= 18 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • thomson_scattering-n_e         | role=input    | id= 19 | modality=profile    | encoder=dct3d | dim=5
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • thomson_scattering-t_e         | role=input    | id= 20 | modality=profile    | encoder=dct3d | dim=5
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-beta_normal        | role=output   | id= 21 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-beta_pol           | role=output   | id= 22 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-beta_tor           | role=output   | id= 23 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-bphi_rmag          | role=output   | id= 24 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-bvac_rmag          | role=output   | id= 25 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-elongation         | role=output   | id= 26 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-elongation_axis    | role=output   | id= 27 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-lcfs_r             | role=output   | id= 28 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-lcfs_z             | role=output   | id= 29 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-magnetic_axis_r    | role=output   | id= 30 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-magnetic_axis_z    | role=output   | id= 31 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-minor_radius       | role=output   | id= 32 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-psi                | role=output   | id= 33 | modality=video      | encoder=dct3d | dim=640
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-q95                | role=output   | id= 34 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-triangularity_lower | role=output   | id= 35 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-triangularity_upper | role=output   | id= 36 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-x_point_r          | role=output   | id= 37 | modality=profile    | encoder=dct3d | dim=20
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • equilibrium-x_point_z          | role=output   | id= 38 | modality=profile    | encoder=dct3d | dim=20
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • interferometer-n_e_line        | role=output   | id= 39 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_ccbv_field | role=output   | id= 40 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obr_field | role=output   | id= 41 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obv_field | role=output   | id= 42 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_omv_voltage | role=output   | id= 43 | modality=profile    | encoder=dct3d | dim=30
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_cc_field | role=output   | id= 44 | modality=profile    | encoder=dct3d | dim=30
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_saddle_voltage | role=output   | id= 45 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • magnetics-flux_loop_flux       | role=output   | id= 46 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • pf_active-coil_current         | role=output   | id= 47 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • pf_active-solenoid_current     | role=output   | id= 48 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • soft_x_rays-horizontal_cam_lower | role=output   | id= 49 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • soft_x_rays-horizontal_cam_upper | role=output   | id= 50 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • spectrometer_visible-filter_spectrometer_dalpha_voltage | role=output   | id= 51 | modality=profile    | encoder=dct3d | dim=30
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • summary-ip                     | role=output   | id= 52 | modality=timeseries | encoder=dct3d | dim=10
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • thomson_scattering-n_e         | role=output   | id= 53 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.SignalSpec |   • thomson_scattering-t_e         | role=output   | id= 54 | modality=profile    | encoder=dct3d | dim=100
+2026-01-20 15:31:02 | INFO | mmt.TuneDCT3D | TuneDCT3D initialized | roles=input,actuator,output | candidates=816 | budgets={'input': 4096, 'actuator': 4096, 'output': 4096}
+2026-01-20 15:31:03 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=1 | windows seen=1
+2026-01-20 15:33:02 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=2 | windows seen=13
+2026-01-20 15:34:42 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=3 | windows seen=24
+2026-01-20 15:35:49 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=4 | windows seen=33
+2026-01-20 15:36:59 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=5 | windows seen=41
+2026-01-20 15:38:56 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=6 | windows seen=54
+2026-01-20 15:41:56 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=7 | windows seen=77
+2026-01-20 15:43:13 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=8 | windows seen=86
+2026-01-20 15:46:26 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=9 | windows seen=109
+2026-01-20 15:47:33 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=10 | windows seen=118
+2026-01-20 15:48:42 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=11 | windows seen=126
+2026-01-20 15:50:26 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=12 | windows seen=140
+2026-01-20 15:54:01 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=13 | windows seen=165
+2026-01-20 15:55:05 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=14 | windows seen=173
+2026-01-20 15:56:13 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=15 | windows seen=181
+2026-01-20 15:58:40 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=16 | windows seen=197
+2026-01-20 16:01:03 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=17 | windows seen=212
+2026-01-20 16:03:17 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=18 | windows seen=226
+2026-01-20 16:06:09 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=19 | windows seen=244
+2026-01-20 16:06:59 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=20 | windows seen=253
+2026-01-20 16:08:31 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=21 | windows seen=265
+2026-01-20 16:09:49 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=22 | windows seen=276
+2026-01-20 16:10:57 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=23 | windows seen=288
+2026-01-20 16:12:33 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=24 | windows seen=299
+2026-01-20 16:13:44 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=25 | windows seen=311
+2026-01-20 16:15:16 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=26 | windows seen=322
+2026-01-20 16:17:49 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=27 | windows seen=338
+2026-01-20 16:18:43 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=28 | windows seen=347
+2026-01-20 16:20:43 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=29 | windows seen=360
+2026-01-20 16:21:47 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=30 | windows seen=370
+2026-01-20 16:23:14 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=31 | windows seen=383
+2026-01-20 16:25:11 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=32 | windows seen=395
+2026-01-20 16:27:28 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=33 | windows seen=413
+2026-01-20 16:29:29 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=34 | windows seen=426
+2026-01-20 16:30:56 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=35 | windows seen=437
+2026-01-20 16:33:32 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=36 | windows seen=457
+2026-01-20 16:34:58 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=37 | windows seen=467
+2026-01-20 16:36:27 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=38 | windows seen=479
+2026-01-20 16:37:45 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=39 | windows seen=489
+2026-01-20 16:38:16 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=40 | windows seen=494
+2026-01-20 16:39:53 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=41 | windows seen=505
+2026-01-20 16:42:14 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=42 | windows seen=519
+2026-01-20 16:43:21 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=43 | windows seen=529
+2026-01-20 16:44:45 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=44 | windows seen=541
+2026-01-20 16:46:35 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=45 | windows seen=552
+2026-01-20 16:48:40 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=46 | windows seen=567
+2026-01-20 16:50:52 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=47 | windows seen=581
+2026-01-20 16:53:16 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=48 | windows seen=599
+2026-01-20 16:54:31 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=49 | windows seen=608
+2026-01-20 16:56:02 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=50 | windows seen=620
+2026-01-20 16:57:03 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=51 | windows seen=628
+2026-01-20 16:57:56 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=52 | windows seen=635
+2026-01-20 17:00:10 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=53 | windows seen=649
+2026-01-20 17:01:26 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=54 | windows seen=660
+2026-01-20 17:02:14 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=55 | windows seen=669
+2026-01-20 17:04:00 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=56 | windows seen=683
+2026-01-20 17:07:04 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=57 | windows seen=704
+2026-01-20 17:08:40 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=58 | windows seen=715
+2026-01-20 17:09:57 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=59 | windows seen=725
+2026-01-20 17:11:44 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=60 | windows seen=739
+2026-01-20 17:13:49 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=61 | windows seen=753
+2026-01-20 17:16:31 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=62 | windows seen=819
+2026-01-20 17:18:11 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=63 | windows seen=833
+2026-01-20 17:19:41 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=64 | windows seen=843
+2026-01-20 17:21:11 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=65 | windows seen=853
+2026-01-20 17:23:28 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=66 | windows seen=869
+2026-01-20 17:24:22 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=67 | windows seen=877
+2026-01-20 17:25:54 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=68 | windows seen=889
+2026-01-20 17:27:26 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=69 | windows seen=901
+2026-01-20 17:28:25 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=70 | windows seen=909
+2026-01-20 17:30:06 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=71 | windows seen=921
+2026-01-20 17:31:10 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=72 | windows seen=932
+2026-01-20 17:32:48 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=73 | windows seen=945
+2026-01-20 17:33:58 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=74 | windows seen=955
+2026-01-20 17:36:02 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=75 | windows seen=969
+2026-01-20 17:37:09 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=76 | windows seen=977
+2026-01-20 17:38:34 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=77 | windows seen=988
+2026-01-20 17:39:29 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=78 | windows seen=994
+2026-01-20 17:41:48 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=79 | windows seen=1008
+2026-01-20 17:43:46 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=80 | windows seen=1021
+2026-01-20 17:46:54 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=81 | windows seen=1047
+2026-01-20 17:49:11 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=82 | windows seen=1061
+2026-01-20 17:51:36 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=83 | windows seen=1076
+2026-01-20 17:53:28 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=84 | windows seen=1090
+2026-01-20 17:55:01 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=85 | windows seen=1102
+2026-01-20 17:56:26 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=86 | windows seen=1113
+2026-01-20 17:57:01 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=87 | windows seen=1119
+2026-01-20 17:58:07 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=88 | windows seen=1128
+2026-01-20 17:59:40 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=89 | windows seen=1140
+2026-01-20 18:01:26 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=90 | windows seen=1152
+2026-01-20 18:02:17 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=91 | windows seen=1160
+2026-01-20 18:03:57 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=92 | windows seen=1171
+2026-01-20 18:05:17 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=93 | windows seen=1180
+2026-01-20 18:07:12 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=94 | windows seen=1193
+2026-01-20 18:09:00 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=95 | windows seen=1205
+2026-01-20 18:10:04 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=96 | windows seen=1213
+2026-01-20 18:10:36 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=97 | windows seen=1218
+2026-01-20 18:11:59 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=98 | windows seen=1230
+2026-01-20 18:12:54 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=99 | windows seen=1237
+2026-01-20 18:14:06 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots seen=100 | windows seen=1247
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | Processed windows: total=1259
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | Selected configurations:
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:interferometer-n_e_line] shape=(20,) keep=(1,1,20) expl_energy=1.0000 eff_dim=20
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:magnetics-b_field_pol_probe_ccbv_field] shape=(40, 25) keep=(40,1,2) expl_energy=0.9994 eff_dim=80
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:magnetics-b_field_pol_probe_obr_field] shape=(18, 25) keep=(18,1,2) expl_energy=0.9994 eff_dim=36
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:magnetics-b_field_pol_probe_obv_field] shape=(18, 25) keep=(18,1,2) expl_energy=0.9997 eff_dim=36
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:magnetics-b_field_pol_probe_omv_voltage] shape=(3, 2500) keep=(3,1,1280) expl_energy=0.9485 eff_dim=3840
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:magnetics-b_field_tor_probe_cc_field] shape=(3, 2500) keep=(3,1,1280) expl_energy=0.9812 eff_dim=3840
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:magnetics-b_field_tor_probe_saddle_voltage] shape=(12, 250) keep=(12,1,2) expl_energy=0.9999 eff_dim=24
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:magnetics-flux_loop_flux] shape=(15, 25) keep=(15,1,1) expl_energy=0.9994 eff_dim=15
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:pf_active-coil_current] shape=(10, 20) keep=(10,1,2) expl_energy=0.9996 eff_dim=20
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:pf_active-solenoid_current] shape=(20,) keep=(1,1,2) expl_energy=0.9998 eff_dim=2
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:soft_x_rays-horizontal_cam_lower] shape=(18, 250) keep=(18,1,224) expl_energy=0.9992 eff_dim=4032
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:soft_x_rays-horizontal_cam_upper] shape=(18, 250) keep=(18,1,224) expl_energy=0.9983 eff_dim=4032
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:spectrometer_visible-filter_spectrometer_dalpha_voltage] shape=(3, 250) keep=(3,1,128) expl_energy=0.9992 eff_dim=384
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:summary-ip] shape=(20,) keep=(1,1,4) expl_energy=0.9992 eff_dim=4
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:thomson_scattering-n_e] shape=(120, 1) keep=(120,1,1) expl_energy=1.0000 eff_dim=120
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [input:thomson_scattering-t_e] shape=(120, 1) keep=(120,1,1) expl_energy=1.0000 eff_dim=120
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [actuator:gas_injection-total_injected] shape=(20,) keep=(1,1,2) expl_energy=0.9999 eff_dim=2
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [actuator:pf_active-coil_voltage] shape=(4, 20) keep=(4,1,16) expl_energy=0.9992 eff_dim=64
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [actuator:pulse_schedule-i_plasma] shape=(20,) keep=(1,1,2) expl_energy=0.9994 eff_dim=2
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [actuator:pulse_schedule-n_e_line] shape=(20,) keep=(1,1,2) expl_energy=0.9997 eff_dim=2
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [actuator:summary-power_nbi] shape=(20,) keep=(1,1,16) expl_energy=0.9998 eff_dim=16
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-beta_normal] shape=(10,) keep=(1,1,10) expl_energy=1.0000 eff_dim=10
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-beta_pol] shape=(10,) keep=(1,1,10) expl_energy=1.0000 eff_dim=10
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-beta_tor] shape=(10,) keep=(1,1,8) expl_energy=0.9964 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-bphi_rmag] shape=(10,) keep=(1,1,8) expl_energy=0.9960 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-bvac_rmag] shape=(10,) keep=(1,1,8) expl_energy=0.9953 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-elongation] shape=(10,) keep=(1,1,10) expl_energy=1.0000 eff_dim=10
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-elongation_axis] shape=(10,) keep=(1,1,10) expl_energy=1.0000 eff_dim=10
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-lcfs_r] shape=(170, 10) keep=(4,1,2) expl_energy=0.9963 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-lcfs_z] shape=(170, 10) keep=(8,1,2) expl_energy=0.9962 eff_dim=16
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-magnetic_axis_r] shape=(10,) keep=(1,1,8) expl_energy=0.9982 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-magnetic_axis_z] shape=(10,) keep=(1,1,8) expl_energy=0.9952 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-minor_radius] shape=(10,) keep=(1,1,8) expl_energy=0.9962 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-psi] shape=(65, 65, 10) keep=(16,16,4) expl_energy=0.9957 eff_dim=1024
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-q95] shape=(10,) keep=(1,1,8) expl_energy=0.9985 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-triangularity_lower] shape=(10,) keep=(1,1,10) expl_energy=1.0000 eff_dim=10
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-triangularity_upper] shape=(10,) keep=(1,1,10) expl_energy=1.0000 eff_dim=10
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-x_point_r] shape=(2, 10) keep=(2,1,4) expl_energy=0.9975 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:equilibrium-x_point_z] shape=(2, 10) keep=(2,1,1) expl_energy=0.9973 eff_dim=2
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:interferometer-n_e_line] shape=(200,) keep=(1,1,16) expl_energy=0.9961 eff_dim=16
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_pol_probe_ccbv_field] shape=(40, 250) keep=(40,1,8) expl_energy=0.9979 eff_dim=320
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_pol_probe_obr_field] shape=(18, 250) keep=(18,1,4) expl_energy=0.9961 eff_dim=72
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_pol_probe_obv_field] shape=(18, 250) keep=(18,1,8) expl_energy=0.9988 eff_dim=144
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_pol_probe_omv_voltage] shape=(3, 25000) keep=(3,1,1280) expl_energy=0.6690 eff_dim=3840
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_tor_probe_cc_field] shape=(3, 25000) keep=(3,1,1280) expl_energy=0.6832 eff_dim=3840
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_tor_probe_saddle_voltage] shape=(12, 2500) keep=(12,1,4) expl_energy=0.9981 eff_dim=48
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:magnetics-flux_loop_flux] shape=(15, 250) keep=(15,1,2) expl_energy=0.9973 eff_dim=30
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:pf_active-coil_current] shape=(10, 200) keep=(10,1,8) expl_energy=0.9985 eff_dim=80
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:pf_active-solenoid_current] shape=(200,) keep=(1,1,2) expl_energy=0.9966 eff_dim=2
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:soft_x_rays-horizontal_cam_lower] shape=(18, 2500) keep=(18,1,224) expl_energy=0.9908 eff_dim=4032
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:soft_x_rays-horizontal_cam_upper] shape=(18, 2500) keep=(18,1,224) expl_energy=0.9849 eff_dim=4032
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:spectrometer_visible-filter_spectrometer_dalpha_voltage] shape=(3, 2500) keep=(3,1,256) expl_energy=0.9954 eff_dim=768
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:summary-ip] shape=(200,) keep=(1,1,8) expl_energy=0.9972 eff_dim=8
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:thomson_scattering-n_e] shape=(120, 10) keep=(96,1,10) expl_energy=0.9955 eff_dim=960
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | [output:thomson_scattering-t_e] shape=(120, 10) keep=(120,1,10) expl_energy=1.0000 eff_dim=1200
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | Wrote tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/pretrain_inputs_actuators_to_inputs_outputs/embeddings_overrides/dct3d.yaml
+2026-01-20 18:16:00 | INFO | mmt.TuneDCT3D | Archived tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/pretrain_inputs_actuators_to_inputs_outputs/embeddings_overrides/history/dct3d_20260120_181600_954149.yaml

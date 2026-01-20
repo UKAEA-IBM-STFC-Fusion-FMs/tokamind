@@ -50,3 +50,131 @@ embeddings:
   # Input and actuators overrides computed from the pretraining task.
   # Output task-specific overrides should live in tasks_overrides/<task>/embedding_overrides/<profile>.yaml.
   per_signal_overrides:
+    input:
+      interferometer-n_e_line:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 20
+      magnetics-b_field_pol_probe_ccbv_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 40
+          keep_w: 1
+          keep_t: 2
+      magnetics-b_field_pol_probe_obr_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 2
+      magnetics-b_field_pol_probe_obv_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 2
+      magnetics-b_field_pol_probe_omv_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 1280
+      magnetics-b_field_tor_probe_cc_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 1280
+      magnetics-b_field_tor_probe_saddle_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 12
+          keep_w: 1
+          keep_t: 2
+      magnetics-flux_loop_flux:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 15
+          keep_w: 1
+          keep_t: 1
+      pf_active-coil_current:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 10
+          keep_w: 1
+          keep_t: 2
+      pf_active-solenoid_current:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      soft_x_rays-horizontal_cam_lower:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 224
+      soft_x_rays-horizontal_cam_upper:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 224
+      spectrometer_visible-filter_spectrometer_dalpha_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 128
+      summary-ip:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 4
+      thomson_scattering-n_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 120
+          keep_w: 1
+          keep_t: 1
+      thomson_scattering-t_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 120
+          keep_w: 1
+          keep_t: 1
+    actuator:
+      gas_injection-total_injected:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      pf_active-coil_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 4
+          keep_w: 1
+          keep_t: 16
+      pulse_schedule-i_plasma:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      pulse_schedule-n_e_line:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      summary-power_nbi:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 16
