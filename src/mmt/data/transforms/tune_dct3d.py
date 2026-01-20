@@ -141,6 +141,7 @@ class TuneDCT3DTransform:
         thresholds: Mapping[str, float],
         roles: Iterable[str] = ("input", "actuator", "output"),
         max_budget: int | Mapping[str, int] | None = None,
+        progress_every_n_shots: int | None = 1,
     ) -> None:
         """Create a DCT3D tuner.
 
@@ -162,8 +163,29 @@ class TuneDCT3DTransform:
             {"input": 4096, "output": 16384}. Candidates with
             D_eff > max_budget[role] are ignored during selection (and skipped
             during evaluation for speed).
+        progress_every_n_shots:
+            Optional progress logger. If provided, logs every N shots during
+            streaming evaluation, printing:
+            "TuneDCT3D progress: shots_seen=<n> windows_seen=<m>".
+            Shot counting is based on changes in window["shot_id"] (i.e. it
+            assumes windows are streamed grouped by shot).
         """
         self.signal_specs = signal_specs
+
+        # Optional shot progress logging.
+        self.progress_every_n_shots: int | None
+        if progress_every_n_shots is None:
+            self.progress_every_n_shots = None
+        else:
+            n = int(progress_every_n_shots)
+            if n <= 0:
+                raise ValueError(
+                    "TuneDCT3D: progress_every_n_shots must be a positive integer"
+                )
+            self.progress_every_n_shots = n
+            self._shots_seen: int = 0
+            self._windows_seen: int = 0
+            self._last_shot_id: Any | None = None
 
         # Normalize + validate roles.
         allowed = {"input", "actuator", "output"}
@@ -276,6 +298,22 @@ class TuneDCT3DTransform:
         return within
 
     def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
+        # Optional progress logging.
+        if self.progress_every_n_shots is not None:
+            # We assume windows arrive grouped by shot_id (typical streaming dataset
+            # behavior). Each time shot_id changes, we count a new shot.
+            self._windows_seen += 1
+            shot_id = window.get("shot_id")
+            if shot_id is not None and shot_id != self._last_shot_id:
+                self._last_shot_id = shot_id
+                self._shots_seen += 1
+                if self._shots_seen % self.progress_every_n_shots == 0:
+                    logger.info(
+                        "TuneDCT3D progress: shots seen=%d | windows seen=%d",
+                        self._shots_seen,
+                        self._windows_seen,
+                    )
+
         # Only require chunks if we're tuning chunk-based roles.
         if (
             any(r in self.roles for r in ("input", "actuator"))
