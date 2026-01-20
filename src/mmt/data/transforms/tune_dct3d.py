@@ -309,7 +309,7 @@ class TuneDCT3DTransform:
                 self._shots_seen += 1
                 if self._shots_seen % self.progress_every_n_shots == 0:
                     logger.info(
-                        "TuneDCT3D progress: shots seen=%d | windows seen=%d",
+                        "TuneDCT3D progress: shots: %d | windows: %d",
                         self._shots_seen,
                         self._windows_seen,
                     )
