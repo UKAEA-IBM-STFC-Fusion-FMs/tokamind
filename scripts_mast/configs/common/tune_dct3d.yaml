@@ -19,7 +19,7 @@ preprocess:
 
 tune_dct3d:
   sampling:
-    n_shots: 10
+    n_shots: 100
     max_windows: 2000
 
   objective:

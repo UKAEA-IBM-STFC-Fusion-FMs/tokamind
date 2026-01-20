@@ -25,7 +25,7 @@ data:
   cache:
     enable: true
     dtype: float16          # or float32
-    num_workers: 4
+    num_workers: 32
     max_windows:
       train: null
       val: null
@@ -35,7 +35,7 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: null
+    window_stride_sec: 0.01
 
 # "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
