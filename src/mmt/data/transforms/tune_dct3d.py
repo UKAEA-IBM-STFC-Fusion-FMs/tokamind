@@ -141,7 +141,7 @@ class TuneDCT3DTransform:
         thresholds: Mapping[str, float],
         roles: Iterable[str] = ("input", "actuator", "output"),
         max_budget: int | Mapping[str, int] | None = None,
-        progress_every_n_shots: int | None = 1,
+        progress_every_n_shots: int | None = 10,
     ) -> None:
         """Create a DCT3D tuner.
 
