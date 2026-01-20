@@ -10,14 +10,14 @@
 
 
 collate:
-  p_drop_inputs: 0.15
+  p_drop_inputs: 0.1
   p_drop_inputs_overrides: {}
 #    pf_active-solenoid_current: 0.1
   p_drop_outputs: 0.0
   p_drop_outputs_overrides: {}
   p_drop_actuators: 0.0
   p_drop_actuators_overrides: {}
-  p_drop_inputs_chunks: 0.15
+  p_drop_inputs_chunks: 0.1
   p_drop_actuators_chunks: 0.0
 
 data:
@@ -25,7 +25,6 @@ data:
   cache:
     enable: true
     dtype: float16          # or float32
-
     num_workers: 8
     max_windows:
       train: null
@@ -42,7 +41,7 @@ preprocess:
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
 
 loader:
-  batch_size: 1024
+  batch_size: 256
   num_workers: 0
   shuffle_train: true
   drop_last: false
@@ -108,12 +107,12 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 3e-4        # null: inherit from backbone
-          backbone: 1e-4
-          modality_heads: 3e-4
-          output_adapters: 3e-4
+          token_encoder: 1e-4    # 1e-4  # 3e-4  # 1e-3       # null: inherit from backbone
+          backbone: 5e-5         # 5e-5  # 1e-4  # 5e-4
+          modality_heads: 1e-4   # 1e-4  # 3e-4  # 1e-3
+          output_adapters: 1e-4  # 1e-4  # 3e-4  # 1e-3
         wd:
-          token_encoder: 0.05        # null: inherit from backbone
+          token_encoder: 0.05              # null: inherit from backbone
           backbone: 0.05
           modality_heads: 0.05
           output_adapters: 0.05
