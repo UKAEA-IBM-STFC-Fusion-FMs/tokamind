@@ -422,9 +422,10 @@ def run_one_epoch(
                 for k, v in sorted(loss_logs.items(), key=lambda kv: str(kv[0]))
             )
             logger.debug(
-                "[LOSS] batch %d (%s) per-output: %s",
+                "[LOSS] batch %d (%s) total=%.3e per-output: %s",
                 batch_idx,
                 "train" if train else "val",
+                float(loss_t.detach().cpu().item()),
                 per_out_str,
             )
 
