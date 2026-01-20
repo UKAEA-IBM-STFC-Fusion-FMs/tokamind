@@ -102,6 +102,7 @@ def _compute_paths(
             "configs_root": str(configs_root),
             "run_dir": str(task_dir),
             "config_dir": str(task_dir),
+            "tune_dir": str(task_dir / "embeddings_overrides"),
         }
 
     # train phases write into runs/<run_id>
@@ -260,6 +261,12 @@ def load_experiment_config(
         merged, configs_root=configs_root_path, task_dir=tasks_overrides_dir
     )
 
+    # Ensure ids exist at top-level, even when auto-generated in _compute_paths().
+    if phase in ("pretrain", "finetune") and merged.get("run_id") is None:
+        merged["run_id"] = merged["paths"].get("run_id")
+    if phase == "eval" and merged.get("eval_id") is None:
+        merged["eval_id"] = merged["paths"].get("eval_id")
+
     # Resolve model_source.run_dir to absolute path (if present)
     if isinstance(merged.get("model_source"), dict):
         model_dir = merged["model_source"].get("run_dir", None)
@@ -268,11 +275,19 @@ def load_experiment_config(
                 _resolve_from_repo_root(str(model_dir))
             )
 
-    # Save merged config for run-based phases only
-    if phase != "tune_dct3d":
-        run_dir_path = Path(merged["paths"]["run_dir"])
-        run_dir_path.mkdir(parents=True, exist_ok=True)
-        with (run_dir_path / "config_merged.yaml").open("w", encoding="utf-8") as f:
-            yaml.safe_dump(merged, f, sort_keys=False)
+    # Save merged config
+    if phase == "tune_dct3d":
+        out_dir = Path(merged["paths"]["tune_dir"])
+        config_name = "tune_dct3d.yaml"
+    elif phase == "eval":
+        out_dir = Path(merged["paths"]["run_dir"])
+        config_name = f"{merged['eval_id']}.yaml"
+    else:
+        out_dir = Path(merged["paths"]["run_dir"])
+        config_name = f"{merged['run_id']}.yaml"
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with (out_dir / config_name).open("w", encoding="utf-8") as f:
+        yaml.safe_dump(merged, f, sort_keys=False)
 
     return ExperimentConfig(raw=merged)

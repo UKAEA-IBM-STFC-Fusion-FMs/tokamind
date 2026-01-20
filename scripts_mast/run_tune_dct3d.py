@@ -127,9 +127,9 @@ def main() -> None:
 
     # For tune_dct3d, loader sets run_dir to: scripts_mast/configs/tasks_overrides/<task>/
     logger = setup_logging(
-        cfg_mmt.paths["run_dir"],
+        cfg_mmt.paths["tune_dir"],
         logger_name="mmt",
-        filename=None,
+        filename="tune_dct3d.log",
         console=True,
     )
     logger.setLevel("DEBUG" if debug_mode else "INFO")
@@ -308,7 +308,7 @@ def main() -> None:
                 "encoder_kwargs": new_kwargs,
             }
 
-    out_path = Path(cfg_mmt.paths["run_dir"]) / "embeddings_overrides" / "dct3d.yaml"
+    out_path = Path(cfg_mmt.paths["tune_dir"]) / "dct3d.yaml"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Also archive a timestamped copy for history (to avoid losing prior good runs).
