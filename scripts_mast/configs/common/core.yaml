@@ -60,5 +60,5 @@ model:
 
   output_adapters:
     hidden_default: 0
-    hidden_overrides:    # other task-specific overrides go in tasks_overrides/<task>/task.yaml
-      equilibrium-psi: 32
+    hidden_overrides: {}   # other task-specific overrides go in tasks_overrides/<task>/task.yaml
+#      equilibrium-psi: 32
