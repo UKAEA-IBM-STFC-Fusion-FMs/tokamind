@@ -26,11 +26,11 @@ tune_dct3d:
     thresholds:
       input: 0.999
       actuator: 0.999
-      output: 0.999
+      output: 0.995
     max_budget:
       input: 4096
       actuator: 4096
-      output: 6144
+      output: 4096
 
   search_space:
     keep_h: [ 1, 4, 8, 16, 32, 64, 96, 128 ]
