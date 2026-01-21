@@ -39,7 +39,19 @@ class Backbone(nn.Module):
             batch_first=True,
             activation=activation,  # explicit, default "relu"
         )
-        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
+        # NOTE:
+        # PyTorch's nested tensor API is still marked as prototype and may emit
+        # warnings when TransformerEncoder internally constructs nested tensors.
+        # Disabling nested tensors keeps behaviour stable and avoids the warning.
+        try:
+            self.encoder = nn.TransformerEncoder(
+                encoder_layer,
+                num_layers=n_layers,
+                enable_nested_tensor=False,
+            )
+        except TypeError:
+            # Backwards compatibility for older PyTorch versions.
+            self.encoder = nn.TransformerEncoder(encoder_layer, num_layers=n_layers)
 
     def forward(
         self,
