@@ -1,0 +1,28 @@
+2026-01-20 23:59:28 | INFO | mmt.TuneDCT3D | task=task_2-3 | phase=tune_dct3d | device=cuda | roles=output
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec | Built SignalSpecRegistry with 11 role-specific signals
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • pf_active-coil_voltage         | role=actuator | id=  0 | modality=profile    | encoder=dct3d | dim=64
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • summary-power_nbi              | role=actuator | id=  1 | modality=timeseries | encoder=dct3d | dim=16
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_ccbv_field | role=input    | id=  2 | modality=profile    | encoder=dct3d | dim=80
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obr_field | role=input    | id=  3 | modality=profile    | encoder=dct3d | dim=36
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obv_field | role=input    | id=  4 | modality=profile    | encoder=dct3d | dim=36
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_saddle_voltage | role=input    | id=  5 | modality=profile    | encoder=dct3d | dim=24
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • magnetics-flux_loop_flux       | role=input    | id=  6 | modality=profile    | encoder=dct3d | dim=15
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • pf_active-coil_current         | role=input    | id=  7 | modality=profile    | encoder=dct3d | dim=20
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • pf_active-solenoid_current     | role=input    | id=  8 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • summary-ip                     | role=input    | id=  9 | modality=timeseries | encoder=dct3d | dim=4
+2026-01-20 23:59:28 | INFO | mmt.SignalSpec |   • equilibrium-psi                | role=output   | id= 10 | modality=video      | encoder=dct3d | dim=320
+2026-01-20 23:59:28 | INFO | mmt.TuneDCT3D | TuneDCT3D initialized | roles=output | candidates=952 | budgets={'output': 6144}
+2026-01-20 23:59:59 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 10, windows: 153
+2026-01-21 00:00:44 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 20, windows: 366
+2026-01-21 00:01:24 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 30, windows: 568
+2026-01-21 00:02:02 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 40, windows: 748
+2026-01-21 00:02:38 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 50, windows: 939
+2026-01-21 00:03:16 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 60, windows: 1149
+2026-01-21 00:03:51 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 70, windows: 1344
+2026-01-21 00:04:32 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 80, windows: 1569
+2026-01-21 00:05:10 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 90, windows: 1759
+2026-01-21 00:05:31 | INFO | mmt.TuneDCT3D | Processed windows: total=1867
+2026-01-21 00:05:31 | INFO | mmt.TuneDCT3D | Selected configurations:
+2026-01-21 00:05:31 | INFO | mmt.TuneDCT3D | [output:equilibrium-psi] shape=(65, 65, 5) keep=(32,16,5) expl_energy=0.9993 eff_dim=2560
+2026-01-21 00:05:31 | INFO | mmt.TuneDCT3D | Wrote tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_2-3/embeddings_overrides/dct3d.yaml
+2026-01-21 00:05:31 | INFO | mmt.TuneDCT3D | Archived tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_2-3/embeddings_overrides/history/dct3d_20260121_000531_752269.yaml

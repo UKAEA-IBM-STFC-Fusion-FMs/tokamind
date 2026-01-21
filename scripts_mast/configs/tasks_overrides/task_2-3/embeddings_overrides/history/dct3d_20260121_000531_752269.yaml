@@ -1,0 +1,9 @@
+embeddings:
+  per_signal_overrides:
+    output:
+      equilibrium-psi:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 32
+          keep_w: 16
+          keep_t: 5

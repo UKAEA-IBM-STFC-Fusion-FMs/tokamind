@@ -1,0 +1,285 @@
+seed: 54
+runtime:
+  debug_logging: false
+data:
+  local: true
+  subset_of_shots: null
+preprocess:
+  chunk:
+    chunk_length: 0.005
+    stride: null
+  trim_chunks:
+    max_chunks: 50
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    window_stride_sec: 0.02
+model:
+  backbone:
+    d_model: 256
+    n_layers: 6
+    n_heads: 8
+    dim_ff: 1024
+    dropout: 0.1
+    activation: relu
+  modality_heads:
+    timeseries:
+      hidden: 256
+      out_dim: 256
+    profile:
+      hidden: 256
+      out_dim: 256
+    video:
+      hidden: 384
+      out_dim: 256
+  output_adapters:
+    hidden_default: 0
+    hidden_overrides:
+      equilibrium-psi: 32
+embeddings:
+  defaults:
+    input:
+      timeseries:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 10
+      profile:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 5
+          keep_w: 1
+          keep_t: 10
+      video:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 16
+          keep_w: 16
+          keep_t: 5
+    actuator:
+      timeseries:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 10
+      profile:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 5
+          keep_w: 1
+          keep_t: 10
+      video:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 16
+          keep_w: 16
+          keep_t: 5
+    output:
+      timeseries:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 10
+      profile:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 10
+          keep_w: 1
+          keep_t: 10
+      video:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 8
+          keep_w: 8
+          keep_t: 10
+  per_signal_overrides:
+    input:
+      interferometer-n_e_line:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 20
+      magnetics-b_field_pol_probe_ccbv_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 40
+          keep_w: 1
+          keep_t: 2
+      magnetics-b_field_pol_probe_obr_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 2
+      magnetics-b_field_pol_probe_obv_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 2
+      magnetics-b_field_pol_probe_omv_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 1280
+      magnetics-b_field_tor_probe_cc_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 1280
+      magnetics-b_field_tor_probe_saddle_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 12
+          keep_w: 1
+          keep_t: 2
+      magnetics-flux_loop_flux:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 15
+          keep_w: 1
+          keep_t: 1
+      pf_active-coil_current:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 10
+          keep_w: 1
+          keep_t: 2
+      pf_active-solenoid_current:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      soft_x_rays-horizontal_cam_lower:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 224
+      soft_x_rays-horizontal_cam_upper:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 224
+      spectrometer_visible-filter_spectrometer_dalpha_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 128
+      summary-ip:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 4
+      thomson_scattering-n_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 120
+          keep_w: 1
+          keep_t: 1
+      thomson_scattering-t_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 120
+          keep_w: 1
+          keep_t: 1
+    actuator:
+      gas_injection-total_injected:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      pf_active-coil_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 4
+          keep_w: 1
+          keep_t: 16
+      pulse_schedule-i_plasma:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      pulse_schedule-n_e_line:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      summary-power_nbi:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 16
+tune_dct3d:
+  sampling:
+    n_shots: 100
+    max_windows: 15000
+  objective:
+    thresholds:
+      input: 0.999
+      actuator: 0.999
+      output: 0.999
+    max_budget:
+      input: 4096
+      actuator: 4096
+      output: 6144
+  search_space:
+    keep_h:
+    - 1
+    - 4
+    - 8
+    - 16
+    - 32
+    - 64
+    - 96
+    - 128
+    keep_w:
+    - 1
+    - 4
+    - 8
+    - 16
+    - 24
+    - 32
+    - 65
+    keep_t:
+    - 1
+    - 2
+    - 4
+    - 8
+    - 16
+    - 32
+    - 64
+    - 96
+    - 128
+    - 192
+    - 224
+    - 256
+    - 512
+    - 768
+    - 1024
+    - 1280
+    - 2048
+task: task_1-3
+phase: tune_dct3d
+embeddings_profile: dct3d
+paths:
+  repo_root: /home/ir-bosc1/git/multi-modal-transformer
+  configs_root: /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs
+  run_dir: /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_1-3
+  config_dir: /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_1-3
+  tune_dir: /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_1-3/embeddings_overrides

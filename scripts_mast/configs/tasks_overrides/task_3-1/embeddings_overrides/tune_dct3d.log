@@ -1,0 +1,26 @@
+2026-01-21 00:05:37 | INFO | mmt.TuneDCT3D | task=task_3-1 | phase=tune_dct3d | device=cuda | roles=output
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec | Built SignalSpecRegistry with 8 role-specific signals
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec |   • gas_injection-total_injected   | role=actuator | id=  0 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec |   • pulse_schedule-i_plasma        | role=actuator | id=  1 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec |   • pulse_schedule-n_e_line        | role=actuator | id=  2 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec |   • summary-power_nbi              | role=actuator | id=  3 | modality=timeseries | encoder=dct3d | dim=16
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec |   • thomson_scattering-n_e         | role=input    | id=  4 | modality=profile    | encoder=dct3d | dim=120
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec |   • thomson_scattering-t_e         | role=input    | id=  5 | modality=profile    | encoder=dct3d | dim=120
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec |   • thomson_scattering-n_e         | role=output   | id=  6 | modality=profile    | encoder=dct3d | dim=100
+2026-01-21 00:05:37 | INFO | mmt.SignalSpec |   • thomson_scattering-t_e         | role=output   | id=  7 | modality=profile    | encoder=dct3d | dim=100
+2026-01-21 00:05:37 | INFO | mmt.TuneDCT3D | TuneDCT3D initialized | roles=output | candidates=952 | budgets={'output': 6144}
+2026-01-21 00:05:53 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 10, windows: 138
+2026-01-21 00:06:14 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 20, windows: 327
+2026-01-21 00:06:35 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 30, windows: 512
+2026-01-21 00:06:55 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 40, windows: 687
+2026-01-21 00:07:10 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 50, windows: 831
+2026-01-21 00:07:31 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 60, windows: 1029
+2026-01-21 00:07:47 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 70, windows: 1183
+2026-01-21 00:08:07 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 80, windows: 1375
+2026-01-21 00:08:21 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 90, windows: 1512
+2026-01-21 00:08:23 | INFO | mmt.TuneDCT3D | Processed windows: total=1532
+2026-01-21 00:08:23 | INFO | mmt.TuneDCT3D | Selected configurations:
+2026-01-21 00:08:23 | INFO | mmt.TuneDCT3D | [output:thomson_scattering-n_e] shape=(120, 10) keep=(120,1,10) expl_energy=1.0000 eff_dim=1200
+2026-01-21 00:08:23 | INFO | mmt.TuneDCT3D | [output:thomson_scattering-t_e] shape=(120, 10) keep=(120,1,10) expl_energy=1.0000 eff_dim=1200
+2026-01-21 00:08:23 | INFO | mmt.TuneDCT3D | Wrote tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_3-1/embeddings_overrides/dct3d.yaml
+2026-01-21 00:08:23 | INFO | mmt.TuneDCT3D | Archived tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_3-1/embeddings_overrides/history/dct3d_20260121_000823_777155.yaml

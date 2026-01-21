@@ -1,0 +1,93 @@
+embeddings:
+  per_signal_overrides:
+    output:
+      equilibrium-beta_normal:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-beta_pol:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-beta_tor:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-bphi_rmag:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-bvac_rmag:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-elongation:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-elongation_axis:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-magnetic_axis_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-magnetic_axis_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-minor_radius:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-q95:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-triangularity_lower:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-triangularity_upper:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 1
+      equilibrium-x_point_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 2
+          keep_w: 1
+          keep_t: 1
+      equilibrium-x_point_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 2
+          keep_w: 1
+          keep_t: 1

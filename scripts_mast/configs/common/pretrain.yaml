@@ -41,7 +41,7 @@ preprocess:
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
 
 loader:
-  batch_size: 256
+  batch_size: 2048
   num_workers: 0
   shuffle_train: true
   drop_last: false
@@ -107,10 +107,10 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 1e-4    # 1e-4  # 3e-4  # 1e-3       # null: inherit from backbone
-          backbone: 5e-5         # 5e-5  # 1e-4  # 5e-4
-          modality_heads: 1e-4   # 1e-4  # 3e-4  # 1e-3
-          output_adapters: 1e-4  # 1e-4  # 3e-4  # 1e-3
+          token_encoder: 1e-4           # null: inherit from backbone
+          backbone: 5e-5        
+          modality_heads: 1e-4   
+          output_adapters: 1e-4       
         wd:
           token_encoder: 0.05              # null: inherit from backbone
           backbone: 0.05

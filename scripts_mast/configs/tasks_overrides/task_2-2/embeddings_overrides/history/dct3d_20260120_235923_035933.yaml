@@ -1,0 +1,15 @@
+embeddings:
+  per_signal_overrides:
+    output:
+      equilibrium-lcfs_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 16
+          keep_w: 1
+          keep_t: 2
+      equilibrium-lcfs_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 16
+          keep_w: 1
+          keep_t: 4

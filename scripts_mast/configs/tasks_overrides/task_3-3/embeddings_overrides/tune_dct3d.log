@@ -1,0 +1,39 @@
+2026-01-21 00:41:50 | INFO | mmt.TuneDCT3D | task=task_3-3 | phase=tune_dct3d | device=cuda | roles=output
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec | Built SignalSpecRegistry with 18 role-specific signals
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • gas_injection-total_injected   | role=actuator | id=  0 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • pulse_schedule-i_plasma        | role=actuator | id=  1 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • pulse_schedule-n_e_line        | role=actuator | id=  2 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • summary-power_nbi              | role=actuator | id=  3 | modality=timeseries | encoder=dct3d | dim=16
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • interferometer-n_e_line        | role=input    | id=  4 | modality=timeseries | encoder=dct3d | dim=20
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_ccbv_field | role=input    | id=  5 | modality=profile    | encoder=dct3d | dim=80
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obr_field | role=input    | id=  6 | modality=profile    | encoder=dct3d | dim=36
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obv_field | role=input    | id=  7 | modality=profile    | encoder=dct3d | dim=36
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_saddle_voltage | role=input    | id=  8 | modality=profile    | encoder=dct3d | dim=24
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • magnetics-flux_loop_flux       | role=input    | id=  9 | modality=profile    | encoder=dct3d | dim=15
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • pf_active-coil_current         | role=input    | id= 10 | modality=profile    | encoder=dct3d | dim=20
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • pf_active-solenoid_current     | role=input    | id= 11 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • summary-ip                     | role=input    | id= 12 | modality=timeseries | encoder=dct3d | dim=4
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • equilibrium-beta_normal        | role=output   | id= 13 | modality=timeseries | encoder=dct3d | dim=1
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • equilibrium-beta_pol           | role=output   | id= 14 | modality=timeseries | encoder=dct3d | dim=1
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • equilibrium-beta_tor           | role=output   | id= 15 | modality=timeseries | encoder=dct3d | dim=1
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • thomson_scattering-n_e         | role=output   | id= 16 | modality=profile    | encoder=dct3d | dim=10
+2026-01-21 00:41:51 | INFO | mmt.SignalSpec |   • thomson_scattering-t_e         | role=output   | id= 17 | modality=profile    | encoder=dct3d | dim=10
+2026-01-21 00:41:51 | INFO | mmt.TuneDCT3D | TuneDCT3D initialized | roles=output | candidates=952 | budgets={'output': 6144}
+2026-01-21 00:42:36 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 10, windows: 158
+2026-01-21 00:43:33 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 20, windows: 369
+2026-01-21 00:44:24 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 30, windows: 565
+2026-01-21 00:45:22 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 40, windows: 747
+2026-01-21 00:46:17 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 50, windows: 940
+2026-01-21 00:47:05 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 60, windows: 1118
+2026-01-21 00:47:56 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 70, windows: 1326
+2026-01-21 00:48:51 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 80, windows: 1526
+2026-01-21 00:49:51 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 90, windows: 1736
+2026-01-21 00:50:32 | INFO | mmt.TuneDCT3D | Processed windows: total=1883
+2026-01-21 00:50:32 | INFO | mmt.TuneDCT3D | Selected configurations:
+2026-01-21 00:50:32 | INFO | mmt.TuneDCT3D | [output:equilibrium-beta_normal] shape=(1,) keep=(1,1,1) expl_energy=1.0000 eff_dim=1
+2026-01-21 00:50:32 | INFO | mmt.TuneDCT3D | [output:equilibrium-beta_pol] shape=(1,) keep=(1,1,1) expl_energy=1.0000 eff_dim=1
+2026-01-21 00:50:32 | INFO | mmt.TuneDCT3D | [output:equilibrium-beta_tor] shape=(1,) keep=(1,1,1) expl_energy=1.0000 eff_dim=1
+2026-01-21 00:50:32 | INFO | mmt.TuneDCT3D | [output:thomson_scattering-n_e] shape=(120, 1) keep=(120,1,1) expl_energy=1.0000 eff_dim=120
+2026-01-21 00:50:32 | INFO | mmt.TuneDCT3D | [output:thomson_scattering-t_e] shape=(120, 1) keep=(120,1,1) expl_energy=1.0000 eff_dim=120
+2026-01-21 00:50:33 | INFO | mmt.TuneDCT3D | Wrote tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_3-3/embeddings_overrides/dct3d.yaml
+2026-01-21 00:50:33 | INFO | mmt.TuneDCT3D | Archived tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_3-3/embeddings_overrides/history/dct3d_20260121_005032_990791.yaml

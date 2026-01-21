@@ -1,0 +1,15 @@
+embeddings:
+  per_signal_overrides:
+    output:
+      thomson_scattering-n_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 120
+          keep_w: 1
+          keep_t: 10
+      thomson_scattering-t_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 120
+          keep_w: 1
+          keep_t: 10
