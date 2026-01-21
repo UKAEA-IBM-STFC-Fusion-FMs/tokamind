@@ -237,43 +237,19 @@ tune_dct3d:
     max_budget:
       input: 4096
       actuator: 4096
-      output: 6144
+      output: 12288
   search_space:
     keep_h:
     - 1
-    - 4
-    - 8
-    - 16
-    - 32
-    - 64
-    - 96
-    - 128
-    keep_w:
-    - 1
-    - 4
-    - 8
-    - 16
-    - 24
-    - 32
-    - 65
-    keep_t:
-    - 1
     - 2
     - 4
-    - 8
-    - 16
-    - 32
-    - 64
-    - 96
-    - 128
-    - 192
-    - 224
-    - 256
-    - 512
-    - 768
-    - 1024
-    - 1280
+    keep_w:
+    - 1
+    keep_t:
     - 2048
+    - 3072
+    - 4096
+    - 6144
 task: task_4-5
 phase: tune_dct3d
 embeddings_profile: dct3d

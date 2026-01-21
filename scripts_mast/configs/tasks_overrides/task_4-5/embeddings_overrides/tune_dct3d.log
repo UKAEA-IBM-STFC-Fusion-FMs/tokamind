@@ -36,3 +36,41 @@
 2026-01-21 05:27:57 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_tor_probe_cc_field] shape=(3, 50000) keep=(3,1,2048) expl_energy=0.6667 eff_dim=6144
 2026-01-21 05:27:57 | INFO | mmt.TuneDCT3D | Wrote tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_4-5/embeddings_overrides/dct3d.yaml
 2026-01-21 05:27:57 | INFO | mmt.TuneDCT3D | Archived tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_4-5/embeddings_overrides/history/dct3d_20260121_052757_915291.yaml
+2026-01-21 09:18:07 | INFO | mmt.TuneDCT3D | task=task_4-5 | phase=tune_dct3d | device=cuda | roles=output
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec | Built SignalSpecRegistry with 20 role-specific signals
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • gas_injection-total_injected   | role=actuator | id=  0 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • pulse_schedule-i_plasma        | role=actuator | id=  1 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • pulse_schedule-n_e_line        | role=actuator | id=  2 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • summary-power_nbi              | role=actuator | id=  3 | modality=timeseries | encoder=dct3d | dim=16
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • interferometer-n_e_line        | role=input    | id=  4 | modality=timeseries | encoder=dct3d | dim=20
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_ccbv_field | role=input    | id=  5 | modality=profile    | encoder=dct3d | dim=80
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obr_field | role=input    | id=  6 | modality=profile    | encoder=dct3d | dim=36
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_obv_field | role=input    | id=  7 | modality=profile    | encoder=dct3d | dim=36
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_omv_voltage | role=input    | id=  8 | modality=profile    | encoder=dct3d | dim=3840
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_cc_field | role=input    | id=  9 | modality=profile    | encoder=dct3d | dim=3840
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_saddle_voltage | role=input    | id= 10 | modality=profile    | encoder=dct3d | dim=24
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-flux_loop_flux       | role=input    | id= 11 | modality=profile    | encoder=dct3d | dim=15
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • pf_active-coil_current         | role=input    | id= 12 | modality=profile    | encoder=dct3d | dim=20
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • pf_active-solenoid_current     | role=input    | id= 13 | modality=timeseries | encoder=dct3d | dim=2
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • soft_x_rays-horizontal_cam_lower | role=input    | id= 14 | modality=profile    | encoder=dct3d | dim=4032
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • soft_x_rays-horizontal_cam_upper | role=input    | id= 15 | modality=profile    | encoder=dct3d | dim=4032
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • spectrometer_visible-filter_spectrometer_dalpha_voltage | role=input    | id= 16 | modality=profile    | encoder=dct3d | dim=384
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • summary-ip                     | role=input    | id= 17 | modality=timeseries | encoder=dct3d | dim=4
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-b_field_pol_probe_omv_voltage | role=output   | id= 18 | modality=profile    | encoder=dct3d | dim=30
+2026-01-21 09:18:07 | INFO | mmt.SignalSpec |   • magnetics-b_field_tor_probe_cc_field | role=output   | id= 19 | modality=profile    | encoder=dct3d | dim=30
+2026-01-21 09:18:07 | INFO | mmt.TuneDCT3D | TuneDCT3D initialized | roles=output | candidates=12 | budgets={'output': 12288}
+2026-01-21 09:19:36 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 10, windows: 228
+2026-01-21 09:21:21 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 20, windows: 484
+2026-01-21 09:23:01 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 30, windows: 662
+2026-01-21 09:24:32 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 40, windows: 869
+2026-01-21 09:25:58 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 50, windows: 1065
+2026-01-21 09:27:33 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 60, windows: 1273
+2026-01-21 09:28:48 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 70, windows: 1449
+2026-01-21 09:30:29 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 80, windows: 1688
+2026-01-21 09:31:38 | INFO | mmt.TuneDCT3D | TuneDCT3D progress: shots: 90, windows: 1844
+2026-01-21 09:32:08 | INFO | mmt.TuneDCT3D | Processed windows: total=1917
+2026-01-21 09:32:08 | INFO | mmt.TuneDCT3D | Selected configurations:
+2026-01-21 09:32:08 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_pol_probe_omv_voltage] shape=(3, 50000) keep=(3,1,4096) expl_energy=0.6754 eff_dim=12288
+2026-01-21 09:32:08 | INFO | mmt.TuneDCT3D | [output:magnetics-b_field_tor_probe_cc_field] shape=(3, 50000) keep=(3,1,4096) expl_energy=0.7663 eff_dim=12288
+2026-01-21 09:32:08 | INFO | mmt.TuneDCT3D | Wrote tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_4-5/embeddings_overrides/dct3d.yaml
+2026-01-21 09:32:08 | INFO | mmt.TuneDCT3D | Archived tuned embedding overrides to /home/ir-bosc1/git/multi-modal-transformer/scripts_mast/configs/tasks_overrides/task_4-5/embeddings_overrides/history/dct3d_20260121_093208_384068.yaml

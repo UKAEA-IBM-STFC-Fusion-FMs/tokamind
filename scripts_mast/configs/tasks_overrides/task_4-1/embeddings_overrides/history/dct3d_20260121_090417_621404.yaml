@@ -1,15 +1,15 @@
 embeddings:
   per_signal_overrides:
     output:
-      magnetics-b_field_pol_probe_omv_voltage:
+      soft_x_rays-horizontal_cam_lower:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 3
+          keep_h: 18
           keep_w: 1
-          keep_t: 4096
-      magnetics-b_field_tor_probe_cc_field:
+          keep_t: 336
+      soft_x_rays-horizontal_cam_upper:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 3
+          keep_h: 18
           keep_w: 1
-          keep_t: 4096
+          keep_t: 336

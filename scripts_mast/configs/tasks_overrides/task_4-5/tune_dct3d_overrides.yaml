@@ -1,0 +1,17 @@
+# This file defines task-wide overrides that apply to tuning embedding 
+
+
+tune_dct3d:
+ 
+  objective:
+    thresholds:
+      output: 0.999
+    max_budget:
+      output: 12288
+ 
+  search_space:
+    keep_h: [ 1, 2, 4 ]
+    keep_w: [ 1 ]
+    keep_t: [ 2048, 3072, 4096, 6144 ]
+
+
