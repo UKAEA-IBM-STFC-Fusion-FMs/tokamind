@@ -295,6 +295,43 @@ def load_experiment_config(
     if phase == "eval" and merged.get("eval_id") is None:
         merged["eval_id"] = merged["paths"].get("eval_id")
 
+    # ------------------------------------------------------------------
+    # Eval: rebuild the model spec from the *source run* saved config.
+    #
+    # Rationale: evaluation should be robust to config drift. If a user changes
+    # model/embedding settings in finetune but forgets to mirror them in eval
+    # configs, evaluation would instantiate a different model and checkpoint
+    # loading may fail. For eval we therefore load the trained run's YAML and
+    # take the model + embeddings blocks.
+    #
+    # If the source config is missing, we error (no silent fallbacks).
+    # ------------------------------------------------------------------
+    if phase == "eval":
+        model_run_dir = Path(merged["paths"]["model_run_dir"])
+
+        # By convention we save the merged config as: runs/<run_id>/<run_id>.yaml
+        src_cfg_path = model_run_dir / f"{model_run_dir.name}.yaml"
+
+        if not src_cfg_path.is_file():
+            raise FileNotFoundError(
+                "Evaluation requires the source run config YAML to be present so we can "
+                "rebuild the exact trained model spec.\n"
+                f"Looked for: {src_cfg_path}\n"
+            )
+
+        src_cfg = _load_yaml(src_cfg_path)
+
+        if "model" not in src_cfg or "embeddings" not in src_cfg:
+            raise KeyError(
+                "Source run config YAML is missing required keys for evaluation. "
+                "Expected at least 'model' and 'embeddings'.\n"
+                f"path={src_cfg_path}"
+            )
+
+        # Overwrite potentially stale eval-side definitions.
+        merged["model"] = copy.deepcopy(src_cfg["model"])
+        merged["embeddings"] = copy.deepcopy(src_cfg["embeddings"])
+
     # Resolve model_source.run_dir to absolute path (if present)
     if isinstance(merged.get("model_source"), dict):
         model_dir = merged["model_source"].get("run_dir", None)

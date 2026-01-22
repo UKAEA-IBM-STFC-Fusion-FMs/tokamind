@@ -26,6 +26,13 @@ model_source:
 
 Evaluation loads the **best** checkpoint if present, otherwise it falls back to the latest checkpoint.
 
+During evaluation, the loader rebuilds the model using the **saved training config** from the source run directory:
+
+- `runs/<training_run_id>/<training_run_id>.yaml`
+
+This avoids checkpoint mismatches if `model` / `embeddings` settings drift between finetune and eval configs.
+If the file is missing, evaluation raises an error.
+
 ---
 
 ## Output location
@@ -34,7 +41,7 @@ Eval outputs are written under the training run directory:
 
 ```
 runs/<training_run_id>/<eval_id>/
-  config_merged.yaml
+  <eval_id>.yaml
   metrics/
   traces/
 ```

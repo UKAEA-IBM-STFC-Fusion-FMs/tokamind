@@ -306,7 +306,7 @@ Outputs go to:
 
 ```text
 <repo_root>/runs/<run_id>/
-  config_merged.yaml
+  <run_id>.yaml
   checkpoints/
   logs/
   ...
@@ -316,12 +316,16 @@ Outputs go to:
 Eval outputs go next to the training run:
 
 ```text
-<model_source.run_dir>/<eval_id>/
-  config_merged.yaml
+<repo_root>/runs/<training_run_id>/<eval_id>/
+  <eval_id>.yaml
   metrics/
   traces/
   eval.log
 ```
+
+Note: during **evaluation**, the loader rebuilds the model using the saved training config at
+`<repo_root>/runs/<training_run_id>/<training_run_id>.yaml` so you do not need to duplicate
+`model` / `embeddings` settings in eval YAMLs.
 
 ### tune_dct3d
 Tuning writes its main artifact directly into the task folder:
