@@ -11,7 +11,6 @@
 #   <model_source.run_dir>/<eval_id>/   (or eval__<timestamp> if eval_id is omitted)
 
 
-
 model_source:
   run_dir: null   # REQUIRED for eval; set in task eval overrides
 
@@ -27,7 +26,6 @@ data:
     max_windows:
       train: null
       val: null
-
 
 
 preprocess:

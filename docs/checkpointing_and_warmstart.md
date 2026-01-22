@@ -105,9 +105,12 @@ This is the recommended workflow for:
 
 In the config system, the source run is specified by:
 
+`model_source.run_dir` is the **run id** (folder name under `runs/`), not a path.
+
+
 ```yaml
 model_source:
-  run_dir: "runs/some_previous_run"
+  run_dir: "some_previous_run"
   load_parts:
     token_encoder: true
     backbone: true
@@ -170,7 +173,7 @@ model_source:
 ### 2) Finetune from a pretrained run (common)
 ```yaml
 model_source:
-  run_dir: "runs/pretrain_some_task"
+  run_dir: "pretrain_some_task"
   load_parts:
     token_encoder: true
     backbone: true
@@ -181,7 +184,7 @@ model_source:
 ### 3) Warm-start backbone only (re-learn token projections / heads)
 ```yaml
 model_source:
-  run_dir: "runs/pretrain_some_task"
+  run_dir: "pretrain_some_task"
   load_parts:
     token_encoder: false
     backbone: true

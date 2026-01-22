@@ -67,6 +67,34 @@ def _resolve_from_repo_root(rel_or_abs: str) -> Path:
     return (get_repo_root() / p).resolve()
 
 
+def _resolve_run_id_to_run_dir(run_id: str) -> Path:
+    """Resolve a training run id to an absolute run directory path.
+
+    Convention: all training runs live under ``<repo_root>/runs/<run_id>/``.
+
+    Notes
+    -----
+    - ``run_id`` must be a *single* path component (no slashes).
+    - Do not pass ``runs/<run_id>``; pass only ``<run_id>``.
+    """
+    s = str(run_id).strip()
+    if not s:
+        raise ValueError(
+            "model_source.run_dir must be a non-empty run id (folder name under <repo_root>/runs/)."
+        )
+
+    p = Path(s)
+
+    # Enforce "run id only" (no relative/absolute paths).
+    if p.is_absolute() or len(p.parts) != 1:
+        raise ValueError(
+            "model_source.run_dir must be a run id (folder name under <repo_root>/runs/), "
+            "e.g. 'pretrain_base'. Do not include 'runs/' or any path separators."
+        )
+
+    return (get_repo_root() / "runs" / p.parts[0]).resolve()
+
+
 def _load_yaml(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
         return yaml.safe_load(f) or {}
@@ -125,9 +153,9 @@ def _compute_paths(
         model_dir = init_cfg.get("run_dir")
         if model_dir is None:
             raise ValueError(
-                "Eval phase requires model_source.run_dir pointing to a training run."
+                "Eval phase requires model_source.run_dir set to a training run id (folder name under <repo_root>/runs/)."
             )
-        model_dir = _resolve_from_repo_root(str(model_dir))
+        model_dir = _resolve_run_id_to_run_dir(str(model_dir))
 
         eval_id = merged.get("eval_id") or f"{task}__eval__{timestamp}"
         eval_dir = model_dir / eval_id
@@ -272,13 +300,14 @@ def load_experiment_config(
         model_dir = merged["model_source"].get("run_dir", None)
         if model_dir is not None:
             merged["model_source"]["run_dir"] = str(
-                _resolve_from_repo_root(str(model_dir))
+                _resolve_run_id_to_run_dir(str(model_dir))
             )
 
     # Save merged config
     if phase == "tune_dct3d":
-        out_dir = Path(merged["paths"]["tune_dir"])
-        config_name = "tune_dct3d.yaml"
+        out_dir = Path(merged["paths"]["tune_dir"]) / "history"
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+        config_name = f"tune_dct3d_{timestamp}.yaml"
     elif phase == "eval":
         out_dir = Path(merged["paths"]["run_dir"])
         config_name = f"{merged['eval_id']}.yaml"

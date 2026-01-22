@@ -266,9 +266,11 @@ There are two distinct behaviors:
 ### Warm-start (pretrain / finetune)
 Use `model_source.run_dir` (recommended naming) in the phase overrides:
 
+`model_source.run_dir` is the **run id** (folder name under `runs/`), not a path.
+
 ```yaml
 model_source:
-  run_dir: "runs/some_previous_run"
+  run_dir: "some_previous_run"
   load_parts:
     token_encoder: true
     backbone: true
@@ -307,7 +309,7 @@ Outputs go to:
 Eval outputs go next to the training run:
 
 ```text
-<model_source.run_dir>/<eval_id>/
+runs/<training_run_id>/<eval_id>/
   config_merged.yaml
   metrics/
   traces/
@@ -320,6 +322,13 @@ Tuning writes its main artifact directly into the task folder:
 ```text
 scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
 ```
+
+The merged tuning experiment config is also archived (timestamped) under:
+
+```text
+scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/history/tune_dct3d_<timestamp>.yaml
+```
+
 
 ---
 

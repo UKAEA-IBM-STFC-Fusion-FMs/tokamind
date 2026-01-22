@@ -6,8 +6,8 @@
 #   - tighten/relax preprocess.valid_windows thresholds for eval
 
 model_source:
-  # source model directory
-  run_dir: runs/task_4-5_finetune_base
+  # source model directory. It must be in runs/
+  run_dir: task_4-5_finetune_base
 
 # If omitted, loader uses eval__<timestamp>.
 eval_id: eval

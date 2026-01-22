@@ -18,7 +18,7 @@ Recommended config key:
 
 ```yaml
 model_source:
-  run_dir: "runs/<training_run_id>"
+  run_dir: "<training_run_id>"
 ```
 
 > Legacy naming: some configs may use `model_init.model_dir`. The meaning is the same:

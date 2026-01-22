@@ -100,9 +100,8 @@ pip install -e ".[dev]"
 Runs a tiny training loop on synthetic data to demonstrate the core APIs:
 
 ```bash
-python examples/toy_train.py --config /configs/toy.yaml
+python examples/toy_train.py --config examples/configs/toy.yaml
 ```
-with ``--config:`` relative path to where you run the command
 
 ### 2) Run training/evaluation with MAST integration
 
@@ -129,7 +128,7 @@ Evaluate:
 
    ```yaml
    model_source:
-     run_dir: "runs/<training_run_id>"
+     run_dir: "<training_run_id>"
    ```
 
 2. Run:

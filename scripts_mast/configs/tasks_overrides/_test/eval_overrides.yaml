@@ -6,9 +6,9 @@
 #   - tighten/relax preprocess.valid_windows thresholds for eval
 
 model_source:
-  # Path to the TRAINING run directory whose weights will be evaluated.
-  # Example: runs/<task>/<run_name> or runs/<run_id>
-  run_dir: runs/test_train
+  # run_id of the TRAINING run directory whose weights will be evaluated.
+  # Example: <run_id>
+  run_dir: test_train
 
 # Optional: name the eval subfolder. If omitted, loader uses eval__<timestamp>.
 eval_id: eval
