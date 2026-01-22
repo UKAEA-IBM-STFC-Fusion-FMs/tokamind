@@ -78,10 +78,10 @@ def evaluate_metrics(
       <run_dir>/metrics/metrics_summary.csv  (per-output averages)
 
     metrics_full columns:
-      shot_id, window_id, feature_name, RMSE, MSE, MAE, NORM_REF
+      shot_id, window_id, feature_name, RMSE, MSE, MAE
 
     metrics_per_timestamp columns:
-      shot_id, window_id, time_idx, feature_name, RMSE, MSE, MAE, NORM_REF
+      shot_id, window_id, time_idx, feature_name, RMSE, MSE, MAE
 
     Config (compute_metrics_cfg)
     ---------------------------
@@ -123,7 +123,6 @@ def evaluate_metrics(
                 "RMSE",
                 "MSE",
                 "MAE",
-                "NORM_REF"
             ]
         )
 
@@ -140,7 +139,6 @@ def evaluate_metrics(
                 "RMSE",
                 "MSE",
                 "MAE",
-                "NORM_REF",
             ]
         )
 
@@ -173,7 +171,6 @@ def evaluate_metrics(
                         rmse_b = float("nan")
                         mse_b = float("nan")
                         mae_b = float("nan")
-                        norm_ref_b = float("nan")
                     else:
                         true_b = y_true[out][b]
                         pred_b = y_pred[out][b]
@@ -182,7 +179,6 @@ def evaluate_metrics(
                         mse_b = float(np.mean(diff * diff))
                         rmse_b = float(np.sqrt(mse_b))
                         mae_b = float(np.mean(np.abs(diff)))
-                        norm_ref_b = float(np.sqrt(np.mean(true_b * true_b)))
 
                         accum[out][0] += rmse_b
                         accum[out][1] += mse_b
@@ -191,18 +187,16 @@ def evaluate_metrics(
 
                     if wr_full is not None:
                         wr_full.writerow(
-                            [shot_id, window_id, out, rmse_b, mse_b, mae_b, norm_ref_b]
+                            [shot_id, window_id, out, rmse_b, mse_b, mae_b]
                         )
 
                     # Optional per-time metrics for this window/output.
                     # Convention: time is the last axis (..., T).
                     if wr_ts is not None and ok:
                         diff2 = diff.reshape(-1, diff.shape[-1])
-                        true2 = true_b.reshape(-1, true_b.shape[-1])
                         mse_t = np.mean(diff2 * diff2, axis=0)  # (T,)
                         rmse_t = np.sqrt(mse_t)
                         mae_t = np.mean(np.abs(diff2), axis=0)
-                        norm_ref_t = np.sqrt(np.mean(true2 * true2, axis=0))
                         time_ids = range(mse_t.shape[0])
 
                         for t in time_ids:
@@ -215,7 +209,6 @@ def evaluate_metrics(
                                     float(rmse_t[t]),
                                     float(mse_t[t]),
                                     float(mae_t[t]),
-                                    float(norm_ref_t[t]),
                                 ]
                             )
 
