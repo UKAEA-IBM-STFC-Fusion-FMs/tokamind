@@ -10,6 +10,10 @@
 # Outputs are saved under:
 #   <model_source.run_dir>/<eval_id>/   (or eval__<timestamp> if eval_id is omitted)
 
+seed: 54
+
+runtime:
+  debug_logging: false
 
 model_source:
   run_dir: null   # REQUIRED for eval; set in task eval overrides
@@ -18,6 +22,9 @@ model_source:
 eval_id: null
 
 data:
+  local: true         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: null   # None / null → uses all shots
+
   keep_output_native: true
   cache:
     enable: true

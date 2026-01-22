@@ -153,12 +153,14 @@ scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
 
 Configuration is **convention-based** (no pointers inside YAML). The loader merges:
 
-1) `scripts_mast/configs/common/core.yaml`  
-2) `scripts_mast/configs/common/embeddings.yaml`  
-3) `scripts_mast/configs/common/<phase>.yaml`  
-4) `scripts_mast/configs/tasks_overrides/<task>/core_overrides.yaml`  
-5) `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*  
-6) `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required; create an empty file if you do not want task-specific overrides yet)*
+1) `scripts_mast/configs/common/embeddings.yaml`  
+2) `scripts_mast/configs/common/<phase>.yaml`  
+3) `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*  
+4) `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune/eval; create an empty file if you do not want task-specific overrides yet)*
+
+Notes:
+- Each phase config must explicitly define: `seed`, `runtime`, `data.local`, `data.subset_of_shots`.
+- `finetune` and `eval` must set `model_source.run_dir` to a run id under `runs/`.
 
 See:
 - `docs/config_guide.md`

@@ -58,7 +58,7 @@ def parse_args_finetune() -> argparse.Namespace:
     parser.add_argument(
         "--task",
         type=str,
-        default="task_2-1",
+        default="_test",
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
     parser.add_argument(

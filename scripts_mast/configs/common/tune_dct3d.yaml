@@ -10,7 +10,23 @@
 # and tuned encoder parameters should be written to:
 #   scripts_mast/configs/tasks_overrides/<task>/dct3d.yaml   (generated)
 
+seed: 54
+
+runtime:
+  debug_logging: false
+
+data:
+  local: false         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: 5
+
 preprocess:
+  chunk:
+    chunk_length: 0.005          # 5 ms per chunk (placeholder)
+    stride: null                 # null => non-overlapping chunks
+
+  trim_chunks:
+     max_chunks: 50     # maximum number of chunks in the history
+
   valid_windows:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
@@ -19,7 +35,6 @@ preprocess:
 
 tune_dct3d:
   sampling:
-    n_shots: 100
     max_windows: 15000
 
   objective:

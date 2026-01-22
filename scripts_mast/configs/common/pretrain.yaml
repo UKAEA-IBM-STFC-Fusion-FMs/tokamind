@@ -8,6 +8,40 @@
 # - train.resume=true resumes the SAME run_dir (optimizer/scheduler/scaler/RNG/epochs).
 # - model_source.run_dir is a warm-start from a DIFFERENT run (weights only, overlap loading).
 
+seed: 54
+
+runtime:
+  debug_logging: false
+
+# Optional: name the training run folder under runs/. If omitted, loader generates one.
+run_id: null
+
+data:
+  local: true         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: null   # None / null → uses all shots;
+
+  keep_output_native: false
+  cache:
+    enable: true
+    dtype: float16          # or float32
+    num_workers: 32
+    max_windows:
+      train: null
+      val: null
+
+preprocess:
+  chunk:
+    chunk_length: 0.005          # 5 ms per chunk (placeholder)
+    stride: null                 # null => non-overlapping chunks
+
+  trim_chunks:
+     max_chunks: 50     # maximum number of chunks in the history
+
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    window_stride_sec: 0.01
 
 collate:
   p_drop_inputs: 0.2
@@ -20,24 +54,7 @@ collate:
   p_drop_inputs_chunks: 0.2
   p_drop_actuators_chunks: 0.0
 
-data:
-  keep_output_native: false
-  cache:
-    enable: true
-    dtype: float16          # or float32
-    num_workers: 32
-    max_windows:
-      train: null
-      val: null
-
-preprocess:
-  valid_windows:
-    min_valid_inputs_actuators: 1
-    min_valid_outputs: 1
-    min_valid_chunks: 1
-    window_stride_sec: 0.01
-
-# "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
+  # "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
 
 loader:
@@ -47,31 +64,33 @@ loader:
   drop_last: false
   batches_per_epoch: null  # Required only when data.cache.enable=false (streaming)
 
-model_source:
-  # Optional warm-start source run directory.
-  #
-  # - run_dir: null  -> train from scratch
-  # - run_dir: <path> -> warm-start weights from another run (partial/overlap load)
-  #
-  # Overlap loading reuses parameters only when (key, shape) match; missing or
-  # incompatible parameters are initialized. This is different from resume
-  # (resume continues the *same* run_dir with full optimizer/scheduler state).
-  #
-  # Overlap loading allows to:
-  #   - add/remove outputs,
-  #   - add/remove modalities,
-  #   - change some submodule shapes between pretrain and finetune.
-  #
-  # See docs/config_guide.md#warmstart for details.
-  run_dir: null
+model:
+  backbone:
+    d_model: 256
+    n_layers: 6
+    n_heads: 8
+    dim_ff: 1024
+    dropout: 0.1
+    activation: relu
 
-  # Which model parts to warm-start. Defaults to True for all parts if omitted.
-  load_parts:
-    token_encoder: true
-    backbone: true
-    modality_heads: true
-    output_adapters: true
+  modality_heads:
+    timeseries:
+      hidden: 256
+      out_dim: 256
+    profile:
+      hidden: 256
+      out_dim: 256
+    video:
+      hidden: 384
+      out_dim: 256
 
+  output_adapters:
+    hidden_dim:
+      default: 0
+      bucketed:
+        enable: false
+      manual: {}   # manual always wins
+#        equilibrium-pis: 128
 
 train:
   # This is run-level behaviour, not per-stage.
@@ -123,3 +142,92 @@ train:
         backbone: false
         modality_heads: false
         output_adapters: false
+
+
+# ------------------------------
+# MODEL DIMENSIONS:
+# ------------------------------
+
+# BASE ----------------
+#model:
+#  backbone:
+#    d_model: 256
+#    n_layers: 6
+#    n_heads: 8
+#    dim_ff: 1024
+#    dropout: 0.1
+#    activation: relu
+#
+#  modality_heads:
+#    timeseries:
+#      hidden: 256
+#      out_dim: 256
+#    profile:
+#      hidden: 256
+#      out_dim: 256
+#    video:
+#      hidden: 384
+#      out_dim: 256
+#
+#  output_adapters:
+#    hidden_dim:
+#      default: 0
+#      bucketed:
+#        enable: false
+#      manual: {}   # manual always wins
+
+## LARGE ---------------
+#model:
+#  backbone:
+#    d_model: 384
+#    n_layers: 8
+#    n_heads: 12
+#    dim_ff: 1536
+#    dropout: 0.1
+#    activation: relu
+#
+#  modality_heads:
+#    timeseries:
+#      hidden: 384
+#      out_dim: 384
+#    profile:
+#      hidden: 384
+#      out_dim: 384
+#    video:
+#      hidden: 576
+#      out_dim: 384
+#
+#  output_adapters:
+#    hidden_dim:
+#      default: 0
+#      bucketed:
+#        enable: false
+#      manual: {}   # manual always wins
+
+## SMALL ---------------
+#model:
+#  backbone:
+#    d_model: 192
+#    n_layers: 4
+#    n_heads: 6
+#    dim_ff: 768
+#    dropout: 0.1
+#    activation: relu
+#
+#  modality_heads:
+#    timeseries:
+#      hidden: 192
+#      out_dim: 192
+#    profile:
+#      hidden: 192
+#      out_dim: 192
+#    video:
+#      hidden: 288
+#      out_dim: 192
+#
+#  output_adapters:
+#    hidden_dim:
+#      default: 0
+#      bucketed:
+#        enable: false
+#      manual: {}   # manual always wins

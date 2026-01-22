@@ -8,7 +8,7 @@
 model_source:
   # run_id of the TRAINING run directory whose weights will be evaluated.
   # Example: <run_id>
-  run_dir: test_train
+  run_dir: test_pretrain
 
 # Optional: name the eval subfolder. If omitted, loader uses eval__<timestamp>.
 eval_id: eval

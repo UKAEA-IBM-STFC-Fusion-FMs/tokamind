@@ -160,15 +160,9 @@ You still **cannot** warm-start across structural changes that alter the core sh
 
 ## Practical recipes
 
-### 1) Finetune from scratch (no warm-start)
-Set the source run to null / omit it:
-
-```yaml
-model_source:
-  run_dir: null
-```
-
-(or delete the block entirely if your loader supports that).
+### 1) Finetune requires a source run
+In the new config system, `finetune` always requires `model_source.run_dir` (a run id under `runs/`).
+If you want to train a model from scratch, use `pretrain`.
 
 ### 2) Finetune from a pretrained run (common)
 ```yaml
@@ -198,10 +192,11 @@ model_source:
 
 By convention:
 
-- Put warm-start defaults in `common/finetune.yaml` or `common/pretrain.yaml` (as `null`)
+- Put warm-start defaults in `common/pretrain.yaml` (as `null`)
+- For `finetune`, set `model_source.run_dir` in the task's `finetune_overrides.yaml` (required)
 - Set task/run-specific warm-start sources in:
-  - `tasks/<task>/finetune_overrides.yaml`
-  - `tasks/<task>/pretrain_overrides.yaml`
+  - `tasks_overrides/<task>/finetune_overrides.yaml`
+  - `tasks_overrides/<task>/pretrain_overrides.yaml`
 
 This keeps `common/*` task-agnostic and makes runs reproducible.
 

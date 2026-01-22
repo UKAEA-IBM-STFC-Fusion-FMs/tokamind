@@ -26,12 +26,20 @@ model_source:
 
 Evaluation loads the **best** checkpoint if present, otherwise it falls back to the latest checkpoint.
 
-During evaluation, the loader rebuilds the model using the **saved training config** from the source run directory:
+To keep evaluation consistent across models, the config loader rebuilds the **model spec** from the source run's saved merged config:
 
-- `runs/<training_run_id>/<training_run_id>.yaml`
+- `model`
+- `embeddings`
+- `preprocess.chunk` and `preprocess.trim_chunks`
 
-This avoids checkpoint mismatches if `model` / `embeddings` settings drift between finetune and eval configs.
-If the file is missing, evaluation raises an error.
+It reads them from:
+
+```
+runs/<training_run_id>/<training_run_id>.yaml
+```
+
+So your `eval.yaml` / `eval_overrides.yaml` should focus on evaluation knobs (drop lists, metrics, traces, etc.), not architecture.
+
 
 ---
 
@@ -46,7 +54,7 @@ runs/<training_run_id>/<eval_id>/
   traces/
 ```
 
-- `eval_id` can be set in `tasks/<task>/eval_overrides.yaml`.
+- `eval_id` can be set in `tasks_overrides/<task>/eval_overrides.yaml`.
 - If omitted, the loader typically uses a timestamped default like `eval__YYYYMMDD_HHMMSS`.
 
 This keeps all evaluations for a run grouped next to the run.

@@ -6,9 +6,42 @@ This repository uses a **convention-based** configuration system.
 - Dataset/task integration lives under `scripts_mast/`.
 - Runs are configured by selecting a **task** and a **phase**; the loader finds and merges YAML files by convention.
 
-The goal is: **easy reuse of shared defaults** + **small per-task overrides** + **predictable output locations**.
+The goals are: **explicit phase configs** + **small per-task overrides** + **stable model/eval behavior** + **predictable output locations**.
 
 ---
+
+## 0) Configuration design overview
+
+This project intentionally separates **run context** from **model identity**, so that finetuning and evaluation stay consistent across runs.
+
+### Two categories of settings
+
+**A) Run context (explicit in every phase config)**  
+These settings describe *how* to run (and can differ between your laptop and an HPC/GPU node):
+
+- `seed`
+- `runtime.*`
+- `data.local`
+- `data.subset_of_shots` *(may be `null`, but must be present)*
+
+**B) Model identity (anchored to a training run)**  
+These settings define *what* was trained and must not drift between training and evaluation:
+
+- `model` (architecture)
+- `preprocess.chunk` and `preprocess.trim_chunks` (window/token history shape)
+
+### Key rules (no legacy / no core config)
+
+- **pretrain**: defines the base `model` and `preprocess.*`, and writes a merged config to:
+  `runs/<run_id>/<run_id>.yaml`
+- **finetune**: requires `model_source.run_dir` and inherits `model` + `preprocess.chunk/trim_chunks` from the source run config,
+  then applies finetune-side overrides (from `common/finetune.yaml` and `tasks_overrides/<task>/finetune_overrides.yaml`).
+- **eval**: requires `model_source.run_dir` and rebuilds `model`, `embeddings`, and `preprocess.chunk/trim_chunks` from the source run config.
+  Eval-side configs should not redefine these “identity” fields.
+
+This design prevents “config drift” (e.g., changing model knobs in finetune and forgetting to mirror them in eval) and makes eval results comparable across models.
+
+
 
 ## 1) Directory layout
 
@@ -272,7 +305,11 @@ There are two distinct behaviors:
 - **Warm-start** (training phases): start a **new** run directory, optionally initializing from another run.
 - **Resume** (training phases): continue the **same** run directory, including optimizer/scheduler/scaler state.
 
-### Warm-start (pretrain / finetune)
+### Warm-start (training phases)
+
+- For **finetune**, `model_source.run_dir` is **required**.
+- For **pretrain**, `model_source` is typically omitted (train from scratch), but the warm-start mechanism is the same if you choose to use it.
+
 Use `model_source.run_dir` (recommended naming) in the phase overrides:
 
 ```yaml
@@ -313,7 +350,7 @@ Outputs go to:
 ```
 
 ### eval
-Eval outputs go next to the training run:
+Eval outputs go inside the training run folder:
 
 ```text
 <repo_root>/runs/<training_run_id>/<eval_id>/
@@ -322,10 +359,6 @@ Eval outputs go next to the training run:
   traces/
   eval.log
 ```
-
-Note: during **evaluation**, the loader rebuilds the model using the saved training config at
-`<repo_root>/runs/<training_run_id>/<training_run_id>.yaml` so you do not need to duplicate
-`model` / `embeddings` settings in eval YAMLs.
 
 ### tune_dct3d
 Tuning writes its main artifact directly into the task folder:
@@ -456,4 +489,3 @@ This writes `tasks_overrides/<task>/embeddings_overrides/dct3d.yaml`.
 ## 14) Toy example (benchmark-free)
 
 For a benchmark-free smoke run, see the repo’s toy example (synthetic data) under `examples/`.
-

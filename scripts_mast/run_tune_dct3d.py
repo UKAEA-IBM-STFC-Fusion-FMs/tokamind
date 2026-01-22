@@ -115,7 +115,6 @@ def main() -> None:
 
     debug_mode = cfg_mmt.runtime["debug_logging"]
     local_flag = cfg_data.get("local", True)
-    n_shots = cfg_sampling.get("n_shots")
 
     # benchmark task config (with overrides such as subset_of_shots/local)
     cfg_task = load_task_definition(args.task)
@@ -157,7 +156,7 @@ def main() -> None:
 
     # we randomly select n_shots from the train
     train_shots_, _, _ = get_train_test_val_shots(
-        max_index=n_shots,
+        max_index=cfg_data["subset_of_shots"],
         shuffle=True,
         seed=cfg_mmt.seed,
     )

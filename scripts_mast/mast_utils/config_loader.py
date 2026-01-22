@@ -5,22 +5,21 @@ Convention-based config layout (no pointers inside YAML):
 
 scripts_mast/configs/
   common/
-    core.yaml
     embeddings.yaml
-    finetune.yaml
     pretrain.yaml
+    finetune.yaml
     eval.yaml
     tune_dct3d.yaml
+
   tasks_overrides/
     <task>/                                   (one folder per task)
-      core_overrides.yaml                     (optional)
-      finetune_overrides.yaml                 (optional)
       pretrain_overrides.yaml                 (optional)
+      finetune_overrides.yaml                 (optional)
       eval_overrides.yaml                     (optional)
       tune_dct3d_overrides.yaml               (optional)
       embeddings_overrides/
-        dct3d.yaml                            (task-level embedding overrides for DCT3D)
-        vae.yaml                              (task-level embedding overrides for VAE, future)
+        <profile>.yaml                        (task-level embedding overrides; required for
+                                              pretrain/finetune/eval; may be empty)
 
 Embedding profile selection
 ---------------------------
@@ -31,19 +30,44 @@ The loader looks for:
 
 Merge order (later wins)
 ------------------------
-  1) common/core.yaml
-  2) common/embeddings.yaml
-  3) common/<phase>.yaml
-  4) tasks_overrides/<task>/core_overrides.yaml                     (optional)
-  5) tasks_overrides/<task>/<phase>_overrides.yaml                  (optional)
-  6) tasks_overrides/<task>/embeddings_overrides/<profile>.yaml     (required for
+  1) common/embeddings.yaml
+  2) common/<phase>.yaml
+  3) tasks_overrides/<task>/<phase>_overrides.yaml                  (optional)
+  4) tasks_overrides/<task>/embeddings_overrides/<profile>.yaml     (required for
      pretrain/finetune/eval; NOT merged for tune_dct3d)
+
+Required keys (explicit per phase)
+----------------------------------
+To keep configs self-contained and avoid implicit inheritance, each phase config
+must define:
+
+- ``seed``
+- ``runtime`` (mapping; individual keys are user-defined)
+- ``data.local``
+- ``data.subset_of_shots``
+
+Model + preprocess inheritance from model_source
+------------------------------------------------
+To ensure consistent evaluation and avoid config drift:
+
+- ``finetune`` requires ``model_source.run_dir`` (a run id under ``runs/``).
+  The loader loads ``model`` and ``preprocess.chunk``/``preprocess.trim_chunks`` from the
+  source run config YAML (``runs/<run_id>/<run_id>.yaml``), then applies any finetune-side
+  overrides on top.
+
+- ``eval`` requires ``model_source.run_dir`` and rebuilds the model spec from the
+  source run config YAML, taking:
+    - ``model``
+    - ``embeddings``
+    - ``preprocess.chunk`` / ``preprocess.trim_chunks``
+
+  Eval-side YAMLs should not redefine these blocks.
 
 Notes
 -----
 - Benchmark task *definitions* are resolved separately (scripts_mast layer),
   not here.
-- tune_dct3d intentionally does not merge the task-level embedding overrides so
+- ``tune_dct3d`` intentionally does not merge the task-level embedding overrides so
   the tuner always writes deltas relative to common/embeddings.yaml.
 """
 
@@ -110,6 +134,77 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return out
 
 
+def _load_source_run_config_yaml(model_run_dir: Path) -> Dict[str, Any]:
+    """Load the saved merged config YAML for a previous training run."""
+    src_cfg_path = model_run_dir / f"{model_run_dir.name}.yaml"
+    if not src_cfg_path.is_file():
+        raise FileNotFoundError(
+            "Required source run config YAML not found.\n"
+            "Warm-start and evaluation require the saved merged config at:\n"
+            f"  {src_cfg_path}\n"
+        )
+    return _load_yaml(src_cfg_path)
+
+
+def _inherit_preprocess_chunk_trim(
+    merged: Dict[str, Any],
+    src_cfg: Dict[str, Any],
+    *,
+    allow_override: bool,
+) -> None:
+    """Inherit preprocess.chunk and preprocess.trim_chunks from a source config.
+
+    Keeps any other preprocess keys (e.g. preprocess.valid_windows) from the
+    current merged config.
+    """
+    src_pre = src_cfg.get("preprocess")
+    if not isinstance(src_pre, dict):
+        raise KeyError(
+            "Source run config is missing required mapping: 'preprocess'.\n"
+            "Expected 'preprocess.chunk' and 'preprocess.trim_chunks' to be present."
+        )
+    if "chunk" not in src_pre or "trim_chunks" not in src_pre:
+        raise KeyError(
+            "Source run config is missing required keys under 'preprocess'.\n"
+            "Expected: preprocess.chunk and preprocess.trim_chunks"
+        )
+
+    merged_pre = merged.get("preprocess")
+    if merged_pre is None:
+        merged_pre = {}
+        merged["preprocess"] = merged_pre
+    if not isinstance(merged_pre, dict):
+        raise TypeError("Config key 'preprocess' must be a mapping (dict).")
+
+    override_chunk = None
+    override_trim = None
+    if allow_override:
+        override_chunk = copy.deepcopy(merged_pre.get("chunk"))
+        override_trim = copy.deepcopy(merged_pre.get("trim_chunks"))
+
+    merged_pre["chunk"] = copy.deepcopy(src_pre["chunk"])
+    merged_pre["trim_chunks"] = copy.deepcopy(src_pre["trim_chunks"])
+
+    if allow_override:
+        if override_chunk is not None:
+            if isinstance(override_chunk, dict) and isinstance(
+                merged_pre["chunk"], dict
+            ):
+                merged_pre["chunk"] = _deep_merge(merged_pre["chunk"], override_chunk)
+            else:
+                merged_pre["chunk"] = override_chunk
+
+        if override_trim is not None:
+            if isinstance(override_trim, dict) and isinstance(
+                merged_pre["trim_chunks"], dict
+            ):
+                merged_pre["trim_chunks"] = _deep_merge(
+                    merged_pre["trim_chunks"], override_trim
+                )
+            else:
+                merged_pre["trim_chunks"] = override_trim
+
+
 def _compute_paths(
     merged: Dict[str, Any], *, configs_root: Path, task_dir: Path
 ) -> Dict[str, str]:
@@ -147,10 +242,10 @@ def _compute_paths(
             "run_dir": str(run_dir),
         }
 
-    # eval writes into <model_run_dir>/eval/<eval_id>
+    # eval writes into <model_run_dir>/<eval_id>
     if phase == "eval":
         init_cfg = merged.get("model_source", {})
-        model_dir = init_cfg.get("run_dir")
+        model_dir = init_cfg.get("run_dir") if isinstance(init_cfg, dict) else None
         if model_dir is None:
             raise ValueError(
                 "Eval phase requires model_source.run_dir set to a training run id (folder name under <repo_root>/runs/)."
@@ -223,16 +318,14 @@ def load_experiment_config(
     )  # may not exist (OK)
 
     # Required common files
-    core_path = common_dir / "core.yaml"
     embeddings_path = common_dir / "embeddings.yaml"
     phase_common_path = common_dir / f"{phase}.yaml"
 
-    for p in (core_path, embeddings_path, phase_common_path):
+    for p in (embeddings_path, phase_common_path):
         if not p.is_file():
             raise FileNotFoundError(f"Required config not found: {p}")
 
-    # Optional task overrides (all optional)
-    core_overrides_path = tasks_overrides_dir / "core_overrides.yaml"
+    # Optional task overrides
     phase_overrides_path = tasks_overrides_dir / f"{phase}_overrides.yaml"
 
     # Task-level embedding overrides are selected by *profile*
@@ -245,13 +338,8 @@ def load_experiment_config(
         embeddings_overrides_dir.mkdir(parents=True, exist_ok=True)
 
     merged: Dict[str, Any] = {}
-    merged = _deep_merge(merged, _load_yaml(core_path))
     merged = _deep_merge(merged, _load_yaml(embeddings_path))
     merged = _deep_merge(merged, _load_yaml(phase_common_path))
-
-    # Merge optional core overrides
-    if core_overrides_path.is_file():
-        merged = _deep_merge(merged, _load_yaml(core_overrides_path))
 
     # Merge optional phase overrides
     if phase_overrides_path.is_file():
@@ -269,14 +357,14 @@ def load_experiment_config(
             )
         merged = _deep_merge(merged, _load_yaml(embeddings_overrides_path))
 
-    # Enforce task name from CLI/folder selection
+    # Enforce task + phase from CLI
     task_in_yaml = merged.get("task", None)
     if task_in_yaml is not None and str(task_in_yaml) != str(task):
         raise ValueError(
-            f"Task mismatch: requested task='{task}' but an overrides file defines task='{task_in_yaml}'."
+            f"Task mismatch: requested task={task!r} but an overrides file defines task={task_in_yaml!r}."
         )
     merged["task"] = task
-    merged["phase"] = phase  # enforce phase from CLI
+    merged["phase"] = phase
     merged["embeddings_profile"] = emb_profile
 
     # Inject run_id / eval_id if provided
@@ -296,41 +384,57 @@ def load_experiment_config(
         merged["eval_id"] = merged["paths"].get("eval_id")
 
     # ------------------------------------------------------------------
-    # Eval: rebuild the model spec from the *source run* saved config.
+    # Phase-specific inheritance from the *source run config*.
     #
-    # Rationale: evaluation should be robust to config drift. If a user changes
-    # model/embedding settings in finetune but forgets to mirror them in eval
-    # configs, evaluation would instantiate a different model and checkpoint
-    # loading may fail. For eval we therefore load the trained run's YAML and
-    # take the model + embeddings blocks.
-    #
-    # If the source config is missing, we error (no silent fallbacks).
+    # - finetune requires model_source.run_dir and inherits model + preprocess chunk/trim,
+    #   then applies finetune-side overrides on top.
+    # - eval requires model_source.run_dir and rebuilds model + embeddings + preprocess chunk/trim.
     # ------------------------------------------------------------------
-    if phase == "eval":
-        model_run_dir = Path(merged["paths"]["model_run_dir"])
+    if phase in ("finetune", "eval"):
+        init_cfg = merged.get("model_source", {})
+        if not isinstance(init_cfg, dict):
+            raise TypeError("Config key 'model_source' must be a mapping (dict).")
 
-        # By convention we save the merged config as: runs/<run_id>/<run_id>.yaml
-        src_cfg_path = model_run_dir / f"{model_run_dir.name}.yaml"
-
-        if not src_cfg_path.is_file():
-            raise FileNotFoundError(
-                "Evaluation requires the source run config YAML to be present so we can "
-                "rebuild the exact trained model spec.\n"
-                f"Looked for: {src_cfg_path}\n"
+        src_run_id = init_cfg.get("run_dir", None)
+        if src_run_id is None:
+            raise ValueError(
+                f"{phase} phase requires model_source.run_dir set to a training run id (folder name under <repo_root>/runs/)."
             )
 
-        src_cfg = _load_yaml(src_cfg_path)
+        src_run_dir = _resolve_run_id_to_run_dir(str(src_run_id))
+        src_cfg = _load_source_run_config_yaml(src_run_dir)
 
-        if "model" not in src_cfg or "embeddings" not in src_cfg:
+        if "model" not in src_cfg:
             raise KeyError(
-                "Source run config YAML is missing required keys for evaluation. "
-                "Expected at least 'model' and 'embeddings'.\n"
-                f"path={src_cfg_path}"
+                "Source run config YAML is missing required key 'model'.\n"
+                f"path={src_run_dir}/{src_run_dir.name}.yaml"
             )
 
-        # Overwrite potentially stale eval-side definitions.
-        merged["model"] = copy.deepcopy(src_cfg["model"])
-        merged["embeddings"] = copy.deepcopy(src_cfg["embeddings"])
+        if phase == "finetune":
+            # Model: inherit base model spec from source and apply finetune overrides.
+            model_override = copy.deepcopy(merged.get("model", {}))
+            merged["model"] = copy.deepcopy(src_cfg["model"])
+            if model_override:
+                if not isinstance(model_override, dict):
+                    raise TypeError(
+                        "Finetune 'model' overrides must be a mapping (dict)."
+                    )
+
+                merged["model"] = _deep_merge(merged["model"], model_override)
+
+            # Preprocess: inherit chunk/trim from source (keep finetune valid_windows, etc.).
+            _inherit_preprocess_chunk_trim(merged, src_cfg, allow_override=True)
+
+        else:  # eval
+            if "embeddings" not in src_cfg:
+                raise KeyError(
+                    "Source run config YAML is missing required key 'embeddings'.\n"
+                    f"path={src_run_dir}/{src_run_dir.name}.yaml"
+                )
+
+            merged["model"] = copy.deepcopy(src_cfg["model"])
+            merged["embeddings"] = copy.deepcopy(src_cfg["embeddings"])
+            _inherit_preprocess_chunk_trim(merged, src_cfg, allow_override=False)
 
     # Resolve model_source.run_dir to absolute path (if present)
     if isinstance(merged.get("model_source"), dict):

@@ -8,6 +8,33 @@
 # - train.resume=true resumes the SAME run_dir (optimizer/scheduler/scaler/RNG/epochs).
 # - model_source.run_dir is a warm-start from a DIFFERENT run (weights only, overlap loading).
 
+seed: 54
+
+runtime:
+  debug_logging: false
+
+# Optional: name the training run folder under runs/. If omitted, loader generates one.
+run_id: null
+
+data:
+  local: true         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: null   # None / null → uses all shots
+
+  keep_output_native: false
+  cache:
+    enable: true
+    dtype: float16          # or float32; default behavior if omitted is “no cast”
+    num_workers: 8
+    max_windows:
+      train: null
+      val: null
+
+preprocess:
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    window_stride_sec: 0.01  # we override the stride based on different tasks
 
 
 collate:
@@ -21,23 +48,6 @@ collate:
   p_drop_inputs_chunks: 0.05
   p_drop_actuators_chunks: 0.0
 
-data:
-  keep_output_native: false
-  cache:
-    enable: true
-    dtype: float16          # or float32; default behavior if omitted is “no cast”
-    num_workers: 8
-    max_windows:
-      train: null
-      val: null
-
-
-preprocess:
-  valid_windows:
-    min_valid_inputs_actuators: 1
-    min_valid_outputs: 1
-    min_valid_chunks: 1
-    window_stride_sec: 0.01  # we override the stride based on different tasks
 
 # "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
@@ -52,8 +62,8 @@ loader:
 model_source:
   # Optional warm-start source run directory.
   #
-  # - run_dir: null  -> train from scratch
-  # - run_dir: <path> -> warm-start weights from another run (partial/overlap load)
+  # - run_dir: REQUIRED for finetune (set it in tasks_overrides/<task>/finetune_overrides.yaml)
+  # - run_dir: <run_id> -> warm-start weights from another run (partial/overlap load)
   #
   # Overlap loading reuses parameters only when (key, shape) match; missing or
   # incompatible parameters are initialized. This is different from resume

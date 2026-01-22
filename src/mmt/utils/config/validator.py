@@ -90,6 +90,20 @@ REQUIRED_COMMON_FIELDS: List[Tuple[str, type]] = [
     ("task", str),
 ]
 
+# ---------------------------------------------------------------------------
+# Required run-context fields (explicit in phase configs)
+# ---------------------------------------------------------------------------
+
+# These fields are required for *all* phases. They capture execution/runtime knobs
+# that should be explicit in the selected phase config rather than implicitly
+# provided by the loader.
+REQUIRED_RUN_CONTEXT_FIELDS: List[Tuple[str, type]] = [
+    ("seed", int),
+    ("runtime", dict),
+    ("data.local", bool),
+    ("data.subset_of_shots", (int, type(None))),
+]
+
 
 # ---------------------------------------------------------------------------
 # Training validation (same spec as before)
@@ -304,6 +318,21 @@ def _validate_output_adapters_hidden_dim(cfg: Dict[str, Any]) -> None:
     hd["manual"] = {str(k): _hid(v) for k, v in manual.items()}
 
 
+def _validate_required_run_context(cfg: Dict[str, Any]) -> None:
+    """Validate presence and basic types for run-context keys."""
+    # Presence checks
+    for path, _t in REQUIRED_RUN_CONTEXT_FIELDS:
+        val = _get_nested(cfg, path)
+        # Basic type checks (match existing validator style: simple and explicit)
+        if not isinstance(val, _t):
+            raise TypeError(
+                f"Expected type {getattr(_t, '__name__', str(_t))} at '{path}', "
+                f"got {type(val).__name__}."
+            )
+
+    # runtime must be a dict (already checked), but allow empty dict; no further checks here.
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -326,6 +355,7 @@ def validate_config(cfg: Union[Dict[str, Any], Any]) -> None:
             f"Unsupported phase: {phase} (allowed: {sorted(ALLOWED_PHASES)})"
         )
 
+    _validate_required_run_context(cfgd)
     # validate phase-specific config
     if phase in ("pretrain", "finetune"):
         validate_train_config(cfgd)

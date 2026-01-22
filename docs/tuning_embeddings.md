@@ -161,12 +161,10 @@ It is treated as an **auto-generated artifact**.
 
 The config loader typically merges tuned overrides **last**, so they win over defaults:
 
-1. `common/core.yaml`
-2. `common/embeddings.yaml`
-3. `common/<phase>.yaml`
-4. `tasks_overrides/<task>/core_overrides.yaml`
-5. `tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*
-6. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune/eval; not merged during tune_dct3d)*
+1. `common/embeddings.yaml`
+2. `common/<phase>.yaml`
+3. `tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*
+4. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune/eval; not merged during tune_dct3d)*
 
 Note: during `tune_dct3d`, the config loader intentionally does **not** merge the task-level
 `embeddings_overrides/<profile>.yaml` file. This allows the tuner to write deltas relative to
