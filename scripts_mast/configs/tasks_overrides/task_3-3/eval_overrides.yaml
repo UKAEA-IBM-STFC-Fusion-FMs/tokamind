@@ -7,7 +7,7 @@
 
 model_source:
   # source model directory
-  run_dir: runs/task_2-2_finetune_base
+  run_dir: runs/task_3-3_finetune_base
 
 # If omitted, loader uses eval__<timestamp>.
 eval_id: eval

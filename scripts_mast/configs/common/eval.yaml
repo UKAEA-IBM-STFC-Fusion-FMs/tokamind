@@ -23,7 +23,7 @@ data:
   cache:
     enable: true
     dtype: float16          # or float32; default behavior if omitted is “no cast”
-    num_workers: 8
+    num_workers: 32
     max_windows:
       train: null
       val: null
@@ -39,7 +39,7 @@ preprocess:
 
 
 loader:
-  batch_size: 1024
+  batch_size: 512
   num_workers: 0
   drop_last: false
   batches_per_epoch: null   # ignored in evaluation
