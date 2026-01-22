@@ -137,7 +137,7 @@ def save_latest(
     if extra_meta:
         meta.update(extra_meta)
 
-    atomic_save(meta, os.path.join(lat, "meta.json"))
+    atomic_json_save(meta, os.path.join(lat, "meta.json"))
 
 
 def resume_from_latest(
@@ -156,16 +156,39 @@ def resume_from_latest(
     (train.resume = true).
 
     Restores:
-      - model triplet
+      - model quadruplet (token encoder, backbone, heads, adapters)
       - optimizer / scheduler / scaler states
       - RNG state
       - meta.json (epoch, best_val_so_far, etc.)
+
+    Notes
+    -----
+    This function expects run_dir/checkpoints/latest/meta.json to be valid JSON.
+    If it is missing or corrupted, resume fails explicitly.
     """
 
     lat = os.path.join(run_dir, "checkpoints", "latest")
     if not os.path.isdir(lat):
         raise FileNotFoundError(f"No 'latest' checkpoint found: {lat}")
 
+    # Load metadata FIRST so that a corrupted meta.json cannot leave the model
+    # partially resumed while the caller falls back to "start from scratch".
+    meta_path = os.path.join(lat, "meta.json")
+    if not os.path.exists(meta_path):
+        raise FileNotFoundError(f"Missing resume metadata file: {meta_path}")
+
+    try:
+        with open(meta_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+    except (OSError, JSONDecodeError, UnicodeDecodeError) as e:
+        raise ValueError(
+            f"Failed to parse resume metadata (expected JSON): {meta_path}"
+        ) from e
+
+    if not isinstance(meta, dict):
+        raise ValueError(f"Invalid resume metadata (expected a dict): {meta_path}")
+
+    # Now restore the model + training state.
     load_model_quadruplet(
         model,
         lat,
@@ -191,15 +214,6 @@ def resume_from_latest(
     rng_file = os.path.join(lat, "rng.pt")
     if os.path.exists(rng_file):
         restore_rng_state(torch_load_full(rng_file, map_location))
-
-    meta_path = os.path.join(lat, "meta.json")
-    meta = {}
-    if os.path.exists(meta_path):
-        try:
-            with open(meta_path, "r") as f:
-                meta = json.load(f)
-        except (OSError, JSONDecodeError):
-            meta = {}
 
     start_epoch = int(meta.get("epoch", 0)) + 1
     best_val = float(meta.get("best_val_so_far", float("inf")))
