@@ -74,6 +74,22 @@ model_source:
     modality_heads: true
     output_adapters: false
 
+# for finetuning we choose specific output-adapters:
+model:
+  output_adapters:
+    hidden_dim:
+      default: 0
+
+      bucketed:
+        enable: true
+        rules:
+          - {max_out_dim: 64,   hidden: 0}
+          - {max_out_dim: 512,  hidden: 32}
+          - {max_out_dim: 4096, hidden: 64}
+          - {max_out_dim: 8192, hidden: 128}
+          - {max_out_dim: null, hidden: d_model}   # fallback / otherwise
+
+      manual: {}   # {output_name: hidden_int, ...} (always wins)
 
 train:
   # This is run-level behaviour, not per-stage.

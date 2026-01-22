@@ -11,7 +11,6 @@ We deliberately keep validation focused and simple:
   • eval-specific requirements (model_source.run_dir, keep_output_native),
   • tune_dct3d minimal requirements.
 
-No backwards compatibility: the config is expected to be in the new format.
 """
 
 from __future__ import annotations
@@ -238,6 +237,74 @@ def _normalize_load_parts(cfg: Dict[str, Any]) -> None:
 
 
 # ---------------------------------------------------------------------------
+# model.output_adapters.hidden_dim (very simple validation / normalization)
+# ---------------------------------------------------------------------------
+
+
+def _validate_output_adapters_hidden_dim(cfg: Dict[str, Any]) -> None:
+    """Minimal validation for model.output_adapters.hidden_dim.
+
+    Semantics:
+      - fill defaults if missing
+      - coerce ints / 'd_model'
+      - manual always wins
+    """
+    model = cfg.get("model")
+    if not isinstance(model, dict):
+        return
+
+    oa = model.setdefault("output_adapters", {})
+    if oa is None:
+        oa = model["output_adapters"] = {}
+    if not isinstance(oa, dict):
+        raise TypeError("model.output_adapters must be a dict.")
+
+    hd = oa.get("hidden_dim")
+    if hd is None:
+        oa["hidden_dim"] = {
+            "default": 0,
+            "bucketed": {"enable": False, "rules": []},
+            "manual": {},
+        }
+        return
+    if not isinstance(hd, dict):
+        raise TypeError("model.output_adapters.hidden_dim must be a dict.")
+
+    def _hid(v):
+        if v == "d_model":
+            return "d_model"
+        v = int(v)
+        if v < 0:
+            raise ValueError("hidden_dim values must be >= 0 or 'd_model'.")
+        return v
+
+    hd["default"] = _hid(hd.get("default", 0))
+
+    bucketed = hd.get("bucketed") or {}
+    if not isinstance(bucketed, dict):
+        raise TypeError("hidden_dim.bucketed must be a dict.")
+    bucketed["enable"] = bool(bucketed.get("enable", False))
+
+    rules = bucketed.get("rules") or []
+    if not isinstance(rules, list):
+        raise TypeError("hidden_dim.bucketed.rules must be a list.")
+    cleaned = []
+    for r in rules:
+        if not isinstance(r, dict) or "hidden" not in r:
+            continue
+        max_out = r.get("max_out_dim")
+        max_out = None if max_out is None else int(max_out)
+        cleaned.append({"max_out_dim": max_out, "hidden": _hid(r["hidden"])})
+    bucketed["rules"] = cleaned
+    hd["bucketed"] = bucketed
+
+    manual = hd.get("manual") or {}
+    if not isinstance(manual, dict):
+        raise TypeError("hidden_dim.manual must be a dict.")
+    hd["manual"] = {str(k): _hid(v) for k, v in manual.items()}
+
+
+# ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
 
@@ -280,6 +347,9 @@ def validate_config(cfg: Union[Dict[str, Any], Any]) -> None:
             raise ValueError(
                 "data.cache.dtype must be 'float16' or 'float32' (or null)."
             )
+
+    # Model config validation (common to all phases)
+    _validate_output_adapters_hidden_dim(cfgd)
 
 
 def validate_train_config(cfg: Dict[str, Any]) -> None:

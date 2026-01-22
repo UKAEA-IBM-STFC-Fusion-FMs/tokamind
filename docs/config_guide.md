@@ -152,8 +152,17 @@ task: "task_2-1"
 # Optional: task-wide model/data overrides (apply to ALL phases)
 model:
   output_adapters:
-    hidden_overrides:
-      equilibrium-psi: 64
+    hidden_dim:
+      default: 0
+      bucketed:
+        enable: true
+        rules:
+          - {max_out_dim: 64, hidden: 0}
+          - {max_out_dim: 512, hidden: 32}
+          - {max_out_dim: 4096, hidden: 64}
+          - {max_out_dim: null, hidden: d_model}
+      manual:
+        equilibrium-psi: 64
 
 data:
   subset_of_shots: 2
@@ -266,8 +275,6 @@ There are two distinct behaviors:
 ### Warm-start (pretrain / finetune)
 Use `model_source.run_dir` (recommended naming) in the phase overrides:
 
-`model_source.run_dir` is the **run id** (folder name under `runs/`), not a path.
-
 ```yaml
 model_source:
   run_dir: "some_previous_run"
@@ -309,7 +316,7 @@ Outputs go to:
 Eval outputs go next to the training run:
 
 ```text
-runs/<training_run_id>/<eval_id>/
+<model_source.run_dir>/<eval_id>/
   config_merged.yaml
   metrics/
   traces/
@@ -322,13 +329,6 @@ Tuning writes its main artifact directly into the task folder:
 ```text
 scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
 ```
-
-The merged tuning experiment config is also archived (timestamped) under:
-
-```text
-scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/history/tune_dct3d_<timestamp>.yaml
-```
-
 
 ---
 

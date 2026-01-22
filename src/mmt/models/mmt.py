@@ -26,7 +26,7 @@ from mmt.data.signal_spec import SignalSpecRegistry
 
 from .token_encoder import TokenEncoder
 from .modality_heads import ModalityHead
-from .output_adapters import OutputAdapter
+from .output_adapters import OutputAdapter, resolve_output_adapter_hiddens
 from .backbone import Backbone
 
 import logging
@@ -179,8 +179,17 @@ class MultiModalTransformer(nn.Module):
      output_adapters_cfg : dict
          Configuration of output adapters. Example:
              {
-               "hidden_default": 0,
-               "hidden_overrides": {"equilibrium-psi": 32}
+               "hidden_dim": {
+                 "default": 0,
+                 "bucketed": {
+                   "enable": True,
+                   "rules": [
+                     {"max_out_dim": 64, "hidden": 0},
+                     {"max_out_dim": None, "hidden": "d_model"},
+                   ],
+                 },
+                 "manual": {"equilibrium-psi": 32},
+               }
              }
 
      backbone_activation : str
@@ -308,14 +317,16 @@ class MultiModalTransformer(nn.Module):
         # ------------------------------------------------------------------
         # 3) Per-output adapters (from model.output_adapters)
         # ------------------------------------------------------------------
-        hidden_default = int(output_adapters_cfg.get("hidden_default", 0) or 0)
-        hidden_overrides = {
-            str(k): int(v)
-            for k, v in output_adapters_cfg.get("hidden_overrides", {}).items()
-        }
+        hidden_dim_cfg = output_adapters_cfg.get("hidden_dim", None)
+        hidden_by_name = resolve_output_adapter_hiddens(
+            output_specs=output_specs,
+            d_model=d_model,
+            hidden_dim_cfg=hidden_dim_cfg,
+        )
 
         self.output_adapters = nn.ModuleDict()
         self.output_dims: Dict[int, int] = {}
+        self.output_hidden: Dict[int, int] = {}
         # Mapping from signal_id → canonical adapter key "role:name"
         self.output_sid_to_key: Dict[int, str] = {}
 
@@ -332,7 +343,9 @@ class MultiModalTransformer(nn.Module):
                 )
             K_t = int(K_t)
 
-            hidden = hidden_overrides.get(spec.name, hidden_default)
+            hidden = hidden_by_name.get(spec.name, 0)
+
+            self.output_hidden[spec.signal_id] = int(hidden)
 
             # Use a stable canonical key for the adapter name (role:name)
             adapter_key = spec.canonical_key
@@ -367,8 +380,9 @@ class MultiModalTransformer(nn.Module):
         for spec in self.output_specs:
             sid = spec.signal_id
             mod = self.output2modality[sid]
+            hidden = int(self.output_hidden.get(sid, 0))
             logger.info(
-                f"    - {spec.name} (id={sid}, modality={mod}): dim={self.output_dims[sid]}"
+                f"    - {spec.name} (id={sid}, modality={mod}): dim={self.output_dims[sid]}, hidden={hidden}"
             )
 
     # ------------------------------------------------------------------

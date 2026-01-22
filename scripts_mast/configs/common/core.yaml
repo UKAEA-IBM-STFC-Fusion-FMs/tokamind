@@ -60,9 +60,12 @@ model:
       out_dim: 256
 
   output_adapters:
-    hidden_default: 0
-    hidden_overrides: {}   # other task-specific overrides go in tasks_overrides/<task>/task.yaml
-#      equilibrium-psi: 32
+    hidden_dim:
+      default: 0
+      bucketed:
+        enable: false
+      manual: {}   # manual always wins
+#        equilibrium-pis: 128
 
 ## Large Model
 #model:
@@ -86,8 +89,12 @@ model:
 #      out_dim: 384
 #
 #  output_adapters:
-#    hidden_default: 0
-#    hidden_overrides: {}
+#    hidden_dim:
+#      default: 0
+#      bucketed:
+#        enable: false
+#      manual: {}   # manual always wins
+
 
 ## Small Model
 #model:
@@ -111,5 +118,8 @@ model:
 #      out_dim: 192
 #
 #  output_adapters:
-#    hidden_default: 0
-#    hidden_overrides: {}
+#    hidden_dim:
+#      default: 0
+#      bucketed:
+#        enable: false
+#      manual: {}   # manual always wins
