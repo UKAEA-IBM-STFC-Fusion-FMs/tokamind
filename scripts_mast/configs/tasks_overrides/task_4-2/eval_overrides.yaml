@@ -12,3 +12,7 @@ model_source:
 # If omitted, loader uses eval__<timestamp>.
 eval_id: eval
 
+# override to be sure we set the same stride as the task definition
+preprocess:
+  valid_windows:
+    window_stride_sec: null
