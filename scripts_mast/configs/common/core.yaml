@@ -38,27 +38,78 @@ preprocess:
   trim_chunks:
      max_chunks: 50     # maximum number of chunks in the history
 
+## Base Model
 model:
   backbone:
-    d_model: 256 # 192  # 128 256
-    n_layers: 6 #  4   # 2
-    n_heads: 8 # 4    # 2
-    dim_ff: 1024 # 768   # 256
+    d_model: 256
+    n_layers: 6
+    n_heads: 8
+    dim_ff: 1024
     dropout: 0.1
     activation: relu
 
   modality_heads:
     timeseries:
-      hidden: 256  # 192
-      out_dim: 256  # 192
+      hidden: 256
+      out_dim: 256
     profile:
-      hidden: 256  # 192
-      out_dim: 256  # 192
+      hidden: 256
+      out_dim: 256
     video:
-      hidden: 384  # 256
-      out_dim: 256  # 192
+      hidden: 384
+      out_dim: 256
 
   output_adapters:
     hidden_default: 0
     hidden_overrides: {}   # other task-specific overrides go in tasks_overrides/<task>/task.yaml
 #      equilibrium-psi: 32
+
+## Large Model
+#model:
+#  backbone:
+#    d_model: 384
+#    n_layers: 8
+#    n_heads: 12
+#    dim_ff: 1536
+#    dropout: 0.1
+#    activation: relu
+#
+#  modality_heads:
+#    timeseries:
+#      hidden: 384
+#      out_dim: 384
+#    profile:
+#      hidden: 384
+#      out_dim: 384
+#    video:
+#      hidden: 576
+#      out_dim: 384
+#
+#  output_adapters:
+#    hidden_default: 0
+#    hidden_overrides: {}
+
+## Small Model
+#model:
+#  backbone:
+#    d_model: 192
+#    n_layers: 4
+#    n_heads: 6
+#    dim_ff: 768
+#    dropout: 0.1
+#    activation: relu
+#
+#  modality_heads:
+#    timeseries:
+#      hidden: 192
+#      out_dim: 192
+#    profile:
+#      hidden: 192
+#      out_dim: 192
+#    video:
+#      hidden: 288
+#      out_dim: 192
+#
+#  output_adapters:
+#    hidden_default: 0
+#    hidden_overrides: {}
