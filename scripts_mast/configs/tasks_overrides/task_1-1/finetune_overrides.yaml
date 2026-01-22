@@ -18,9 +18,4 @@ preprocess:
   valid_windows:
      window_stride_sec: 0.005
 
-model:
-  output_adapters:
-    hidden_default: 0
-    hidden_overrides: {}
-
 
