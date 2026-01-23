@@ -7,8 +7,8 @@
 
 model_source:
   # source model directory. It must be in runs/
-#  run_dir: task_1-2_finetune_base
-  run_dir: task_1-2_pretrain_base
+  run_dir: task_1-2_finetune_base
+#  run_dir: task_1-2_pretrain_base
 
 # If omitted, loader uses eval__<timestamp>.
 eval_id: eval
