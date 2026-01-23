@@ -45,7 +45,7 @@ preprocess:
 
 loader:
   batch_size: 512
-  num_workers: 0
+  num_workers: 32
   drop_last: false
   batches_per_epoch: null   # ignored in evaluation
 
