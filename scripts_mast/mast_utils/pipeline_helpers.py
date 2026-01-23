@@ -362,7 +362,7 @@ def make_collate_fn(
     in_over = _convert_overrides(
         "input",
         cfg.get("p_drop_inputs_overrides", {}),
-        label="p_droxp_inputs_overrides",
+        label="p_drop_inputs_overrides",
     )
     act_over = _convert_overrides(
         "actuator",
