@@ -83,6 +83,10 @@ import yaml
 from mmt.utils.paths import get_repo_root
 from mmt.utils.config.schema import ExperimentConfig
 
+import logging
+
+logger = logging.getLogger("mmt.ConfigLoader")
+
 
 def _resolve_from_repo_root(rel_or_abs: str) -> Path:
     p = Path(rel_or_abs)
@@ -345,17 +349,19 @@ def load_experiment_config(
     if phase_overrides_path.is_file():
         merged = _deep_merge(merged, _load_yaml(phase_overrides_path))
 
-    # Merge REQUIRED task-level embedding overrides for run phases.
-    # tune_dct3d does NOT merge them so it can write deltas relative to common/embeddings.yaml.
+    # Raise warning if the embeddings overrides are not provided.
+    # We will use the common embeddings.
     if phase != "tune_dct3d":
         if not embeddings_overrides_path.is_file():
-            raise FileNotFoundError(
-                "Missing required task-level embedding overrides file for the selected profile.\n"
-                f"task={task!r}, embeddings_profile={emb_profile!r}\n"
-                f"expected: {embeddings_overrides_path}\n\n"
-                "Create an empty YAML file if you do not want task-specific embedding overrides yet."
+            logger.warning(
+                "[WARNING] Missing task-level embedding overrides for profile=%s (task=%s). "
+                "Proceeding without per-signal overrides. Expected: %s",
+                emb_profile,
+                task,
+                embeddings_overrides_path,
             )
-        merged = _deep_merge(merged, _load_yaml(embeddings_overrides_path))
+        else:
+            merged = _deep_merge(merged, _load_yaml(embeddings_overrides_path))
 
     # Enforce task + phase from CLI
     task_in_yaml = merged.get("task", None)
