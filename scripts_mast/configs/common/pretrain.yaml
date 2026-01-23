@@ -54,7 +54,7 @@ collate:
   p_drop_inputs_chunks: 0.2
   p_drop_actuators_chunks: 0.0
 
-  # "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
+# "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
 
 loader:
