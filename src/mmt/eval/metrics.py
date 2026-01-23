@@ -178,7 +178,7 @@ def evaluate_metrics(
                     logger.info("Evaluated %d windows so far", n_windows)
 
                 for out in stats.keys():
-                    ok = bool(y_mask[out][b])
+                    ok = (out in y_mask) and bool(y_mask[out][b])
                     if not ok:
                         rmse_b = float("nan")
                         mse_b = float("nan")
