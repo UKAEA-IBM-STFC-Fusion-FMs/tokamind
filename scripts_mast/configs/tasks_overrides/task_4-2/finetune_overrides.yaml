@@ -16,4 +16,4 @@ run_id: task_4-2_finetune_base
 
 preprocess:
   valid_windows:
-     window_stride_sec: 0.01
+     window_stride_sec: 0.02
