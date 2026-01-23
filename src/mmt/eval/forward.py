@@ -39,7 +39,7 @@ def forward_decode_native(
     stats: Dict[str, Dict[str, float]],
     codecs: Dict[str, Any],
     id_to_name: Dict[int, str],
-    amp_enabled: bool = True
+    amp_enabled: bool = True,
 ) -> Tuple[
     Dict[str, np.ndarray],  # y_true_native
     Dict[str, np.ndarray],  # y_pred_native
@@ -129,9 +129,16 @@ def forward_decode_native(
     }
 
     # 3) torch → NumPy (CPU)
-    y_true_std = {k: v.detach().cpu().numpy() for k, v in y_true_t.items()}
-    y_mask = {k: v.detach().cpu().numpy().astype(bool) for k, v in y_mask_t.items()}
-    y_pred_std = {k: v.detach().cpu().numpy() for k, v in y_pred_std_t.items()}
+    def _tensor_to_numpy(t: torch.Tensor) -> np.ndarray:
+        t = t.detach().cpu()
+        # NumPy does not support bfloat16; cast to float32 for safe export.
+        if t.dtype == torch.bfloat16:
+            t = t.float()
+        return t.numpy()
+
+    y_true_std = {k: _tensor_to_numpy(v) for k, v in y_true_t.items()}
+    y_mask = {k: v.detach().cpu().bool().numpy() for k, v in y_mask_t.items()}
+    y_pred_std = {k: _tensor_to_numpy(v) for k, v in y_pred_std_t.items()}
 
     # 4) Decode + destandardise predictions
     y_pred_native = decode_and_destandardize(
