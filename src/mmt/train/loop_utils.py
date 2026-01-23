@@ -1,17 +1,15 @@
 """
 loop_utils.py — Runtime utilities for MMT train loop.
 
-This module groups all runtime helpers used by the finetuning and
-pretraining loops:
+This module groups runtime helpers used by the finetuning and pretraining loops:
 
     • Moving collated batches to device (CPU/GPU/MPS)
-    • Determining which outputs are active in a batch
     • Logging train setup
     • Extracting LR from param groups
     • Running a full train or validation epoch
     • AMP-safe backward + grad accumulation
 
-It contains NO global configuration logic (handled in config_validation.py),
+It contains NO global configuration logic (handled in config validation),
 and NO optimizer construction logic (handled in scheduler.py).
 
 The goal is to keep `loop.py` minimal, readable, and focused on the
@@ -19,25 +17,23 @@ high-level orchestration of stages, epochs, checkpoints, and metrics.
 """
 
 from __future__ import annotations
+
 import logging
+import math
+import time
 from typing import Any, Dict, Mapping, Tuple, Hashable, Optional
 
 import torch
 from torch import Tensor
 from torch.optim.lr_scheduler import LRScheduler
-import math
 
 from mmt.utils.amp_utils import amp_ctx_for_model
 from .losses import compute_loss_pred_space
-from .scheduler import toggle_param_groups
-
-import time
 
 logger = logging.getLogger("mmt.Train")
 
 # Max gradient norm for clipping (matches original loop.py behaviour)
 _MAX_GRAD_NORM = 1.0
-
 
 # How many batch-level timing lines to show at INFO during the *first* global epoch.
 # If DEBUG logging is enabled, we will log timing for every batch at DEBUG.
@@ -55,19 +51,7 @@ def _maybe_log_batch_timing(
     dt_backward: Optional[float],
     dt_opt: Optional[float],
 ) -> None:
-    """Log per-batch timing without spamming INFO logs.
-
-    Behavior
-    --------
-    - If DEBUG logging is enabled: log every batch at DEBUG.
-    - Otherwise: log only the first few batches of the first global epoch at INFO.
-
-    Notes
-    -----
-    - `epoch_global` is optional to preserve backwards compatibility; if omitted,
-      we treat it as the first epoch (so you still get a small amount of timing
-      information at INFO).
-    """
+    """Log per-batch timing without spamming INFO logs."""
     if logger.isEnabledFor(logging.DEBUG):
         level = logging.DEBUG
     else:
@@ -103,10 +87,10 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
 
     Notes
     -----
-    • On MPS we force synchronous copies (non_blocking=False). This avoids
-      rare metadata corruption observed with num_workers=0.
-    • On CUDA we use non_blocking=True only when the source tensor is CPU
-      pinned memory (otherwise it provides no benefit).
+    • On MPS we force synchronous copies (non_blocking=False). This avoids rare
+      metadata corruption observed with num_workers=0.
+    • On CUDA we use non_blocking=True only when the source tensor is CPU pinned
+      memory (otherwise it provides no benefit).
     """
     if device.type == "cpu":
         return batch
@@ -180,7 +164,7 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
                 )
         batch["output_emb"] = new_oe
 
-    # Output: masks
+    # Output masks
     output_mask = batch.get("output_mask", None)
     if isinstance(output_mask, dict):
         batch["output_mask"] = {k: _to(v) for k, v in output_mask.items()}
@@ -194,39 +178,12 @@ def move_batch_to_device(batch: Dict[str, Any], device: torch.device) -> Dict[st
 
 
 # ======================================================================
-# Active outputs / LR helpers
+# LR helpers
 # ======================================================================
 
 
-def active_outputs_from_mask(output_mask: Mapping[Hashable, Tensor]) -> set[Hashable]:
-    """
-    Determine which output keys have at least one supervised sample in
-    this batch. These keys drive the automatic per-output LR toggling.
-
-    Parameters
-    ----------
-    output_mask : dict
-        Mapping from output_key -> BoolTensor(B,).
-
-    Returns
-    -------
-    set
-        A set of output keys with output_mask[k].any() == True.
-    """
-    active = set()
-    for key, mask in output_mask.items():
-        if mask.dtype != torch.bool:
-            raise RuntimeError(f"output_mask[{key!r}] must be a bool tensor.")
-        if bool(mask.any()):
-            active.add(key)
-    return active
-
-
 def backbone_lr(optimizer: torch.optim.Optimizer) -> Optional[float]:
-    """
-    Return the current learning rate of the backbone param group.
-    Used for logging.
-    """
+    """Return the current learning rate of the backbone param group (for logging)."""
     for g in optimizer.param_groups:
         if g.get("group_type") == "backbone":
             return float(g.get("lr", 0.0))
@@ -247,9 +204,7 @@ def log_train_setup(
     stages: list[Dict[str, Any]],
     train_cfg: Dict[str, Any],
 ) -> None:
-    """
-    Compact logging of device, AMP, parameters, loss weights, and stage definitions.
-    """
+    """Compact logging of device, AMP, parameters, loss weights, and stage definitions."""
     n_params = sum(p.numel() for p in model.parameters())
     n_trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -259,7 +214,7 @@ def log_train_setup(
     logger.info("Params       : total=%d, trainable=%d", n_params, n_trainable)
     logger.info("Train loader : %d batches/epoch", train_loader_len)
 
-    # --- Loss weights (do not change across stages) ---
+    # Loss weights (do not change across stages)
     loss_cfg = train_cfg.get("loss", {})
     output_weights = loss_cfg.get("output_weights")
     if isinstance(output_weights, dict) and output_weights:
@@ -299,7 +254,6 @@ def run_one_epoch(
     device: torch.device,
     amp_enabled: bool,
     output_weights: Mapping[Hashable, float],
-    output_to_modality: Mapping[Hashable, str],
     grad_accum_steps: int,
     train: bool,
     global_step: int,
@@ -309,68 +263,16 @@ def run_one_epoch(
     """
     Run one epoch over a DataLoader, in either train or eval mode.
 
-    This is the low-level driver used by the high-level loop in loop.py.
-    It is fully agnostic to cached vs streaming datasets; the only extra
-    control is the optional `max_batches` argument.
-
-    Parameters
-    ----------
-    model :
-        The MMT model (nn.Module).
-    loader :
-        A PyTorch DataLoader yielding collated window batches.
-    optimizer : torch.optim.Optimizer or None
-        Required when train=True, ignored when train=False.
-    scheduler : LRScheduler or None
-        Optional LR scheduler, stepped after each optimizer step.
-    scaler : torch.cuda.amp.GradScaler or None
-        Optional AMP scaler (enabled only on CUDA devices).
-    device : torch.device
-        Target device for the batch tensors.
-    amp_enabled : bool
-        Whether to use autocast for forward pass.
-    output_weights : Mapping[Hashable, float]
-        Per-output weights for the prediction-space loss.
-    output_to_modality : Mapping[Hashable, str]
-        Mapping from output-id -> modality string, used by LR toggling.
-    grad_accum_steps : int
-        Number of micro-batches to accumulate before one optimizer step.
-    train : bool
-        If True, run in train mode with optimizer and scheduler steps.
-        If False, run in eval mode (no gradients, no optimizer, no scheduler).
-    global_step : int
-        Current global optimizer-step counter (for logging / schedulers).
-    max_batches : int or None, optional
-        If not None, process at most this many batches from the loader.
-        This is used in STREAMING mode to define an "epoch" by a fixed
-        number of batches rather than a full pass over an IterableDataset.
-        In cached mode, this should be left as None to process the full
-        dataloader.
-    epoch_global : int or None, optional
-        Global epoch index (1-based). Used only to control *logging verbosity*
-        for per-batch timing lines.
-
-    Returns
-    -------
-    avg_loss : float
-        Mean loss over all processed batches.
-    global_step : int
-        Updated global optimizer-step counter (unchanged in eval mode).
-
     Notes
     -----
-    • When `max_batches` is not None and the loader yields fewer batches
-      than requested (e.g. streaming dataset exhausts early), the loop
-      simply runs over the available batches and stops when the iterator
-      ends.
-    • Timing information is logged per batch when train=True.
+    • In streaming mode, pass `max_batches` to define the epoch length.
+    • We do **not** do per-batch LR toggling. Missing outputs are already masked
+      inside the loss via `output_mask`.
     """
     if train and optimizer is None:
         raise ValueError("optimizer must be provided when train=True.")
 
     model.train(train)
-    if not train:
-        torch.set_grad_enabled(False)
 
     if train:
         optimizer.zero_grad(set_to_none=True)
@@ -379,147 +281,141 @@ def run_one_epoch(
     n_batches = 0
 
     t_before_next = time.perf_counter()
-    for batch_idx, batch in enumerate(loader):
-        t_after_next = time.perf_counter()
 
-        # Early stop for streaming mode
-        if max_batches is not None and batch_idx >= max_batches:
-            break
+    # Ensure gradient enablement is always restored, even on exceptions.
+    with torch.set_grad_enabled(train):
+        for batch_idx, batch in enumerate(loader):
+            t_after_next = time.perf_counter()
 
-        t0 = time.perf_counter()
-        batch = move_batch_to_device(batch, device)
-        t1 = time.perf_counter()
+            # Early stop for streaming mode
+            if max_batches is not None and batch_idx >= max_batches:
+                break
 
-        output_mask = batch["output_mask"]
+            t0 = time.perf_counter()
+            batch = move_batch_to_device(batch, device)
+            t1 = time.perf_counter()
 
-        # Per-batch automatic LR enabling/disabling (train only)
-        if train:
-            active = active_outputs_from_mask(output_mask)
-            toggle_param_groups(
-                optimizer,
-                active_outputs=active,
-                output_to_modality=output_to_modality,
+            output_mask = batch["output_mask"]
+
+            # ----------------------- FORWARD -----------------------
+            with amp_ctx_for_model(model, enable=amp_enabled):
+                out = model(batch)
+                preds = out.get("pred", {})
+
+            # Compute loss outside autocast. The loss function itself forces
+            # float32 computation for AMP stability.
+            loss_t, loss_logs = compute_loss_pred_space(
+                preds=preds,
+                y_true=batch["output_emb"],
+                output_mask=output_mask,
+                output_weights=output_weights,
             )
 
-        # ----------------------- FORWARD -----------------------
-        with amp_ctx_for_model(model, enable=amp_enabled):
-            out = model(batch)
-            preds = out.get("pred", {})
+            # Optional: per-output loss logging (enable with logger level DEBUG).
+            if loss_logs and logger.isEnabledFor(logging.DEBUG):
+                per_out_str = ", ".join(
+                    f"{k}={v:.3e}"
+                    for k, v in sorted(loss_logs.items(), key=lambda kv: str(kv[0]))
+                )
+                logger.debug(
+                    "[LOSS] batch %d (%s) total=%.3e per-output: %s",
+                    batch_idx,
+                    "train" if train else "val",
+                    float(loss_t.detach().cpu().item()),
+                    per_out_str,
+                )
 
-        # Compute loss outside autocast. The loss function itself also forces
-        # float32 computation for AMP stability.
-        loss_t, loss_logs = compute_loss_pred_space(
-            preds=preds,
-            y_true=batch["output_emb"],
-            output_mask=output_mask,
-            output_weights=output_weights,
-        )
+            # Fail fast on non-finite loss to surface the offending output key.
+            if (not torch.isfinite(loss_t).item()) or any(
+                not math.isfinite(v) for v in loss_logs.values()
+            ):
+                bad_keys = [k for k, v in loss_logs.items() if not math.isfinite(v)]
+                first_bad = bad_keys[0] if bad_keys else None
+                per_out_str = ", ".join(
+                    f"{k}={v:.3e}"
+                    for k, v in sorted(loss_logs.items(), key=lambda kv: str(kv[0]))
+                )
+                logger.error(
+                    "[LOSS] Non-finite loss detected at batch %d (%s). loss=%s first_bad=%r",
+                    batch_idx,
+                    "train" if train else "val",
+                    float(loss_t.detach().cpu().item()),
+                    first_bad,
+                )
+                if per_out_str:
+                    logger.error("[LOSS] Per-output losses: %s", per_out_str)
+                raise RuntimeError(
+                    f"Non-finite loss detected (batch={batch_idx}, train={train}, "
+                    f"first_bad={first_bad!r})."
+                )
 
-        # Optional: per-output loss logging (enable with logger level DEBUG).
-        if loss_logs and logger.isEnabledFor(logging.DEBUG):
-            per_out_str = ", ".join(
-                f"{k}={v:.3e}"
-                for k, v in sorted(loss_logs.items(), key=lambda kv: str(kv[0]))
-            )
-            logger.debug(
-                "[LOSS] batch %d (%s) total=%.3e per-output: %s",
-                batch_idx,
-                "train" if train else "val",
-                float(loss_t.detach().cpu().item()),
-                per_out_str,
-            )
-
-        # Fail fast on non-finite loss to surface the offending output key.
-        if (not torch.isfinite(loss_t).item()) or any(
-            not math.isfinite(v) for v in loss_logs.values()
-        ):
-            bad_keys = [k for k, v in loss_logs.items() if not math.isfinite(v)]
-            first_bad = bad_keys[0] if bad_keys else None
-            per_out_str = ", ".join(
-                f"{k}={v:.3e}"
-                for k, v in sorted(loss_logs.items(), key=lambda kv: str(kv[0]))
-            )
-            logger.error(
-                "[LOSS] Non-finite loss detected at batch %d (%s). loss=%s first_bad=%r",
-                batch_idx,
-                "train" if train else "val",
-                float(loss_t.detach().cpu().item()),
-                first_bad,
-            )
-            if per_out_str:
-                logger.error("[LOSS] Per-output losses: %s", per_out_str)
-            raise RuntimeError(
-                f"Non-finite loss detected (batch={batch_idx}, train={train}, "
-                f"first_bad={first_bad!r})."
-            )
-
-        if train and grad_accum_steps > 1:
-            loss_for_backprop = loss_t / float(grad_accum_steps)
-        else:
-            loss_for_backprop = loss_t
-        t2 = time.perf_counter()
-
-        # ----------------------- BACKWARD ----------------------
-        t3, t4 = 0, 0
-        if train:
-            if scaler is not None and scaler.is_enabled():
-                scaler.scale(loss_for_backprop).backward()
+            if train and grad_accum_steps > 1:
+                loss_for_backprop = loss_t / float(grad_accum_steps)
             else:
-                loss_for_backprop.backward()
-            t3 = time.perf_counter()
+                loss_for_backprop = loss_t
+            t2 = time.perf_counter()
 
-            # Gradient accumulation → optimizer step
-            if (batch_idx + 1) % grad_accum_steps == 0:
-                did_step = True
-
+            # ----------------------- BACKWARD ----------------------
+            t3, t4 = 0.0, 0.0
+            if train:
                 if scaler is not None and scaler.is_enabled():
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
-
-                    prev_scale = scaler.get_scale()
-                    scaler.step(optimizer)
-                    scaler.update()
-
-                    # If scale decreased, step was skipped due to inf/nan grads
-                    did_step = scaler.get_scale() >= prev_scale
+                    scaler.scale(loss_for_backprop).backward()
                 else:
-                    torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
-                    optimizer.step()
+                    loss_for_backprop.backward()
+                t3 = time.perf_counter()
 
-                optimizer.zero_grad(set_to_none=True)
+                # Gradient accumulation → optimizer step
+                if (batch_idx + 1) % grad_accum_steps == 0:
+                    did_step = True
 
-                if did_step:
-                    if scheduler is not None:
-                        scheduler.step()
-                    global_step += 1
-                else:
-                    # Optional: log once in a while
-                    logger.warning(
-                        "AMP overflow detected: skipped optimizer/scheduler step."
-                    )
+                    if scaler is not None and scaler.is_enabled():
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(), _MAX_GRAD_NORM
+                        )
 
-            t4 = time.perf_counter()
+                        prev_scale = scaler.get_scale()
+                        scaler.step(optimizer)
+                        scaler.update()
 
-        running_loss += float(loss_t.detach().cpu())
-        n_batches += 1
+                        # If scale decreased, step was skipped due to inf/nan grads
+                        did_step = scaler.get_scale() >= prev_scale
+                    else:
+                        torch.nn.utils.clip_grad_norm_(
+                            model.parameters(), _MAX_GRAD_NORM
+                        )
+                        optimizer.step()
 
-        _maybe_log_batch_timing(
-            batch_idx=batch_idx,
-            epoch_global=epoch_global,
-            train=train,
-            dt_dataloader=t_after_next - t_before_next,
-            dt_move=t1 - t0,
-            dt_forward=t2 - t1,
-            dt_backward=(t3 - t2) if train else None,
-            dt_opt=(t4 - t3) if train else None,
-        )
+                    optimizer.zero_grad(set_to_none=True)
 
-        # update t before next loading
-        t_before_next = time.perf_counter()
+                    if did_step:
+                        if scheduler is not None:
+                            scheduler.step()
+                        global_step += 1
+                    else:
+                        # Optional: log once in a while
+                        logger.warning(
+                            "AMP overflow detected: skipped optimizer/scheduler step."
+                        )
+
+                t4 = time.perf_counter()
+
+            running_loss += float(loss_t.detach().cpu())
+            n_batches += 1
+
+            _maybe_log_batch_timing(
+                batch_idx=batch_idx,
+                epoch_global=epoch_global,
+                train=train,
+                dt_dataloader=t_after_next - t_before_next,
+                dt_move=t1 - t0,
+                dt_forward=t2 - t1,
+                dt_backward=(t3 - t2) if train else None,
+                dt_opt=(t4 - t3) if train else None,
+            )
+
+            # update t before next loading
+            t_before_next = time.perf_counter()
 
     avg_loss = running_loss / max(1, n_batches)
-
-    if not train:
-        torch.set_grad_enabled(True)
-
     return avg_loss, global_step
