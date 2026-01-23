@@ -53,6 +53,8 @@ import logging
 
 logger = logging.getLogger("mmt.Eval")
 
+_LOG_INTERVAL = 50000
+
 # ============================================================================
 # METRICS
 # ============================================================================
@@ -147,6 +149,8 @@ def evaluate_metrics(
         name: [0.0, 0.0, 0.0, 0.0] for name in stats.keys()
     }
 
+    n_windows = 0
+
     with torch.no_grad():
         for batch in dataloader:
             y_true, y_pred, y_mask, shot_ids, window_indices = forward_decode_native(
@@ -164,6 +168,10 @@ def evaluate_metrics(
             for b in range(B):
                 shot_id = int(shot_ids[b])
                 window_id = int(window_indices[b])  # window index
+
+                n_windows += 1
+                if _LOG_INTERVAL > 0 and (n_windows % _LOG_INTERVAL == 0):
+                    logger.info("Evaluated %d windows so far", n_windows)
 
                 for out in stats.keys():
                     ok = bool(y_mask[out][b])
