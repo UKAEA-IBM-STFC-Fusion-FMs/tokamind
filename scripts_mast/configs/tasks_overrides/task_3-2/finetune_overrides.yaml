@@ -16,6 +16,6 @@ run_id: task_3-2_tuned_base
 
 preprocess:
   valid_windows:
-     window_stride_sec: 0.005
+     window_stride_sec: 0.01
 
 

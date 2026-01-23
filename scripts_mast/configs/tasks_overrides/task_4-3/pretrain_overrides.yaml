@@ -8,7 +8,7 @@ run_id: task_4-3_trained_base
 
 preprocess:
   valid_windows:
-     window_stride_sec: 0.005
+     window_stride_sec: 0.02
 
 model:
   output_adapters:
