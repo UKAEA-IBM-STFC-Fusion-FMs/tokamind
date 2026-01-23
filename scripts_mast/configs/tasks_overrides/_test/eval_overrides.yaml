@@ -19,9 +19,6 @@ eval:
     actuators:
     outputs: # ["pf_active-solenoid_current", "summary-ip"]
 
-  metrics:
-    enable: true
-
 #  traces:
 #    enable: false
 #    n_max: 2
