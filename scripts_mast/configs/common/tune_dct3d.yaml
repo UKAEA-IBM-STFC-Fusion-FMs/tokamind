@@ -16,8 +16,8 @@ runtime:
   debug_logging: false
 
 data:
-  local: false         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: 5
+  local: true         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: 100
 
 preprocess:
   chunk:

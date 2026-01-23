@@ -27,7 +27,6 @@ Helpers assume the config layout:
 
     scripts_mast/configs/
     common/
-        core.yaml
         embeddings.yaml                # should contain tuned input+actuator settings
         eval.yaml
         finetune.yaml

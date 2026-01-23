@@ -6,42 +6,51 @@ This repository uses a **convention-based** configuration system.
 - Dataset/task integration lives under `scripts_mast/`.
 - Runs are configured by selecting a **task** and a **phase**; the loader finds and merges YAML files by convention.
 
-The goals are: **explicit phase configs** + **small per-task overrides** + **stable model/eval behavior** + **predictable output locations**.
+The goals are:
+
+- **Explicit phase configs** (no hidden globals)
+- **Small per-task overrides**
+- **Stable model/eval behavior** (no architecture drift at eval time)
+- **Predictable output locations**
 
 ---
 
-## 0) Configuration design overview
+## 0) Design overview: run context vs model identity
 
 This project intentionally separates **run context** from **model identity**, so that finetuning and evaluation stay consistent across runs.
 
-### Two categories of settings
+### A) Run context (explicit in every phase config)
 
-**A) Run context (explicit in every phase config)**  
 These settings describe *how* to run (and can differ between your laptop and an HPC/GPU node):
 
 - `seed`
 - `runtime.*`
 - `data.local`
-- `data.subset_of_shots` *(may be `null`, but must be present)*
+- `data.subset_of_shots` *(may be `null`, but should be present)*
 
-**B) Model identity (anchored to a training run)**  
+### B) Model identity (anchored to a training run)
+
 These settings define *what* was trained and must not drift between training and evaluation:
 
 - `model` (architecture)
-- `preprocess.chunk` and `preprocess.trim_chunks` (window/token history shape)
+- `preprocess.chunk` and `preprocess.trim_chunks` (token history shape)
+- `embeddings` (default codec settings + per-signal overrides)
 
-### Key rules (no legacy / no core config)
+### Key rules
 
-- **pretrain**: defines the base `model` and `preprocess.*`, and writes a merged config to:
+- **pretrain** defines the base `model` and `preprocess.{chunk, trim_chunks}` and writes a merged config snapshot to:
+
   `runs/<run_id>/<run_id>.yaml`
-- **finetune**: requires `model_source.run_dir` and inherits `model` + `preprocess.chunk/trim_chunks` from the source run config,
-  then applies finetune-side overrides (from `common/finetune.yaml` and `tasks_overrides/<task>/finetune_overrides.yaml`).
-- **eval**: requires `model_source.run_dir` and rebuilds `model`, `embeddings`, and `preprocess.chunk/trim_chunks` from the source run config.
-  Eval-side configs should not redefine these “identity” fields.
 
-This design prevents “config drift” (e.g., changing model knobs in finetune and forgetting to mirror them in eval) and makes eval results comparable across models.
+- **finetune** requires `model_source.run_dir` and **inherits `model` + `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
+  Finetune-side YAML should focus on *training settings* (stages, LR/WD, freezing, window selection, etc.).
 
+- **eval** requires `model_source.run_dir` and **rebuilds `model`, `embeddings`, and `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
+  Eval-side YAML should focus on *metrics/traces* and *evaluation window selection*.
 
+This design prevents “config drift” (e.g., changing adapter sizing in finetune but forgetting to mirror it in eval).
+
+---
 
 ## 1) Directory layout
 
@@ -50,23 +59,21 @@ All experiment YAML files live under:
 ```text
 scripts_mast/configs/
   common/
-    core.yaml
     embeddings.yaml
-    finetune.yaml
     pretrain.yaml
+    finetune.yaml
     eval.yaml
     tune_dct3d.yaml
 
   tasks_overrides/
     <task>/
-      core_overrides.yaml      # optional (task-wide overrides)
-      finetune_overrides.yaml        # optional
       pretrain_overrides.yaml        # optional
+      finetune_overrides.yaml        # optional
       eval_overrides.yaml            # optional
       tune_dct3d_overrides.yaml      # optional (rare)
-      embeddings_overrides/              # task-level embedding overrides (selected by profile)
-        <profile>.yaml                  # required for pretrain/finetune/eval (can be empty)
-                                        # (DCT3D tuning writes to: dct3d.yaml)
+      embeddings_overrides/          # task-level embedding overrides (selected by profile)
+        <profile>.yaml               # required for pretrain/finetune/eval (can be empty)
+                                     # (DCT3D tuning writes to: dct3d.yaml by default)
 ```
 
 A **task** is simply a folder under `scripts_mast/configs/tasks_overrides/<task>/`.
@@ -77,10 +84,10 @@ A **task** is simply a folder under `scripts_mast/configs/tasks_overrides/<task>
 
 Supported phases:
 
-- `pretrain` — train from scratch or warm-start, using pretraining task definitions
-- `finetune` — train from scratch or warm-start, using downstream task definitions
+- `pretrain` — train from scratch (or warm-start), using pretraining task definitions
+- `finetune` — warm-start from a trained run, using downstream task definitions
 - `eval` — evaluate a trained run (metrics + optional traces)
-- `tune_dct3d` — tune DCT3D embedding parameters and write `embeddings_overrides/<profile>.yaml` (default: `dct3d`)
+- `tune_dct3d` — tune DCT3D embedding parameters and write `embeddings_overrides/<profile>.yaml` (default profile: `dct3d`)
 
 Each phase has a corresponding runner:
 
@@ -97,70 +104,79 @@ python scripts_mast/run_tune_dct3d.py --task <task>
 
 The loader deep-merges configs in the following order (**later wins**):
 
-1. `common/core.yaml`
-2. `common/embeddings.yaml`
-3. `common/<phase>.yaml`
-4. `tasks_overrides/<task>/core_overrides.yaml`
-5. `tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*
-6. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune/eval; not merged during tune_dct3d)*
+1. `common/embeddings.yaml`
+2. `common/<phase>.yaml`
+3. `tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*
+4. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune/eval; not merged during tune_dct3d)*
 
 ### Deep merge semantics
+
 - Dictionaries merge recursively.
 - Scalars replace.
 - Lists replace (they are **not** concatenated).
+
+### Additional identity-inheritance step (finetune / eval)
+
+After the YAML merge above, **finetune** and **eval** load the source run’s saved snapshot:
+
+- expected file: `runs/<source_run_id>/<source_run_id>.yaml`
+- if missing: **raise an error** (eval/finetune must not guess model shapes)
+
+Then:
+
+- **finetune**: inherits `model` and `preprocess.{chunk, trim_chunks}` from the source snapshot
+- **eval**: inherits `model`, `embeddings`, and `preprocess.{chunk, trim_chunks}` from the source snapshot
 
 ---
 
 ## 4) What goes in each config file
 
-### `common/core.yaml`
-Put **stable, task-agnostic defaults** here:
-
-- `seed`
-- `runtime` info: if `debug_logging` is true, the logger saves more diagnostics
-- global `data` defaults
-  - `local`: if `true` the CSD3 version of the MAST data is loaded -- you need permission to access it 
-  - `subset_of_shots`: number of analyzed shots (set to `null` to include all of them)
-- preprocessing that should not drift across phases (e.g., chunking, trimming)
-- model architecture defaults (`model.backbone`, `model.modality_heads`, adapter defaults)
-
-Do **not** put:
-- `task` / `task_config`
-- phase-specific window-selection thresholds (`preprocess.valid_windows`)
-- run-specific settings (`run_id`, `eval_id`, model weight sources)
-
 ### `common/embeddings.yaml`
+
 Defines default embedding/codec settings:
 
 - `embeddings.defaults` by `(role, modality)`
 - keep `embeddings.per_signal_overrides` empty in common (use `{}`), unless you truly want a global override
 
-Task-specific tuned overrides belong in `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`.
+Task-specific tuned overrides belong in:
 
-### `common/finetune.yaml` and `common/pretrain.yaml`
-Training-phase defaults:
+- `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
 
-- `train.*` (stages, LR/WD, scheduler settings)
-- `loader.*` (batch size, num workers, shuffling)
-- `collate.*` (dropout/masking defaults)
-- `data.cache.*`
-- `preprocess.valid_windows` *(allowed to differ by phase)*
+### `common/pretrain.yaml`
 
-Any task-specific changes should go in:
-- `tasks_overrides/<task>/finetune_overrides.yaml` or
-- `tasks_overrides/<task>/pretrain_overrides.yaml`
+Pretrain defines the *base model identity*:
+
+- **Run context**: `seed`, `runtime.*`, `data.local`, `data.subset_of_shots`
+- **Model identity**: `model`, `preprocess.chunk`, `preprocess.trim_chunks`
+- Training defaults: `train.*`, `loader.*`, `collate.*`, `data.cache.*`, `preprocess.valid_windows`
+
+### `common/finetune.yaml`
+
+Finetune defines *how to adapt a pretrained model*:
+
+- **Run context**: `seed`, `runtime.*`, `data.local`, `data.subset_of_shots`
+- Training defaults: `train.*`, `loader.*`, `collate.*`, `data.cache.*`, `preprocess.valid_windows`
+- Finetune-side model knobs that are intended to be captured in the finetune snapshot (e.g., output adapter policy)
+
+**Do not rely on finetune.yaml to define `model` or `preprocess.{chunk, trim_chunks}`**.
+Those are inherited from `model_source.run_dir`.
 
 ### `common/eval.yaml`
+
 Evaluation defaults:
 
+- **Run context**: `seed`, `runtime.*`, `data.local`, `data.subset_of_shots`
 - `data.keep_output_native: true` (required for metrics/traces)
 - `loader.*` for eval
 - `eval.metrics.*` and `eval.traces.*`
 - `preprocess.valid_windows` *(allowed to differ by phase)*
 
-The training run to evaluate must be provided in `tasks_overrides/<task>/eval_overrides.yaml`.
+The training run to evaluate must be provided in:
+
+- `tasks_overrides/<task>/eval_overrides.yaml`
 
 ### `common/tune_dct3d.yaml`
+
 Tuning defaults:
 
 - `tune_dct3d.sampling.*` (how many shots/windows)
@@ -168,112 +184,39 @@ Tuning defaults:
 - `tune_dct3d.search_space.*` (keep_h/keep_w/keep_t)
 - `preprocess.valid_windows`
 
-Task-specific tuning tweaks (rare) go in `tasks_overrides/<task>/tune_dct3d_overrides.yaml`.
+Task-specific tuning tweaks (rare) go in:
+
+- `tasks_overrides/<task>/tune_dct3d_overrides.yaml`
 
 ---
 
-## 5) Task configs
+## 5) Task overrides
 
-### `tasks_overrides/<task>/core_overrides.yaml`
-This file defines optional task-wide overrides that should apply to *all* phases.
+A task can override phase defaults by adding any of the following (all optional):
 
-Minimal example:
-
-```yaml
-task: "task_2-1"
-
-# Optional: task-wide model/data overrides (apply to ALL phases)
-model:
-  output_adapters:
-    hidden_dim:
-      default: 0
-      bucketed:
-        enable: true
-        rules:
-          - {max_out_dim: 64, hidden: 0}
-          - {max_out_dim: 512, hidden: 32}
-          - {max_out_dim: 4096, hidden: 64}
-          - {max_out_dim: null, hidden: d_model}
-      manual:
-        equilibrium-psi: 64
-
-data:
-  subset_of_shots: 2
-  local: false
-```
-
-**Rule of thumb:**
-- Put **task-wide** overrides here (apply to pretrain/finetune/eval/tune).
-- Put **phase-specific** and **run-specific** overrides in `<phase>_overrides.yaml`.
-
-### Important
-The benchmark-style task definition is inferred **only** from `task`.
-Resolution order:
-
-1) **Benchmark task (preferred)**  
-   If the benchmark package knows the task name, we load it via the benchmark API:
-
-- `MAST_benchmark.tasks.get_task_config(task_name)`
-
-2) **Local task (registry)**  
-   If benchmark does not know the task name (raises `KeyError`), we treat it as a **local** task and load it via a local registry map:
-
-- `LOCAL_TASK_CONFIGS_MAP[task_name]` → path under `scripts_mast/configs/`
-
-The local registry lives in:
-
-- `scripts_mast/mast_utils/task_config.py`
-
-## Adding a NEW task
-
-### A) Adding a benchmark task (already in benchmark)
-
-1. (Optional) Create folder: `scripts_mast/configs/tasks_overrides/<task_name>/`
-2. (Optional) Create `core_overrides.yaml` containing:
-
-```yaml
-task: <task_name>
-```
-
-3. Run:
-
-```bash
-python scripts_mast/run_finetune.py --task <task_name>
-```
-
-No additional YAML paths are required; the benchmark benchmark owns the mapping from task name → YAML.
-
-
-### B) Adding a local task (not in benchmark)
-
-1. Add a benchmark-style YAML under:
-
-- `scripts_mast/configs/local_tasks_def/<task_name>.yaml`
-
-2. Register the task in `LOCAL_TASK_CONFIGS_MAP` in:
-
-- `scripts_mast/mast_utils/task_config.py`
-
-Example:
-
-```python
-LOCAL_TASK_CONFIGS_MAP["my_local_task"] = "local_tasks_def/my_local_task.yaml"
-```
-
-3. (Optional) Create `scripts_mast/configs/tasks_overrides/my_local_task/core_overrides.yaml`:
-
-```yaml
-task: my_local_task
-```
----
-
-## 6) Run-specific overrides
-
-### `run_id` (training)
-To force a deterministic training output folder name, add to the relevant overrides file:
-
-- `tasks_overrides/<task>/finetune_overrides.yaml`
 - `tasks_overrides/<task>/pretrain_overrides.yaml`
+- `tasks_overrides/<task>/finetune_overrides.yaml`
+- `tasks_overrides/<task>/eval_overrides.yaml`
+
+Typical contents:
+
+- `run_id` / `eval_id`
+- `model_source.run_dir` *(required for finetune and eval)*
+- phase-specific `preprocess.valid_windows.window_stride_sec`
+- any task-specific `collate` drop probabilities
+
+If you want a task-wide change to apply to multiple phases, copy it into each relevant `<phase>_overrides.yaml`.
+
+---
+
+## 6) Run ids and output locations
+
+### `run_id` (training phases)
+
+Set in either:
+
+- `tasks_overrides/<task>/pretrain_overrides.yaml`
+- `tasks_overrides/<task>/finetune_overrides.yaml`
 
 Example:
 
@@ -288,29 +231,57 @@ If `run_id` is omitted, the loader creates a timestamped one:
 ```
 
 ### `eval_id` (evaluation)
-To name the eval output folder, set in `tasks_overrides/<task>/eval_overrides.yaml`:
+
+Set in `tasks_overrides/<task>/eval_overrides.yaml`:
 
 ```yaml
 eval_id: "eval_test"
 ```
 
-If omitted, eval defaults to `eval__<timestamp>`.
+If omitted, eval defaults to a timestamped id.
+
+### Output folders
+
+#### pretrain / finetune
+
+```text
+<repo_root>/runs/<run_id>/
+  <run_id>.yaml
+  checkpoints/
+  logs/
+  ...
+```
+
+#### eval
+
+```text
+<repo_root>/runs/<training_run_id>/<eval_id>/
+  <eval_id>.yaml
+  metrics/
+  traces/
+  eval.log
+```
+
+#### tune_dct3d
+
+Tuning writes its main artifact directly into the task folder:
+
+```text
+scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml
+```
 
 ---
 
-## 7) Selecting which weights to load: 
+## 7) Selecting which weights to load (warm-start vs resume)
 
 There are two distinct behaviors:
 
 - **Warm-start** (training phases): start a **new** run directory, optionally initializing from another run.
 - **Resume** (training phases): continue the **same** run directory, including optimizer/scheduler/scaler state.
 
-### Warm-start (training phases)
+### Warm-start (pretrain / finetune)
 
-- For **finetune**, `model_source.run_dir` is **required**.
-- For **pretrain**, `model_source` is typically omitted (train from scratch), but the warm-start mechanism is the same if you choose to use it.
-
-Use `model_source.run_dir` (recommended naming) in the phase overrides:
+Use `model_source.run_dir` (run id under `runs/`) in the phase overrides:
 
 ```yaml
 model_source:
@@ -325,6 +296,7 @@ model_source:
 Warm-start uses **overlap loading**: only parameters with matching *(key, shape)* are copied; the rest remain freshly initialized.
 
 ### Resume (pretrain / finetune)
+
 Use:
 
 ```yaml
@@ -336,42 +308,10 @@ Resume is mutually exclusive with warm-start.
 
 ---
 
-## 8) Output locations
-
-### pretrain / finetune
-Outputs go to:
-
-```text
-<repo_root>/runs/<run_id>/
-  <run_id>.yaml
-  checkpoints/
-  logs/
-  ...
-```
-
-### eval
-Eval outputs go inside the training run folder:
-
-```text
-<repo_root>/runs/<training_run_id>/<eval_id>/
-  <eval_id>.yaml
-  metrics/
-  traces/
-  eval.log
-```
-
-### tune_dct3d
-Tuning writes its main artifact directly into the task folder:
-
-```text
-scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
-```
-
----
-
-## 9) Embeddings and tuning
+## 8) Embeddings and tuning
 
 ### Defaults vs overrides
+
 - `common/embeddings.yaml` defines defaults per `(role, modality)`.
 - `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` contains **only per-signal overrides**.
 
@@ -379,9 +319,8 @@ This file is **required** for `pretrain`, `finetune`, and `eval` for the selecte
 If you do not want task-specific embedding overrides yet, create an empty YAML file at that path.
 (The profile is selected by the phase runners via `--emb_profile`; default: `dct3d`.)
 
-The tuning script `run_tune_dct3d.py` writes `embeddings_overrides/dct3d.yaml` automatically.
-
 ### `embeddings_overrides/<profile>.yaml` format
+
 It should contain only:
 
 ```yaml
@@ -400,92 +339,38 @@ Avoid duplicating defaults in this file.
 
 ---
 
-## 10) Validation rules (what the validator enforces)
+## 9) Common gotchas
 
-### Training (`pretrain`, `finetune`)
-The validator enforces:
+1) **Missing task-level embedding overrides file**
 
-- Required global fields in `train.*` (early stopping, scheduler warmup fraction, stages, etc.).
-- Each stage must define epochs, grad accumulation, lr/wd per block, and freeze flags.
-- `null` lr/wd values inherit from `backbone`.
-- If a block is frozen, lr/wd are forced to 0 (with a warning).
-- If `data.cache.enable == false` (streaming windows), you must set `loader.batches_per_epoch`.
+If you see an error like “Missing required task-level embedding overrides file”, create:
 
-### Evaluation (`eval`)
-The validator enforces:
+- `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
 
-- `data.keep_output_native` must be `true` (required for metrics/traces).
+It can be empty.
 
-(Loading the trained run directory itself is validated by the loader when it computes paths.)
+2) **Finetune/eval run id must be a run id, not a path**
 
----
-
-## 11) Task definition resolution (inferred from `task`)
-
-MMT does **not** store a `task_config:` pointer in YAML anymore.
-
-The benchmark-style task definition is resolved **only** from the task name (`task`)
-by `scripts_mast/mast_utils/task_definition.py`:
-
-1) **Benchmark task (preferred)**  
-   Load by name via the benchmark API:
-   `MAST_benchmark.tasks.get_task_config(task_name)`
-
-2) **Local task (registry)**  
-   If the benchmark does not know the task name (`KeyError`), load by name via a local registry map:
-   `LOCAL_TASK_DEFS_MAP[task_name]` → a YAML path under `scripts_mast/configs/`
-
-Local task definitions typically live under:
-
-- `scripts_mast/configs/local_tasks_def/<task_name>.yaml`
-
----
-
-## 12) Common gotchas
-
-1) **Streaming without batches_per_epoch**
-If `data.cache.enable: false`, you must set `loader.batches_per_epoch` for training.
-
-2) **Empty dict vs null in YAML**
-Prefer explicit empty dicts:
+Use:
 
 ```yaml
-p_drop_inputs_overrides: {}
+model_source:
+  run_dir: "pretrain_base"   # ✅
 ```
 
-If you leave a mapping key blank, YAML may parse it as `null`.
+Not:
 
-3) **Eval must point to a training run**
-Set `model_source.run_dir` in `tasks_overrides/<task>/eval_overrides.yaml`.
-
-4) **Keep output native for eval**
-`data.keep_output_native` must be `true` in eval.
-
-5) **Tune writes to the task folder**
-`tune_dct3d` writes `embeddings_overrides/dct3d.yaml` to `tasks_overrides/<task>/embeddings_overrides/`.
-
----
-
-## 13) Minimal examples
-
-### A) Add a new downstream task
-1. Create `scripts_mast/configs/tasks_overrides/<task_name>/core_overrides.yaml` with `task` and `task_config`.
-2. Optionally add `finetune_overrides.yaml` / `eval_overrides.yaml`.
-3. Run:
-
-```bash
-python scripts_mast/run_finetune.py --task <task_name>
-python scripts_mast/run_eval.py --task <task_name>
+```yaml
+model_source:
+  run_dir: "runs/pretrain_base"   # ❌
 ```
 
-### B) Tune embeddings for a task
-```bash
-python scripts_mast/run_tune_dct3d.py --task <task_name>
-```
-This writes `tasks_overrides/<task>/embeddings_overrides/dct3d.yaml`.
+3) **Eval/finetune requires the source run snapshot YAML**
 
----
+If `runs/<source_run_id>/<source_run_id>.yaml` is missing, evaluation/finetune should fail.
+Copying model knobs into eval config is intentionally avoided.
 
-## 14) Toy example (benchmark-free)
+4) **Streaming windows without `loader.batches_per_epoch`**
 
-For a benchmark-free smoke run, see the repo’s toy example (synthetic data) under `examples/`.
+If `data.cache.enable: false` (streaming), training must define `loader.batches_per_epoch`.
+
