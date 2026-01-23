@@ -7,13 +7,15 @@
 
 model_source:
   # Source training run to warm-start from. If omitted/null, train from scratch.
-  run_dir: pretrain_base
+  run_dir: mmt_base
   # load_parts: { token_encoder: true, backbone: true, modality_heads: true, output_adapters: true }
 
 
 # Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: task_2-3_finetune_base
+run_id: task_2-3_tuned_base
 
 preprocess:
   valid_windows:
      window_stride_sec: 0.005
+
+

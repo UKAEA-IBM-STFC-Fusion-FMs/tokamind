@@ -4,7 +4,7 @@
 # LR/epochs, warm-start settings, etc.).
 
 # Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: task_1-3_pretrain_base
+run_id: task_1-3_trained_base
 
 preprocess:
   valid_windows:
