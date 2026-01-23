@@ -70,14 +70,15 @@ def evaluate_metrics(
     run_dir: Path,
     amp_enabled: bool,
     compute_metrics_cfg: Dict[str, Any] | None = None,
+    task_name: str | None = None,
 ) -> Dict[str, Dict[str, float]]:
     """
     Compute native-space error metrics for all outputs of the task.
 
     Writes:
-      <run_dir>/metrics/metrics_full.csv     (per-shot, per-window, per-output)
-      <run_dir>/metrics/metrics_per_timestamp.csv (per-shot, per-window, per-time, per-output)
-      <run_dir>/metrics/metrics_summary.csv  (per-output averages)
+      <run_dir>/metrics/<task_name>_metrics_full.csv     (per-shot, per-window, per-output)
+      <run_dir>/metrics/<task_name>_metrics_per_timestamp.csv (per-shot, per-window, per-time, per-output)
+      <run_dir>/metrics/<task_name>_metrics_summary.csv  (per-output averages)
 
     metrics_full columns:
       shot_id, window_id, feature_name, RMSE, MSE, MAE
@@ -107,6 +108,9 @@ def evaluate_metrics(
         )
         return {}
 
+    # saving prefix
+    prefix = f"{task_name}_" if task_name else None
+
     # Optional outputs
     f_full = None
     wr_full = None
@@ -114,7 +118,7 @@ def evaluate_metrics(
     wr_ts = None
 
     if per_window:
-        csv_full = metrics_dir / "metrics_per_window.csv"
+        csv_full = metrics_dir / f"{prefix}metrics_per_window.csv"
         f_full = csv_full.open("w", newline="")
         wr_full = csv.writer(f_full)
         wr_full.writerow(
@@ -129,7 +133,7 @@ def evaluate_metrics(
         )
 
     if per_timestamp:
-        csv_ts = metrics_dir / "metrics_per_timestamp.csv"
+        csv_ts = metrics_dir / f"{prefix}metrics_per_timestamp.csv"
         f_ts = csv_ts.open("w", newline="")
         wr_ts = csv.writer(f_ts)
         wr_ts.writerow(
@@ -226,7 +230,7 @@ def evaluate_metrics(
         f_ts.close()
 
     # Summary CSV
-    csv_sum = metrics_dir / "metrics_summary.csv"
+    csv_sum = metrics_dir / f"{prefix}metrics_summary.csv"
     summary: Dict[str, Dict[str, float]] = {}
     with csv_sum.open("w", newline="") as f:
         wr = csv.writer(f)

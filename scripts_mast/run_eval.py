@@ -326,6 +326,7 @@ def main() -> None:
             run_dir=run_dir,
             amp_enabled=amp_enabled,
             compute_metrics_cfg=cfg_compute_metrics,
+            task_name=args.task,
         )
         logger.info("Summary metrics: %s", summary_metrics)
 
