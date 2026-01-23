@@ -64,7 +64,7 @@ eval:
 
   compute_metrics:
     per_window: true
-    per_timestamp: true
+    per_timestamp: false
 
   traces:
     enable: false
