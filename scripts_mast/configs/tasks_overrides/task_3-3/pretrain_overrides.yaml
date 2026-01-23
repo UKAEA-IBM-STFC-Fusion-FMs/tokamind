@@ -9,3 +9,19 @@ run_id: task_3-3_trained_base
 preprocess:
   valid_windows:
      window_stride_sec: 0.005
+
+model:
+  output_adapters:
+    hidden_dim:
+      default: 0
+
+      bucketed:
+        enable: true
+        rules:
+          - {max_out_dim: 64,   hidden: 0}
+          - {max_out_dim: 512,  hidden: 32}
+          - {max_out_dim: 4096, hidden: 64}
+          - {max_out_dim: 8192, hidden: 128}
+          - {max_out_dim: null, hidden: d_model}   # fallback / otherwise
+
+      manual: {}   # {output_name: hidden_int, ...} (always wins)
