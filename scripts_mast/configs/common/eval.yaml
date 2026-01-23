@@ -27,7 +27,7 @@ data:
 
   keep_output_native: true
   cache:
-    enable: true
+    enable: false
     dtype: float16          # or float32; default behavior if omitted is “no cast”
     num_workers: 32
     max_windows:
