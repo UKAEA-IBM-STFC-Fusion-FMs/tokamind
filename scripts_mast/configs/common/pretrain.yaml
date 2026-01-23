@@ -155,7 +155,7 @@ train:
 #    n_layers: 6
 #    n_heads: 8
 #    dim_ff: 1024
-#    dropout: 0.1
+#    dropout: 0.05
 #    activation: relu
 #
 #  modality_heads:
@@ -183,7 +183,7 @@ train:
 #    n_layers: 8
 #    n_heads: 12
 #    dim_ff: 1536
-#    dropout: 0.1
+#    dropout: 0.05
 #    activation: relu
 #
 #  modality_heads:
@@ -211,7 +211,7 @@ train:
 #    n_layers: 4
 #    n_heads: 6
 #    dim_ff: 768
-#    dropout: 0.1
+#    dropout: 0.05
 #    activation: relu
 #
 #  modality_heads:
