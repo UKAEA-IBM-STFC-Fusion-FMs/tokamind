@@ -32,8 +32,6 @@ Design choices
   output_adapters. This keeps the optimizer state compact and avoids brittle
   per-output bookkeeping.
 
-We keep `toggle_param_groups(...)` as a backward-compatible **no-op** so older
-loops that still call it won't break.
 """
 
 from __future__ import annotations
