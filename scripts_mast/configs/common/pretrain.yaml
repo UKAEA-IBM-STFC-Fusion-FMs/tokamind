@@ -105,7 +105,7 @@ train:
     delta: 0.0
 
   amp:
-    enable: false
+    enable: true
 
   loss:
     output_weights: {}
