@@ -146,9 +146,10 @@ def train_finetune(
     # Device, AMP, scaler
     # -------------------------------------------------------------------------
     device, amp_enabled, amp_dtype = get_amp_config(model, enable=amp_enabled)
-    scaler = torch.amp.GradScaler(
-        "cuda", enabled=(device.type == "cuda" and amp_enabled)
-    )
+    use_scaler = device.type == "cuda" and amp_enabled and amp_dtype == torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
+
+    logger.info("AMP enabled=%s dtype=%s scaler=%s", amp_enabled, amp_dtype, use_scaler)
 
     # -------------------------------------------------------------------------
     # Initial reporting
