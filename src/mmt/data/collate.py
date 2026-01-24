@@ -369,7 +369,7 @@ class MMTCollate:
             restored += 1
 
         if restored > 0:
-            logger.warning(
+            logger.debug(
                 "[CollateGuard] Restored 1 token for %d/%d samples after dropout.",
                 restored,
                 B,
