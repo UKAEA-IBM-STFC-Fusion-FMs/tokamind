@@ -115,8 +115,6 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
     if p.is_dir():
         return p.resolve()
 
-    # Otherwise, interpret it as a folder name under VAE_fairmast/src/pipelines/data
-    get_settings = _import_vae_fairmast_symbol(VAE_CONFIG_SETUP_MODULE, "get_settings")
     # The file path of the module is our anchor to locate src/pipelines/
     mod = __import__(VAE_CONFIG_SETUP_MODULE, fromlist=["__file__"])
     mod_file = Path(mod.__file__).resolve()
@@ -232,7 +230,7 @@ def _strip_module_prefix(state_dict: Dict[str, Any]) -> Dict[str, Any]:
 class VAECodec:
     """Codec wrapper around a pretrained VAE_fairmast beta_VAE model."""
 
-    def __init__(self, *, model_dir: str, device: str = "cpu") -> None:
+    def __init__(self, *, model_dir: str, device: str | None = None) -> None:
         self.meta = read_vae_model_meta(model_dir)
         self.latent_dim = int(self.meta.latent_dim)
         self.in_channels = int(self.meta.in_channels)
@@ -244,7 +242,8 @@ class VAECodec:
         )
         beta_VAE = _import_vae_fairmast_symbol(VAE_MODEL_MODULE, VAE_MODEL_CLASS)
 
-        self.device = torch.device(str(device))
+        dev = device if (device is not None and str(device).strip() != "") else "cpu"
+        self.device = torch.device(str(dev))
         settings = get_settings(str(self.meta.config_path))
 
         model = beta_VAE(settings)

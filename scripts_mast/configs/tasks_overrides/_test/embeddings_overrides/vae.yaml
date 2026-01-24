@@ -5,7 +5,7 @@ embeddings:
         encoder_name: vae
         encoder_kwargs:
           model_dir: conv1d_vae_config_coil_current
-          device:
+#          device: cpu
     output:
       pf_active-coil_current:
         encoder_name: vae
