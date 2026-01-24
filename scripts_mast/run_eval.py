@@ -63,13 +63,6 @@ def parse_args_eval() -> argparse.Namespace:
         default="_test",
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
-    parser.add_argument(
-        "--emb_profile",
-        type=str,
-        default="dct3d",
-        help="embeddings_profile chosen for the task: "
-        "scripts_mast/configs/tasks_overrides/embedding_overrides/<emb_profile>",
-    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -87,7 +80,6 @@ def main() -> None:
     cfg_mmt = load_experiment_config(
         task=args.task,
         phase="eval",
-        embeddings_profile=args.emb_profile,
     )
     validate_config(cfg_mmt)
 

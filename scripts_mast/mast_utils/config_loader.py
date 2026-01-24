@@ -19,7 +19,7 @@ scripts_mast/configs/
       tune_dct3d_overrides.yaml               (optional)
       embeddings_overrides/
         <profile>.yaml                        (task-level embedding overrides; required for
-                                              pretrain/finetune/eval; may be empty)
+                                              pretrain/finetune; may be empty)
 
 Embedding profile selection
 ---------------------------
@@ -33,8 +33,8 @@ Merge order (later wins)
   1) common/embeddings.yaml
   2) common/<phase>.yaml
   3) tasks_overrides/<task>/<phase>_overrides.yaml                  (optional)
-  4) tasks_overrides/<task>/embeddings_overrides/<profile>.yaml     (required for
-     pretrain/finetune/eval; NOT merged for tune_dct3d)
+  4) tasks_overrides/<task>/embeddings_overrides/<profile>.yaml     (merged for
+     pretrain/finetune; NOT merged for eval/tune_dct3d)
 
 Required keys (explicit per phase)
 ----------------------------------
@@ -299,7 +299,7 @@ def load_experiment_config(
         Embedding profile key. The loader merges the corresponding task-level
         embedding overrides file:
 
-            tasks_overrides/<task>/embeddings_overrides/<embeddings_profile>.yaml
+            tasks_overrides/<task>/embeddings_overrides/<embeddings_profile>.yaml (pretrain/finetune only)
 
         Default: ``dct3d``.
 
@@ -351,7 +351,7 @@ def load_experiment_config(
 
     # Raise warning if the embeddings overrides are not provided.
     # We will use the common embeddings.
-    if phase != "tune_dct3d":
+    if phase not in ("tune_dct3d", "eval"):
         if not embeddings_overrides_path.is_file():
             logger.warning(
                 "[WARNING] Missing task-level embedding overrides for profile=%s (task=%s). "
@@ -440,6 +440,12 @@ def load_experiment_config(
 
             merged["model"] = copy.deepcopy(src_cfg["model"])
             merged["embeddings"] = copy.deepcopy(src_cfg["embeddings"])
+
+            # For eval, the embedding profile is defined by the source run.
+            # Any CLI/profile selection is ignored to avoid config drift.
+            merged["embeddings_profile"] = src_cfg.get(
+                "embeddings_profile", merged.get("embeddings_profile")
+            )
             _inherit_preprocess_chunk_trim(merged, src_cfg, allow_override=False)
 
     # Resolve model_source.run_dir to absolute path (if present)
