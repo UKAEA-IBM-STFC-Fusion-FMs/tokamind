@@ -127,7 +127,7 @@ train:
       optimizer:
         lr:
           token_encoder: 5e-4           # null: inherit from backbone
-          backbone: 2.5e-45e-4
+          backbone: 2.5e-4
           modality_heads: 5e-4
           output_adapters: 5e-4
         wd:
