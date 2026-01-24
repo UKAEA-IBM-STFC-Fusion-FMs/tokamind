@@ -187,6 +187,7 @@ def main() -> None:
         cfg_task,
         model_specific_transform=mmt_transform_map,
         verbose=True,
+        test_mode=True,
     )
 
     # Optional debug: iterate a single shot to exercise wrapper + transforms
