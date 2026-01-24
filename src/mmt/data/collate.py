@@ -20,6 +20,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional, Tuple
 
+import logging
+
 import numpy as np
 import random
 import torch
@@ -32,6 +34,9 @@ from mmt.constants import (
     PAD_MOD,
     PAD_POS,
 )
+
+
+logger = logging.getLogger("mmt.Collate")
 
 
 def _coerce_overrides_to_int_keys(d: Any, *, name: str) -> Dict[int, float]:
@@ -327,6 +332,48 @@ class MMTCollate:
                         for t in idxs:
                             if role_batch[i, int(t)] == ROLE_ACTUATOR:
                                 _drop_token(i, int(t), kind="actuator")
+
+        # ---------------------------------------------------------------
+        # Guard: ensure at least one valid token remains per sample
+        # ---------------------------------------------------------------
+        # With stochastic per-token/per-chunk dropout (and some inherently
+        # missing signals), it is possible for a sample to end up with *zero*
+        # valid tokens (all PAD_ID). That can trigger NaNs downstream (e.g.,
+        # empty attention sequences). We fix this deterministically by
+        # restoring a single original token (preferably a context token).
+        restored = 0
+        for i in range(B):
+            Li = lengths[i]
+            if Li == 0:
+                continue
+            if np.any(id_batch[i, :Li] != PAD_ID):
+                continue
+
+            # Prefer restoring the first context token if one existed.
+            orig_roles = role_lists[i]
+            candidates = np.where(orig_roles[:Li] == ROLE_CONTEXT)[0]
+            if candidates.size == 0:
+                candidates = np.arange(Li)
+
+            t_restore = int(candidates[0])
+
+            # Restore original metadata for this token.
+            id_batch[i, t_restore] = int(id_lists[i][t_restore])
+            mod_batch[i, t_restore] = int(mod_lists[i][t_restore])
+            role_batch[i, t_restore] = int(role_lists[i][t_restore])
+            pos_batch[i, t_restore] = int(pos_lists[i][t_restore])
+
+            # Mark token as kept (setting both to 1 is safe).
+            input_mask[i, t_restore] = 1
+            actuator_mask[i, t_restore] = 1
+            restored += 1
+
+        if restored > 0:
+            logger.warning(
+                "[CollateGuard] Restored 1 token for %d/%d samples after dropout.",
+                restored,
+                B,
+            )
 
         # ---------------------------------------------------------------
         # 7) Output embeddings + dropout
