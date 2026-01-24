@@ -140,10 +140,10 @@ train:
           modality_heads: 3e-4
           output_adapters: 1e-3
         wd:
-          token_encoder: 0.02
+          token_encoder: 0.01
           backbone: 0.0
-          modality_heads: 0.02
-          output_adapters: 0.02
+          modality_heads: 0.01
+          output_adapters: 0.01
 
       freeze:
         token_encoder: false
