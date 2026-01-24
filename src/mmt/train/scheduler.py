@@ -199,6 +199,9 @@ def build_optimizer_and_scheduler(
             # Avoid exact 0 multiplier (can break some schedulers / logs)
             return max(1e-8, step / float(warmup_steps))
 
+        # constant after warmup
+        # return 1.0
+
         # Cosine decay
         denom = max(1, total_steps - warmup_steps)
         progress = (step - warmup_steps) / float(denom)
