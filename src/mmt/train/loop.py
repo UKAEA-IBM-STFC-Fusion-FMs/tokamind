@@ -354,12 +354,6 @@ def train_finetune(
                 f"no_improve={no_improve_str}"
             )
 
-            if improved:
-                logger.info(
-                    f"[checkpoint] New best @ global_epoch {epoch_global}: "
-                    f"val={best_val:.6f}"
-                )
-
             bb_lr = backbone_lr(optimizer)
 
             # ---------------------------- HISTORY UPDATE -------------------
