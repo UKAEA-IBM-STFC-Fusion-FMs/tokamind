@@ -9,7 +9,7 @@ Provides:
 from __future__ import annotations
 
 from contextlib import nullcontext
-from typing import Optional, Tuple
+from typing import Optional, Tuple, cast
 
 import torch
 import torch.nn as nn
@@ -105,12 +105,14 @@ def sdpa_math_only_ctx():
 
     On CPU (or when CUDA is unavailable), this is a no-op.
     """
-    if torch.cuda.is_available():
-        from torch.backends.cuda import sdp_kernel
 
-        with sdp_kernel(
-            enable_flash=False, enable_mem_efficient=False, enable_math=True
-        ):
+    if torch.cuda.is_available():
+        from torch.nn.attention import sdpa_kernel, SDPBackend
+        from torch._C import _SDPBackend
+
+        backend = cast(_SDPBackend, SDPBackend.MATH)
+        with sdpa_kernel(backend):
             yield
+
     else:
         yield
