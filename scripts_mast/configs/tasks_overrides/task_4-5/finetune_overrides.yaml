@@ -7,15 +7,34 @@
 
 model_source:
   # Source training run to warm-start from. If omitted/null, train from scratch.
-  run_dir: mmt_base
+  run_dir: mmt_tiny_v0
   # load_parts: { token_encoder: true, backbone: true, modality_heads: true, output_adapters: true }
 
 
 # Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: task_4-5_tuned_base
+run_id: tuned_4-5_tiny_v0-0
 
 preprocess:
   valid_windows:
      window_stride_sec: 0.02
 
+loader:
+  batch_size: 256    # <- task specific
 
+# train:
+#   stages:
+#     - name: ft_heads
+#       epochs: 30
+
+#       scheduler:
+#         grad_accum_steps: 2     # <- task specific
+
+#       freeze:
+#         token_encoder: true     # <- task specific
+#         backbone: true
+#         modality_heads: false
+#         output_adapters: false
+
+#       optimizer:
+#         lr:
+#           token_encoder: 0.0    # <- task specific

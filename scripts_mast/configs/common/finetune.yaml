@@ -137,8 +137,8 @@ train:
         lr:
           token_encoder: 5e-5
           backbone: 0.0
-          modality_heads: 3e-4
-          output_adapters: 1e-3
+          modality_heads: 5e-4
+          output_adapters: 5e-3
         wd:
           token_encoder: 0.01
           backbone: 0.0

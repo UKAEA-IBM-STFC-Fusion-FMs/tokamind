@@ -4,7 +4,7 @@
 # LR/epochs, warm-start settings, etc.).
 
 # Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: task_4-1_trained_base
+run_id: trained_4-1_tiny_v0-0
 
 preprocess:
   valid_windows:
@@ -25,3 +25,6 @@ model:
           - {max_out_dim: null, hidden: d_model}   # fallback / otherwise
 
       manual: {}   # {output_name: hidden_int, ...} (always wins)
+
+loader:
+  batch_size: 256    # <- task specific

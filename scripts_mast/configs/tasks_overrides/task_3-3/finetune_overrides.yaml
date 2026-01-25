@@ -7,12 +7,12 @@
 
 model_source:
   # Source training run to warm-start from. If omitted/null, train from scratch.
-  run_dir: mmt_base
+  run_dir: mmt_tiny_v0
   # load_parts: { token_encoder: true, backbone: true, modality_heads: true, output_adapters: true }
 
 
 # Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: task_3-3_tuned_base
+run_id: tuned_3-3_tiny_v0-0
 
 preprocess:
   valid_windows:
