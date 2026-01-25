@@ -81,7 +81,7 @@ model:
       hidden: 256
       out_dim: 256
     video:
-      hidden: 384
+      hidden: 256
       out_dim: 256
 
   output_adapters:
@@ -126,10 +126,10 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 5e-4           # null: inherit from backbone
-          backbone: 2.5e-4
-          modality_heads: 5e-4
-          output_adapters: 5e-4
+          token_encoder: 1e-3           # null: inherit from backbone
+          backbone: 5e-4
+          modality_heads: 1e-3
+          output_adapters: 1e-3
         wd:
           token_encoder: 0.01              # null: inherit from backbone
           backbone: 0.01
@@ -166,7 +166,7 @@ train:
 #      hidden: 256
 #      out_dim: 256
 #    video:
-#      hidden: 384
+#      hidden: 256
 #      out_dim: 256
 #
 #  output_adapters:
@@ -194,7 +194,7 @@ train:
 #      hidden: 384
 #      out_dim: 384
 #    video:
-#      hidden: 576
+#      hidden: 384
 #      out_dim: 384
 #
 #  output_adapters:
@@ -222,7 +222,7 @@ train:
 #      hidden: 192
 #      out_dim: 192
 #    video:
-#      hidden: 288
+#      hidden: 192
 #      out_dim: 192
 #
 #  output_adapters:
