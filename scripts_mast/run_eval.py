@@ -42,7 +42,9 @@ from mmt.utils.config.validator import validate_config
 from mmt.utils import (
     set_seed,
     setup_logging,
+    sdpa_math_only_ctx,
 )
+
 from mmt.data import (
     build_signal_specs,
     build_codecs,
@@ -309,18 +311,19 @@ def main() -> None:
 
     if do_metrics:
         logger.info("Computing metrics in: %s/metrics/", run_dir)
-        summary_metrics = evaluate_metrics(
-            model=model,
-            dataloader=eval_loader,
-            device=device,
-            stats=output_stats,
-            codecs=output_codecs,
-            id_to_name=id_to_name,
-            run_dir=run_dir,
-            amp_enabled=amp_enabled,
-            compute_metrics_cfg=cfg_compute_metrics,
-            task_name=args.task,
-        )
+        with sdpa_math_only_ctx():
+            summary_metrics = evaluate_metrics(
+                model=model,
+                dataloader=eval_loader,
+                device=device,
+                stats=output_stats,
+                codecs=output_codecs,
+                id_to_name=id_to_name,
+                run_dir=run_dir,
+                amp_enabled=amp_enabled,
+                compute_metrics_cfg=cfg_compute_metrics,
+                task_name=args.task,
+            )
         logger.info("Summary metrics: %s", summary_metrics)
 
     if cfg_traces.get("enable", False):
@@ -329,17 +332,18 @@ def main() -> None:
             cfg_traces.get("n_max", 10),
             run_dir,
         )
-        save_traces_for_subset(
-            model=model,
-            dataloader=eval_loader,
-            device=device,
-            stats=output_stats,
-            run_dir=run_dir,
-            codecs=output_codecs,
-            id_to_name=id_to_name,
-            traces_cfg=cfg_traces,
-            amp_enabled=amp_enabled,
-        )
+        with sdpa_math_only_ctx():
+            save_traces_for_subset(
+                model=model,
+                dataloader=eval_loader,
+                device=device,
+                stats=output_stats,
+                run_dir=run_dir,
+                codecs=output_codecs,
+                id_to_name=id_to_name,
+                traces_cfg=cfg_traces,
+                amp_enabled=amp_enabled,
+            )
 
     logger.info("Done.")
 

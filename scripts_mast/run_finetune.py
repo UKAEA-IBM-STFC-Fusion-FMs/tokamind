@@ -41,7 +41,9 @@ from mmt.utils.config.validator import validate_config
 from mmt.utils import (
     set_seed,
     setup_logging,
+    sdpa_math_only_ctx,
 )
+
 from mmt.data import (
     build_signal_specs,
     build_codecs,
@@ -313,14 +315,15 @@ def main() -> None:
     # Finetune
     # ------------------------------------------------------------------
     logging.getLogger("mmt.Train").info("Starting finetuning...")
-    history = train_finetune(
-        model=model,
-        train_loader=dataloader_mmt_train,
-        val_loader=dataloader_mmt_val,
-        run_dir=cfg_mmt.paths["run_dir"],
-        train_cfg=cfg_train,
-        loader_cfg=cfg_loader,
-    )
+    with sdpa_math_only_ctx():
+        history = train_finetune(
+            model=model,
+            train_loader=dataloader_mmt_train,
+            val_loader=dataloader_mmt_val,
+            run_dir=cfg_mmt.paths["run_dir"],
+            train_cfg=cfg_train,
+            loader_cfg=cfg_loader,
+        )
 
     logging.getLogger("mmt.Train").info("%s", history)
 

@@ -14,6 +14,8 @@ from typing import Optional, Tuple
 import torch
 import torch.nn as nn
 
+from contextlib import contextmanager
+
 
 def get_amp_config(
     model: nn.Module,
@@ -80,3 +82,35 @@ def amp_ctx_for_model(
 
     # Fallback: do nothing (no AMP)
     return nullcontext()
+
+
+@contextmanager
+def sdpa_math_only_ctx():
+    """
+    Context manager that forces PyTorch's Scaled Dot-Product Attention (SDPA) to use
+    the "math" backend on CUDA (disables FlashAttention and memory-efficient SDPA).
+
+    Why:
+      - Some CUDA setups can produce NaN/Inf (typically in gradients, sometimes forward)
+        when using Flash or memory-efficient SDPA kernels with bf16/AMP and certain
+        masks/shapes.
+      - Forcing the math backend is slower but tends to be the most numerically stable.
+
+    Usage:
+      Wrap the top-level train/eval call (entrypoints) so it applies to training,
+      validation, and evaluation in a single place.
+
+        with sdpa_math_only_ctx():
+            train_finetune(...)   # or train_pretrain(...), run_eval(...)
+
+    On CPU (or when CUDA is unavailable), this is a no-op.
+    """
+    if torch.cuda.is_available():
+        from torch.backends.cuda import sdp_kernel
+
+        with sdp_kernel(
+            enable_flash=False, enable_mem_efficient=False, enable_math=True
+        ):
+            yield
+    else:
+        yield
