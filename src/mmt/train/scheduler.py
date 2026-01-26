@@ -200,11 +200,14 @@ def build_optimizer_and_scheduler(
         # constant after warmup
         # return 1.0
 
-        # Cosine decay
+        # Cosine with floor (set min_lr_ratio to 0 to have no floor)
+        min_lr_ratio = 0.
         denom = max(1, total_steps - warmup_steps)
         progress = (step - warmup_steps) / float(denom)
         progress = min(max(progress, 0.0), 1.0)
-        return 0.5 * (1.0 + math.cos(math.pi * progress))
+
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))  # in [0, 1]
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
     scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     return optimizer, scheduler
