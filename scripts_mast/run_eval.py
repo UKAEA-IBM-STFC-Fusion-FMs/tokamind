@@ -305,7 +305,8 @@ def main() -> None:
     }
 
     do_metrics = bool(
-        cfg_compute_metrics.get("per_window", False)
+        cfg_compute_metrics.get("summary", False)
+        or cfg_compute_metrics.get("per_window", False)
         or cfg_compute_metrics.get("per_timestamp", False)
     )
 
@@ -325,6 +326,10 @@ def main() -> None:
                 task_name=args.task,
             )
         logger.info("Summary metrics: %s", summary_metrics)
+    else:
+        logger.info(
+            "[eval] compute_metrics: summary, per_window, and per_timestamp are disabled; skipping metrics."
+        )
 
     if cfg_traces.get("enable", False):
         logger.info(

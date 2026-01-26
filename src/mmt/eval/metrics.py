@@ -88,6 +88,8 @@ def evaluate_metrics(
 
     Config (compute_metrics_cfg)
     ---------------------------
+    summary: bool
+        If True, write summary.csv (per-output averages).
     per_window : bool
         If True, write metrics_full.csv (per-window aggregates).
     per_timestamp : bool
@@ -99,14 +101,9 @@ def evaluate_metrics(
     metrics_dir.mkdir(parents=True, exist_ok=True)
 
     cfg = compute_metrics_cfg or {}
-    per_window = bool(cfg.get("per_window", True))
+    return_summary = bool(cfg.get("summary", True))
+    per_window = bool(cfg.get("per_window", False))
     per_timestamp = bool(cfg.get("per_timestamp", False))
-
-    if not (per_window or per_timestamp):
-        logger.info(
-            "[eval] compute_metrics: both per_window and per_timestamp are disabled; skipping metrics."
-        )
-        return {}
 
     # saving prefix
     prefix = f"{task_name}_" if task_name else None
@@ -230,24 +227,25 @@ def evaluate_metrics(
         f_ts.close()
 
     # Summary CSV
-    csv_sum = metrics_dir / f"{prefix}metrics_summary.csv"
     summary: Dict[str, Dict[str, float]] = {}
-    with csv_sum.open("w", newline="") as f:
-        wr = csv.writer(f)
-        wr.writerow(["feature_name", "RMSE", "MSE", "MAE"])
+    if return_summary:
+        csv_sum = metrics_dir / f"{prefix}metrics_summary.csv"
+        with csv_sum.open("w", newline="") as f:
+            wr = csv.writer(f)
+            wr.writerow(["feature_name", "RMSE", "MSE", "MAE"])
 
-        for out, (sum_rmse, sum_mse, sum_mae, count) in accum.items():
-            if count > 0:
-                mean_rmse = sum_rmse / count
-                mean_mse = sum_mse / count
-                mean_mae = sum_mae / count
-            else:
-                mean_rmse = float("nan")
-                mean_mse = float("nan")
-                mean_mae = float("nan")
+            for out, (sum_rmse, sum_mse, sum_mae, count) in accum.items():
+                if count > 0:
+                    mean_rmse = sum_rmse / count
+                    mean_mse = sum_mse / count
+                    mean_mae = sum_mae / count
+                else:
+                    mean_rmse = float("nan")
+                    mean_mse = float("nan")
+                    mean_mae = float("nan")
 
-            summary[out] = {"rmse": mean_rmse, "mse": mean_mse, "mae": mean_mae}
-            wr.writerow([out, mean_rmse, mean_mse, mean_mae])
+                summary[out] = {"rmse": mean_rmse, "mse": mean_mse, "mae": mean_mae}
+                wr.writerow([out, mean_rmse, mean_mse, mean_mae])
 
     return summary
 

@@ -63,6 +63,7 @@ eval:
     outputs: null # ["pf_active-solenoid_current", "summary-ip"]
 
   compute_metrics:
+    summary: true
     per_window: true
     per_timestamp: false
 

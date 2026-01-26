@@ -117,23 +117,25 @@ Enable/disable:
 
 ```yaml
 eval:
-  metrics:
-    enable: true
+ compute_metrics:
+    summary: true
+    per_window: true
+    per_timestamp: false
 ```
 
 Metrics are computed only for outputs that remain active (`output_mask=True`).
 
-Outputs are generally saved under:
+- `summary: bool`
+        If True, write summary.csv (per-output averages).
+- ` per_window : bool`
+        If True, write metrics_full.csv (per-window aggregates).
+- `per_timestamp : bool`
+        If True, write metrics_per_timestamp.csv (per-time aggregates).
+Outputs are saved under:
 
 ```
 <eval_run_dir>/metrics/
 ```
-
-Common patterns:
-- per-signal metrics (e.g., RMSE / MAE / correlation)
-- aggregate summaries across outputs
-
-(Exact metrics depend on your evaluation module implementation.)
 
 ---
 
