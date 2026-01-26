@@ -247,6 +247,8 @@ def _compute_paths(
         }
 
     # eval writes into <model_run_dir>/<eval_id>
+    # NOTE: do *not* create directories here.
+    # We only create the eval folder after confirming the source run config exists
     if phase == "eval":
         init_cfg = merged.get("model_source", {})
         model_dir = init_cfg.get("run_dir") if isinstance(init_cfg, dict) else None
@@ -258,7 +260,6 @@ def _compute_paths(
 
         eval_id = merged.get("eval_id") or f"{task}__eval__{timestamp}"
         eval_dir = model_dir / eval_id
-        eval_dir.mkdir(parents=True, exist_ok=True)
         return {
             "repo_root": str(repo_root),
             "configs_root": str(configs_root),
@@ -379,6 +380,42 @@ def load_experiment_config(
     if eval_id is not None:
         merged["eval_id"] = eval_id
 
+    # ------------------------------------------------------------------
+    # For finetune/eval: validate the source run (config + checkpoints)
+    # *before* creating any output directories (e.g., finetune run_dir).
+    # ------------------------------------------------------------------
+    src_run_dir: Path | None = None
+    src_cfg: Dict[str, Any] | None = None
+    if phase in ("finetune", "eval"):
+        init_cfg = merged.get("model_source", {})
+        if not isinstance(init_cfg, dict):
+            raise TypeError("Config key 'model_source' must be a mapping (dict).")
+
+        src_run_id = init_cfg.get("run_dir", None)
+        if src_run_id is None:
+            raise ValueError(
+                f"{phase} phase requires model_source.run_dir set to a training run id (folder name under <repo_root>/runs/)."
+            )
+
+        src_run_dir = _resolve_run_id_to_run_dir(str(src_run_id))
+
+        # 1) Source run config must exist (and we load it once here).
+        src_cfg = _load_source_run_config_yaml(src_run_dir)
+
+        # 2) Source run checkpoints must exist (avoid silently evaluating an untrained model).
+        ckpt_root = src_run_dir / "checkpoints"
+        best_dir = ckpt_root / "best"
+        latest_dir = ckpt_root / "latest"
+        if not best_dir.is_dir() and not latest_dir.is_dir():
+            raise FileNotFoundError(
+                "Required source run checkpoints not found.\n"
+                f"Phase '{phase}' requires an existing trained run with checkpoints under:\n"
+                f"  {best_dir}\n"
+                f"or\n"
+                f"  {latest_dir}\n"
+                "If you want to train from scratch, use the 'pretrain' phase instead.\n"
+            )
+
     merged["paths"] = _compute_paths(
         merged, configs_root=configs_root_path, task_dir=tasks_overrides_dir
     )
@@ -395,20 +432,14 @@ def load_experiment_config(
     # - finetune requires model_source.run_dir and inherits model + preprocess chunk/trim,
     #   then applies finetune-side overrides on top.
     # - eval requires model_source.run_dir and rebuilds model + embeddings + preprocess chunk/trim.
+    #
+    # NOTE: src_run_dir/src_cfg are validated + loaded above (before _compute_paths).
     # ------------------------------------------------------------------
     if phase in ("finetune", "eval"):
-        init_cfg = merged.get("model_source", {})
-        if not isinstance(init_cfg, dict):
-            raise TypeError("Config key 'model_source' must be a mapping (dict).")
-
-        src_run_id = init_cfg.get("run_dir", None)
-        if src_run_id is None:
-            raise ValueError(
-                f"{phase} phase requires model_source.run_dir set to a training run id (folder name under <repo_root>/runs/)."
+        if src_run_dir is None or src_cfg is None:
+            raise RuntimeError(
+                "Internal error: source run should have been validated before _compute_paths()."
             )
-
-        src_run_dir = _resolve_run_id_to_run_dir(str(src_run_id))
-        src_cfg = _load_source_run_config_yaml(src_run_dir)
 
         if "model" not in src_cfg:
             raise KeyError(
@@ -425,7 +456,6 @@ def load_experiment_config(
                     raise TypeError(
                         "Finetune 'model' overrides must be a mapping (dict)."
                     )
-
                 merged["model"] = _deep_merge(merged["model"], model_override)
 
             # Preprocess: inherit chunk/trim from source (keep finetune valid_windows, etc.).
