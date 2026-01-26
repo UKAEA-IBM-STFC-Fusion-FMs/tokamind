@@ -66,23 +66,23 @@ loader:
 
 model:
   backbone:
-    d_model: 256
-    n_layers: 6
-    n_heads: 8
-    dim_ff: 1024
+    d_model: 128
+    n_layers: 2
+    n_heads: 4
+    dim_ff: 384
     dropout: 0.05
     activation: relu
 
   modality_heads:
     timeseries:
-      hidden: 256
-      out_dim: 256
+      hidden: 128
+      out_dim: 128
     profile:
-      hidden: 256
-      out_dim: 256
+      hidden: 128
+      out_dim: 128
     video:
-      hidden: 256
-      out_dim: 256
+      hidden: 128
+      out_dim: 128
 
   output_adapters:
     hidden_dim:
