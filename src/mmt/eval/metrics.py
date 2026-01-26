@@ -73,29 +73,42 @@ def evaluate_metrics(
     task_name: str | None = None,
 ) -> Dict[str, Dict[str, float]]:
     """
-    Compute native-space error metrics for all outputs of the task.
+    Compute native-space error metrics for task outputs.
 
-    Writes:
-      <run_dir>/metrics/<task_name>_metrics_full.csv     (per-shot, per-window, per-output)
-      <run_dir>/metrics/<task_name>_metrics_per_timestamp.csv (per-shot, per-window, per-time, per-output)
-      <run_dir>/metrics/<task_name>_metrics_summary.csv  (per-output averages)
+    Depending on `compute_metrics_cfg`, writes one or more CSVs under:
 
-    metrics_full columns:
+      <run_dir>/metrics/
+
+    Files (optional `<task_name>_` prefix)
+    -------------------------------------
+    - `<task_name>_metrics_summary.csv` (per-output averages) if `summary=True`
+    - `<task_name>_metrics_per_window.csv` (per-shot, per-window, per-output) if `per_window=True`
+    - `<task_name>_metrics_per_timestamp.csv` (per-shot, per-window, per-time, per-output) if `per_timestamp=True`
+
+    Columns
+    -------
+    metrics_per_window:
       shot_id, window_id, feature_name, RMSE, MSE, MAE
 
-    metrics_per_timestamp columns:
-      shot_id, window_id, time_idx, feature_name, RMSE, MSE, MAE
+    metrics_per_timestamp:
+      shot_id, window_id, time_id, feature_name, RMSE, MSE, MAE
+
+    metrics_summary:
+      feature_name, RMSE, MSE, MAE
 
     Config (compute_metrics_cfg)
     ---------------------------
-    summary: bool
-        If True, write summary.csv (per-output averages).
+    summary : bool
+        If True, write `metrics_summary.csv` and return a dict of per-output means.
     per_window : bool
-        If True, write metrics_full.csv (per-window aggregates).
+        If True, write `metrics_per_window.csv` (per-window aggregates).
     per_timestamp : bool
-        If True, write metrics_per_timestamp.csv (per-time aggregates).
-    times_indexes : list[int] | None
-        Optional subset of time indices to write for per_timestamp.
+        If True, write `metrics_per_timestamp.csv` (per-time aggregates).
+
+    Returns
+    -------
+    summary : Dict[str, Dict[str, float]]
+        Mapping `output_name -> {rmse, mse, mae}` when `summary=True`, otherwise `{}`.
     """
     metrics_dir = Path(run_dir) / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
@@ -106,7 +119,7 @@ def evaluate_metrics(
     per_timestamp = bool(cfg.get("per_timestamp", False))
 
     # saving prefix
-    prefix = f"{task_name}_" if task_name else None
+    prefix = f"{task_name}_" if task_name else ""
 
     # Optional outputs
     f_full = None

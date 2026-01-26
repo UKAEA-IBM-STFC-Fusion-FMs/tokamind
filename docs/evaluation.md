@@ -113,28 +113,38 @@ The `eval.drop.*` convenience lists are typically translated into these override
 
 ## Metrics
 
-Enable/disable:
+Metrics are controlled by `eval.compute_metrics`.
+
+Metrics are computed only for outputs that remain active (`output_mask=True`).
 
 ```yaml
 eval:
- compute_metrics:
+  compute_metrics:
     summary: true
     per_window: true
     per_timestamp: false
 ```
 
-Metrics are computed only for outputs that remain active (`output_mask=True`).
+What each flag does:
 
-- `summary: bool`
-        If True, write summary.csv (per-output averages).
-- ` per_window : bool`
-        If True, write metrics_full.csv (per-window aggregates).
-- `per_timestamp : bool`
-        If True, write metrics_per_timestamp.csv (per-time aggregates).
-Outputs are saved under:
+- `summary`: writes `<task_name>_metrics_summary.csv` (per-output averages) and returns/logs a summary dict.
+- `per_window`: writes `<task_name>_metrics_per_window.csv` (per-shot, per-window, per-output).
+- `per_timestamp`: writes `<task_name>_metrics_per_timestamp.csv` (per-shot, per-window, per-time, per-output).
+
+Outputs are written under:
 
 ```
 <eval_run_dir>/metrics/
+```
+
+To disable metrics entirely, set all flags to `false`:
+
+```yaml
+eval:
+  compute_metrics:
+    summary: false
+    per_window: false
+    per_timestamp: false
 ```
 
 ---
