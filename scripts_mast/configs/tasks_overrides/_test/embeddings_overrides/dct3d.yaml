@@ -13,7 +13,7 @@ embeddings:
         encoder_kwargs:
           keep_h: 10
           keep_w: 1
-          keep_t: 4
+          keep_t: 1
       pf_active-solenoid_current:
         encoder_name: dct3d
         encoder_kwargs:

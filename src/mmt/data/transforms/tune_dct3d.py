@@ -130,6 +130,34 @@ def _explained_energy_from_total(total_energy: float, z: np.ndarray) -> float:
     return float(frac)
 
 
+def _explained_energy_from_total_and_kept(total_energy: float, kept_energy: float) -> float:
+    """Compute explained energy fraction given total and kept DCT energy.
+
+    This is equivalent to ``sum(z^2) / sum(x^2)`` but avoids re-encoding `x`
+    for every candidate by using pre-computed sums in DCT space.
+
+    Returns a value in [0, 1]. If total_energy is 0 (all-zeros signal), returns 1.
+    """
+    if not np.isfinite(total_energy) or total_energy <= 0.0:
+        return 1.0
+
+    if not np.isfinite(kept_energy) or kept_energy <= 0.0:
+        return 0.0
+
+    # Numerical guard: kept energy should not exceed total energy (orthonormal DCT).
+    if kept_energy > total_energy:
+        kept_energy = total_energy
+
+    frac = kept_energy / total_energy
+
+    # Clamp to [0, 1] for stability.
+    if frac < 0.0:
+        return 0.0
+    if frac > 1.0:
+        return 1.0
+    return float(frac)
+
+
 class TuneDCT3DTransform:
     def __init__(
         self,
@@ -239,10 +267,10 @@ class TuneDCT3DTransform:
         if not self.candidates:
             raise ValueError("TuneDCT3D: no candidate configurations found")
 
-        # One codec per candidate.
-        self._codecs: Dict[Tuple[int, int, int], DCT3DCodec] = {
-            cfg: DCT3DCodec(cfg[0], cfg[1], cfg[2]) for cfg in self.candidates
-        }
+        # Cache full-shape codecs so we can compute the full DCT once per chunk
+        # (and then evaluate many truncation candidates cheaply).
+        # key: (H, W, T) in the internal 3D view used by DCT3DCodec.
+        self._full_codec_cache: Dict[Tuple[int, int, int], DCT3DCodec] = {}
 
         # Cache: per (role, signal, shape) list of candidates that fit within budget.
         self._candidates_cache: Dict[
@@ -296,6 +324,27 @@ class TuneDCT3DTransform:
 
         self._candidates_cache[key] = within
         return within
+
+
+    @staticmethod
+    def _dct_view_shape(native_shape: Tuple[int, ...]) -> Tuple[int, int, int]:
+        """Return the internal (H, W, T) view used by DCT3DCodec for a native shape."""
+        if len(native_shape) == 1:
+            return 1, 1, int(native_shape[0])
+        if len(native_shape) == 2:
+            return int(native_shape[0]), 1, int(native_shape[1])
+        if len(native_shape) == 3:
+            return int(native_shape[0]), int(native_shape[1]), int(native_shape[2])
+        raise ValueError(f"Unsupported native_shape={native_shape!r}")
+
+    def _full_codec(self, H: int, W: int, T: int) -> DCT3DCodec:
+        """Get (or create) a codec that keeps the full DCT grid for shape (H, W, T)."""
+        key = (int(H), int(W), int(T))
+        codec = self._full_codec_cache.get(key)
+        if codec is None:
+            codec = DCT3DCodec(key[0], key[1], key[2])
+            self._full_codec_cache[key] = codec
+        return codec
 
     def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
         # Optional progress logging.
@@ -359,18 +408,36 @@ class TuneDCT3DTransform:
                             continue
                         x_clean = np.where(finite, x, 0.0)
 
+                        native_shape = tuple(x.shape)
+                        candidates = self._candidates_for(role, name, native_shape)
+
                         # Fast path: zero-energy signals are perfectly represented by any cfg.
                         x64 = np.asarray(x_clean, dtype=np.float64)
                         total = float(np.sum(x64 * x64))
                         if not np.isfinite(total) or total <= 0.0:
-                            for cfg in self._candidates_for(role, name, tuple(x.shape)):
+                            for cfg in candidates:
                                 win_sum[role][name][cfg] += 1.0
                                 win_n[role][name][cfg] += 1
                             continue
 
-                        for cfg in self._candidates_for(role, name, tuple(x.shape)):
-                            z = self._codecs[cfg].encode(x_clean)
-                            ee = _explained_energy_from_total(total, z)
+                        # Compute the full DCT once, then use a 3D prefix-sum
+                        # of coefficient energies to evaluate many truncations cheaply.
+                        H, W, T = self._dct_view_shape(native_shape)
+                        codec_full = self._full_codec(H, W, T)
+
+                        z_full = codec_full.encode(x_clean)  # (H*W*T,)
+                        X = np.asarray(z_full, dtype=np.float64).reshape(H, W, T)
+                        E = X * X
+                        P = E.cumsum(axis=0).cumsum(axis=1).cumsum(axis=2)
+
+                        for cfg in candidates:
+                            h_eff = min(int(cfg[0]), H)
+                            w_eff = min(int(cfg[1]), W)
+                            t_eff = min(int(cfg[2]), T)
+
+                            kept = float(P[h_eff - 1, w_eff - 1, t_eff - 1])
+                            ee = _explained_energy_from_total_and_kept(total, kept)
+
                             win_sum[role][name][cfg] += ee
                             win_n[role][name][cfg] += 1
 
@@ -400,17 +467,33 @@ class TuneDCT3DTransform:
                         continue
                     x_clean = np.where(finite, x, 0.0)
 
+                    native_shape = tuple(x.shape)
+                    candidates = self._candidates_for("output", name, native_shape)
+
                     x64 = np.asarray(x_clean, dtype=np.float64)
                     total = float(np.sum(x64 * x64))
                     if not np.isfinite(total) or total <= 0.0:
-                        for cfg in self._candidates_for("output", name, tuple(x.shape)):
+                        for cfg in candidates:
                             win_sum["output"][name][cfg] += 1.0
                             win_n["output"][name][cfg] += 1
                         continue
 
-                    for cfg in self._candidates_for("output", name, tuple(x.shape)):
-                        z = self._codecs[cfg].encode(x_clean)
-                        ee = _explained_energy_from_total(total, z)
+                    H, W, T = self._dct_view_shape(native_shape)
+                    codec_full = self._full_codec(H, W, T)
+
+                    z_full = codec_full.encode(x_clean)  # (H*W*T,)
+                    X = np.asarray(z_full, dtype=np.float64).reshape(H, W, T)
+                    E = X * X
+                    P = E.cumsum(axis=0).cumsum(axis=1).cumsum(axis=2)
+
+                    for cfg in candidates:
+                        h_eff = min(int(cfg[0]), H)
+                        w_eff = min(int(cfg[1]), W)
+                        t_eff = min(int(cfg[2]), T)
+
+                        kept = float(P[h_eff - 1, w_eff - 1, t_eff - 1])
+                        ee = _explained_energy_from_total_and_kept(total, kept)
+
                         win_sum["output"][name][cfg] += ee
                         win_n["output"][name][cfg] += 1
 
