@@ -20,6 +20,8 @@ Instead of importing benchmark symbols directly in run_*.py, do:
         get_train_test_val_shots,
         get_task_metadata,
         benchmark_get_task_config,
+        WindowMetricsWriter,
+        compute_task_metrics,
     )
 """
 
@@ -43,6 +45,7 @@ try:
     from MAST_benchmark.data_split import get_train_test_val_shots
     from MAST_benchmark.tasks import get_task_metadata
     from MAST_benchmark.tasks import get_task_config as benchmark_get_task_config
+    from MAST_benchmark.evaluator import WindowMetricsWriter, compute_task_metrics
 except Exception as e:
     raise ImportError(
         "Failed to import required symbols from benchmark package 'MAST_benchmark'.\n"
@@ -58,4 +61,6 @@ __all__ = [
     "get_train_test_val_shots",
     "get_task_metadata",
     "benchmark_get_task_config",
+    "WindowMetricsWriter",
+    "compute_task_metrics",
 ]

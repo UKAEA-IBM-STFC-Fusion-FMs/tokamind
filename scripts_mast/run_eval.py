@@ -7,7 +7,9 @@ This script is intentionally thin:
 - resolves the benchmark task_config and builds datasets/metadata,
 - builds signal specs/codecs and the standard shot→windows transform pipeline,
 - loads the best checkpoint from `model_init.model_dir`,
-- runs window-level evaluation (metrics + optional traces),
+- runs a single-pass evaluation loop:
+  - benchmark-aligned metrics (windows_metrics.csv + tasks_metrics.csv)
+  - optional MMT-native diagnostics (per-timestamp CSV + traces),
 - writes outputs under the eval run directory (cfg_mmt.paths["run_dir"]).
 
 Shared boilerplate (device/MP setup, default transforms, window datasets,
@@ -37,6 +39,8 @@ from mast_utils import (
     make_collate_fn,
 )
 
+from mast_utils.eval_benchmark import evaluate_benchmark_and_diagnostics
+
 from mmt.utils.config.validator import validate_config
 
 from mmt.utils import (
@@ -51,7 +55,6 @@ from mmt.data import (
     initialize_mmt_dataloader,
 )
 from mmt.models import MultiModalTransformer
-from mmt.eval import evaluate_metrics, save_traces_for_subset
 from mmt.checkpoints import load_best_weights
 
 
@@ -304,16 +307,17 @@ def main() -> None:
         if spec.name in signal_stats
     }
 
-    do_metrics = bool(
-        cfg_compute_metrics.get("summary", False)
+    do_eval = bool(
+        cfg_compute_metrics.get("per_task", False)
         or cfg_compute_metrics.get("per_window", False)
         or cfg_compute_metrics.get("per_timestamp", False)
+        or cfg_traces.get("enable", False)
     )
 
-    if do_metrics:
-        logger.info("Computing metrics in: %s/metrics/", run_dir)
+    if do_eval:
+        logger.info("Running evaluation in: %s", run_dir)
         with sdpa_math_only_ctx():
-            summary_metrics = evaluate_metrics(
+            result = evaluate_benchmark_and_diagnostics(
                 model=model,
                 dataloader=eval_loader,
                 device=device,
@@ -321,34 +325,19 @@ def main() -> None:
                 codecs=output_codecs,
                 id_to_name=id_to_name,
                 run_dir=run_dir,
+                task_name=args.task,
                 amp_enabled=amp_enabled,
                 compute_metrics_cfg=cfg_compute_metrics,
-                task_name=args.task,
+                traces_cfg=cfg_traces,
             )
-        logger.info("Summary metrics: %s", summary_metrics)
+
+        if "task_metrics" in result:
+            logger.info("Benchmark task metrics: %s", result["task_metrics"])
+        logger.info("Benchmark outputs dir: %s", result.get("benchmark_dir"))
     else:
         logger.info(
-            "[eval] compute_metrics: summary, per_window, and per_timestamp are disabled; skipping metrics."
+            "[eval] compute_metrics: per_task, per_window, per_timestamp and traces are disabled; skipping evaluation."
         )
-
-    if cfg_traces.get("enable", False):
-        logger.info(
-            "Saving traces (n_max=%s) in: %s/traces/",
-            cfg_traces.get("n_max", 10),
-            run_dir,
-        )
-        with sdpa_math_only_ctx():
-            save_traces_for_subset(
-                model=model,
-                dataloader=eval_loader,
-                device=device,
-                stats=output_stats,
-                run_dir=run_dir,
-                codecs=output_codecs,
-                id_to_name=id_to_name,
-                traces_cfg=cfg_traces,
-                amp_enabled=amp_enabled,
-            )
 
     logger.info("Done.")
 

@@ -50,6 +50,7 @@ Eval outputs are written under the training run directory:
 ```
 runs/<training_run_id>/<eval_id>/
   <eval_id>.yaml
+  benchmark/
   metrics/
   traces/
 ```
@@ -120,29 +121,33 @@ Metrics are computed only for outputs that remain active (`output_mask=True`).
 ```yaml
 eval:
   compute_metrics:
-    summary: true
-    per_window: true
+    per_task: true
+    per_window: false
     per_timestamp: false
 ```
 
 What each flag does:
 
-- `summary`: writes `<task_name>_metrics_summary.csv` (per-output averages) and returns/logs a summary dict.
-- `per_window`: writes `<task_name>_metrics_per_window.csv` (per-shot, per-window, per-output).
-- `per_timestamp`: writes `<task_name>_metrics_per_timestamp.csv` (per-shot, per-window, per-time, per-output).
+- `per_task` (**benchmark-aligned**): computes the official task-level scores and writes:
+  - `<eval_run_dir>/benchmark/<task_name>/tasks_metrics.csv`
+  (includes per-signal rows plus an extra row for the task aggregate).
 
-Outputs are written under:
+- `per_window` (**benchmark-aligned**): keeps the intermediate per-window file:
+  - `<eval_run_dir>/benchmark/<task_name>/windows_metrics.csv`
 
-```
-<eval_run_dir>/metrics/
-```
+  If `per_task=true` but `per_window=false`, evaluation still creates `windows_metrics.csv`
+  as an intermediate input for the benchmark aggregator and then deletes it to save disk.
+
+- `per_timestamp` (**MMT diagnostic**): writes a per-timestamp CSV:
+  - `<eval_run_dir>/metrics/<task_name>_metrics_per_timestamp.csv`
+  (per-shot, per-window, per-time, per-output; computed in native space).
 
 To disable metrics entirely, set all flags to `false`:
 
 ```yaml
 eval:
   compute_metrics:
-    summary: false
+    per_task: false
     per_window: false
     per_timestamp: false
 ```
@@ -164,7 +169,7 @@ eval:
 
 Traces are intended for “quick look” diagnostics:
 
-- `n_max`: max number of windows to save traces for
+- `n_max`: max number of **shots** to save traces for
 - `signals`: optional subset of output signals to save
 - `times_indexes`: optional subset of time indices
 
@@ -173,6 +178,17 @@ Outputs are generally saved under:
 ```
 <eval_run_dir>/traces/
 ```
+
+Each trace is saved as one NPZ per (shot, output):
+
+- `<shot_id>__<output_name>.npz`
+
+Arrays inside each NPZ:
+
+- `true`: stacked native-space targets, ordered by `window_index`
+- `pred`: stacked native-space predictions, ordered by `window_index`
+- `window_index`: window indices for the stacked rows
+
 
 ### `keep_output_native`
 

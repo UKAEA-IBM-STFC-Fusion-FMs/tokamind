@@ -1,203 +1,244 @@
-# MMT: Multi-Modal Transformer
+# Evaluation (metrics, traces, and ablations)
 
-MMT is a **multi-modal, token-based Transformer** designed for scientific / industrial sensor data (e.g. time-series, profiles, video) with a **clean separation** between:
+Evaluation is designed to be:
 
-- **`src/mmt/`**: the *dataset-agnostic* core library (model + data pipeline primitives)
-- **`scripts_mast/`**: the FAIR/MAST integration layer (task configs, dataset wiring, training/eval scripts)
+- **reproducible** (strict checkpoint loading),
+- **config-driven** (no ad-hoc flags),
+- **flexible** (evaluate with missing inputs/outputs via masking, without changing model weights).
 
-If you’re new to the repo, start with the **toy example** in `examples/` (runs on synthetic data and does not require the benchmark dataset stack), then move to `scripts_mast/` for real tasks.
-
----
-
-## Description
-
-The core idea is to represent heterogeneous modalities as a **sequence of tokens**, where each token corresponds to a compressed representation of a chunk of data (e.g., a short time segment for time-series). Tokens from inputs/actuators are processed by a Transformer backbone, and outputs are produced by lightweight **per-output adapters**.
-
-Key features:
-
-- **Dataset-agnostic core (`mmt/`)**: the model and token pipeline are reusable across domains.
-- **Convention-based configuration**: common defaults + per-task overrides, with phases for `pretrain`, `finetune`, `eval`, and `tune_dct3d`.
-- **Per-task embedding tuning**: `run_tune_dct3d.py` writes `embeddings_overrides/<profile>.yaml` inside the task folder (default profile: `dct3d`).
-- **Flexible training/evaluation**: warm-start vs resume, forced-drop ablations at eval time, cached vs streamed datasets.
-
-For deeper details, see:
-- `docs/model_architecture.md`
-- `docs/model_flexibility.md`
+This document describes what evaluation does, where outputs are written, and how to run common ablations.
 
 ---
 
-## Visuals
+## Selecting which model to evaluate
 
-Architecture and pipeline diagrams live in:
-- `docs/model_architecture.md`
-- `docs/transforms.md`
+Evaluation needs a trained run directory that contains checkpoints.
 
-(You can add figures/screenshots here later if desired.)
+Recommended config key:
+
+```yaml
+model_source:
+  run_dir: "<training_run_id>"
+```
+
+> Legacy naming: some configs may use `model_init.model_dir`. The meaning is the same:
+> it is the training run directory whose checkpoint weights will be loaded.
+
+Evaluation loads the **best** checkpoint if present, otherwise it falls back to the latest checkpoint.
+
+To keep evaluation consistent across models, the config loader rebuilds the **model spec** from the source run's saved merged config:
+
+- `model`
+- `embeddings`
+- `preprocess.chunk` and `preprocess.trim_chunks`
+
+It reads them from:
+
+```
+runs/<training_run_id>/<training_run_id>.yaml
+```
+
+So your `eval.yaml` / `eval_overrides.yaml` should focus on evaluation knobs (drop lists, metrics, traces, etc.), not architecture.
+
 
 ---
 
-## 📦 Installation
+## Output location
 
-There are two common workflows:
+Eval outputs are written under the training run directory:
 
-1) **Core install + toy example** (recommended first; no benchmark required)  
-2) **Full MAST integration** (requires the benchmark repository and datasets)
-
-### 1) Install MMT (core library)
-
-Clone and install in editable mode:
-
-```bash
-git clone https://github.com/<org>/multi-modal-transformer.git
-cd multi-modal-transformer
-
-python -m pip install -U pip
-pip install -e .
-# Optional developer extras:
-pip install -e ".[dev]"
+```
+runs/<training_run_id>/<eval_id>/
+  <eval_id>.yaml
+  benchmark/
+  metrics/
+  traces/
 ```
 
-Smoke test with synthetic data:
+- `eval_id` can be set in `tasks_overrides/<task>/eval_overrides.yaml`.
+- If omitted, the loader typically uses a timestamped default like `eval__YYYYMMDD_HHMMSS`.
 
-```bash
-python examples/toy_train.py --config examples/configs/toy.yaml
+This keeps all evaluations for a run grouped next to the run.
+
+---
+
+## Keep the model spec fixed
+
+A key design choice is:
+
+> Evaluation does not rebuild a “smaller model” for subsets of signals.
+> It evaluates the same trained model and uses **masking** to simulate missing inputs/outputs.
+
+This avoids:
+- changing signal ids,
+- resizing heads/encoders,
+- accidental checkpoint mismatches.
+
+---
+
+## Forcing missing inputs/actuators/outputs (ablations)
+
+Eval supports deterministic ablations via config:
+
+```yaml
+eval:
+  drop:
+    inputs:    ["summary-ip"]
+    actuators: ["pf_active-coil_voltage"]
+    outputs:   ["pf_active-coil_current"]
 ```
 
-### 2) Full MAST integration (benchmark repository)
+Semantics:
 
-This repository is designed to run on top of a **Benchmark Environment** (FAIR/MAST preprocessing + datasets).
+- Dropped **inputs/actuators**: no tokens are emitted for those signals.
+  The backbone sees less context; model weights are unchanged.
+- Dropped **outputs**: the output mask is set false so they:
+  - contribute no loss,
+  - are excluded from metrics,
+  - are excluded from traces.
 
-Follow these steps:
+Implementation detail:
 
-#### a) Install the benchmark repository
+- The collate function is configured with force-drop overrides:
 
-```bash
-git clone https://github.com/<org>/<benchmark-repo>.git
-cd <benchmark-repo>
-
-# complete block (dataset + deps)
+```yaml
+collate:
+  p_drop_inputs_overrides:    { "<name>": 1.0, ... }
+  p_drop_actuators_overrides: { "<name>": 1.0, ... }
+  p_drop_outputs_overrides:   { "<name>": 1.0, ... }
 ```
 
-Make sure the benchmark repo is importable in the same Python environment used by MMT
-(e.g., via `pip install -e .` in the benchmark repo, or by setting `PYTHONPATH`).
+The `eval.drop.*` convenience lists are typically translated into these overrides internally.
 
-#### b) Install MMT
+---
 
-```bash
-git clone https://github.com/<org>/multi-modal-transformer.git
-cd multi-modal-transformer
+## Metrics
 
-pip install -e .
-pip install -e ".[dev]"
+Metrics are controlled by `eval.compute_metrics`.
+
+Metrics are computed only for outputs that remain active (`output_mask=True`).
+
+```yaml
+eval:
+  compute_metrics:
+    per_task: true
+    per_window: false
+    per_timestamp: false
+```
+
+What each flag does:
+
+- `per_task` (**benchmark-aligned**): computes the official task-level scores and writes:
+  - `<eval_run_dir>/benchmark/<task_name>/tasks_metrics.csv`
+  (includes per-signal rows plus an extra row for the task aggregate).
+
+- `per_window` (**benchmark-aligned**): keeps the intermediate per-window file:
+  - `<eval_run_dir>/benchmark/<task_name>/windows_metrics.csv`
+
+  If `per_task=true` but `per_window=false`, evaluation still creates `windows_metrics.csv`
+  as an intermediate input for the benchmark aggregator and then deletes it to save disk.
+
+- `per_timestamp` (**MMT diagnostic**): writes a per-timestamp CSV:
+  - `<eval_run_dir>/metrics/<task_name>_metrics_per_timestamp.csv`
+  (per-shot, per-window, per-time, per-output; computed in native space).
+
+To disable metrics entirely, set all flags to `false`:
+
+```yaml
+eval:
+  compute_metrics:
+    per_task: false
+    per_window: false
+    per_timestamp: false
 ```
 
 ---
 
-## Usage
+## Traces (qualitative inspection)
 
-### 1) Benchmark-free toy example (synthetic data)
+Enable/disable:
 
-Runs a tiny training loop on synthetic data to demonstrate the core APIs:
-
-```bash
-python examples/toy_train.py --config examples/configs/toy.yaml
+```yaml
+eval:
+  traces:
+    enable: true
+    n_max: 8
+    signals: ["pf_active-coil_current"]   # null → all outputs
+    times_indexes: [0, 1, 2]              # null → full horizon
 ```
 
-### 2) Run training/evaluation with MAST integration
+Traces are intended for “quick look” diagnostics:
 
-All phase scripts use the same pattern: pass a **task folder name** under
+- `n_max`: max number of **shots** to save traces for
+- `signals`: optional subset of output signals to save
+- `times_indexes`: optional subset of time indices
 
-All phase scripts also accept `--emb_profile <profile>` to select which task-level embedding overrides to use (default: `dct3d`).
-`scripts_mast/configs/tasks_overrides/<task>/`.
-
-Finetune:
-
-```bash
-python scripts_mast/run_finetune.py --task task_2-1
-```
-
-Pretrain (example):
-
-```bash
-python scripts_mast/run_pretrain.py --task pretrain_inputs_actuators_to_inputs_outputs
-```
-
-Evaluate:
-
-1. In `scripts_mast/configs/tasks_overrides/<task>/eval_overrides.yaml`, set:
-
-   ```yaml
-   model_source:
-     run_dir: "<training_run_id>"
-   ```
-
-2. Run:
-
-   ```bash
-   python scripts_mast/run_eval.py --task task_2-1
-   ```
-
-Tune embedding parameters (DCT3D) for a task:
-
-```bash
-python scripts_mast/run_tune_dct3d.py --task task_2-1
-```
-
-This writes:
+Outputs are generally saved under:
 
 ```
-scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
+<eval_run_dir>/traces/
 ```
 
-### 3) Configuration
+Each trace is saved as one NPZ per (shot, output):
 
-Configuration is **convention-based** (no pointers inside YAML). The loader merges:
+- `<shot_id>__<output_name>.npz`
 
-1) `scripts_mast/configs/common/embeddings.yaml`  
-2) `scripts_mast/configs/common/<phase>.yaml`  
-3) `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*  
-4) `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune/eval; create an empty file if you do not want task-specific overrides yet)*
+Arrays inside each NPZ:
 
-Notes:
-- Each phase config must explicitly define: `seed`, `runtime`, `data.local`, `data.subset_of_shots`.
-- `finetune` and `eval` must set `model_source.run_dir` to a run id under `runs/`.
+- `true`: stacked native-space targets, ordered by `window_index`
+- `pred`: stacked native-space predictions, ordered by `window_index`
+- `window_index`: window indices for the stacked rows
 
-See:
-- `docs/config_guide.md`
+
+### `keep_output_native`
+
+Traces (and some metrics) often need native outputs.
+For that reason, evaluation typically sets:
+
+```yaml
+data:
+  keep_output_native: true
+```
+
+If you set this to `false`, you may still be able to compute metrics from `output_emb`,
+but you will likely lose rich trace information.
 
 ---
 
-## Documentation
+## Cached vs streaming evaluation
 
-Recommended reading order:
+Evaluation can use either window-level dataset:
 
-- `docs/config_guide.md` — config structure, merge order, phases, and run directories
-- `docs/model_architecture.md` — model blocks and data flow
-- `docs/model_flexibility.md` — warm-start/resume, finetune/eval flexibility
-- `docs/datasets.md` — cached vs streamed datasets, epoch semantics
-- `docs/transforms.md` — transforms pipeline and window dict contract
-- `docs/checkpointing_and_warmstart.md` — checkpoints, overlap loading, model parts
-- `docs/evaluation.md` — metrics/traces, forced-drop ablations, eval outputs
-- `docs/tuning_embeddings.md` — DCT3D tuning and `embeddings_overrides/<profile>.yaml`
+- **Cached** windows (recommended): faster, deterministic epoch sizing.
+- **Streaming** windows: lower memory, but less direct control over “number of windows”.
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+If you evaluate on streaming windows, ensure your configuration/runner defines an appropriate
+number of batches/windows to iterate over (depending on your evaluation loop).
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+---
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+## Common evaluation workflows
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+### Evaluate a trained run (default)
+1. Set `model_source.run_dir` to the training run you want to evaluate.
+2. Run `run_eval.py --task <task>`.
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Evaluate under missing inputs
+Set:
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+```yaml
+eval:
+  drop:
+    inputs: ["some_input_signal"]
+```
 
-## License
-For open source projects, say how it is licensed.
+### Evaluate only a subset of outputs
+Set:
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+```yaml
+eval:
+  drop:
+    outputs: ["output_to_disable"]
+```
+
+This keeps the model spec fixed and simply disables supervision/metrics for those outputs.
