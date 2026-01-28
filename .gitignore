@@ -45,3 +45,7 @@ Thumbs.db
 logs/
 /run_bash*.sh
 *.log
+
+# history folders with legacy results
+history/
+**/history/
