@@ -92,7 +92,7 @@ embeddings:
         encoder_kwargs:
           keep_h: 12
           keep_w: 1
-          keep_t: 2
+          keep_t: 1
       magnetics-flux_loop_flux:
         encoder_name: dct3d
         encoder_kwargs:

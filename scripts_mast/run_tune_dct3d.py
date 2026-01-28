@@ -290,12 +290,7 @@ def main() -> None:
             base_keep_w = int(base_kwargs.get("keep_w", tuned_keep_w))
             base_keep_t = int(base_kwargs.get("keep_t", tuned_keep_t))
 
-            if (tuned_keep_h, tuned_keep_w, tuned_keep_t) == (
-                base_keep_h,
-                base_keep_w,
-                base_keep_t,
-            ):
-                continue
+            # Always write tuned overrides for all tuned signals (even if equal to base).
 
             new_kwargs = copy.deepcopy(base_kwargs)
             new_kwargs.update(

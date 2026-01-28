@@ -1,0 +1,171 @@
+embeddings:
+  per_signal_overrides:
+    output:
+      equilibrium-beta_pol:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 8
+      equilibrium-beta_tor:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 8
+      equilibrium-bphi_rmag:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 8
+      equilibrium-lcfs_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 4
+          keep_w: 1
+          keep_t: 2
+      equilibrium-lcfs_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 8
+          keep_w: 1
+          keep_t: 2
+      equilibrium-magnetic_axis_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 8
+      equilibrium-magnetic_axis_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 8
+      equilibrium-minor_radius:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 8
+      equilibrium-psi:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 16
+          keep_w: 16
+          keep_t: 4
+      equilibrium-q95:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 8
+      equilibrium-x_point_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 2
+          keep_w: 1
+          keep_t: 4
+      equilibrium-x_point_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 2
+          keep_w: 1
+          keep_t: 1
+      interferometer-n_e_line:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 16
+      magnetics-b_field_pol_probe_ccbv_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 40
+          keep_w: 1
+          keep_t: 8
+      magnetics-b_field_pol_probe_obr_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 8
+      magnetics-b_field_pol_probe_obv_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 8
+      magnetics-b_field_pol_probe_omv_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 1280
+      magnetics-b_field_tor_probe_cc_field:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 1280
+      magnetics-b_field_tor_probe_saddle_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 12
+          keep_w: 1
+          keep_t: 4
+      magnetics-flux_loop_flux:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 15
+          keep_w: 1
+          keep_t: 2
+      pf_active-coil_current:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 10
+          keep_w: 1
+          keep_t: 8
+      pf_active-solenoid_current:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 2
+      soft_x_rays-horizontal_cam_lower:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 224
+      soft_x_rays-horizontal_cam_upper:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 18
+          keep_w: 1
+          keep_t: 224
+      spectrometer_visible-filter_spectrometer_dalpha_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 3
+          keep_w: 1
+          keep_t: 256
+      summary-ip:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 1
+          keep_w: 1
+          keep_t: 8
+      thomson_scattering-n_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 96
+          keep_w: 1
+          keep_t: 10
+      thomson_scattering-t_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          keep_h: 120
+          keep_w: 1
+          keep_t: 10
