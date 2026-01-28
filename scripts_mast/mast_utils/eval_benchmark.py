@@ -51,6 +51,8 @@ logger = logging.getLogger("mmt.Eval")
 
 WINDOW_METRICS_FILE = "windows_metrics.csv"
 
+_LOG_INTERVAL = 50000
+
 def _safe_unlink(path: Path) -> None:
     """Best-effort unlink for eval artifacts.
 
@@ -186,6 +188,7 @@ def evaluate_benchmark_and_diagnostics(
     # Main evaluation loop (single pass)
     # ------------------------------------------------------------------
     n_windows = 0
+    next_log_at = _LOG_INTERVAL
 
     with torch.no_grad():
         for batch in dataloader:
@@ -203,8 +206,9 @@ def evaluate_benchmark_and_diagnostics(
             n_windows += B
 
             # Log sparsely to avoid spam on large evaluations
-            if n_windows > 0 and (n_windows % 50000 == 0):
-                logger.info("Evaluated %d windows so far", n_windows)
+            if n_windows >= next_log_at:
+                logger.info("Evaluated %d windows so far", next_log_at)
+                next_log_at += _LOG_INTERVAL
 
             # ------------------------------
             # Benchmark per-window metrics
