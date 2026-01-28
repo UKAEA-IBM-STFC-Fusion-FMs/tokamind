@@ -2,7 +2,7 @@
 Run a forward pass for evaluation and return outputs in native physical units.
 
 This helper:
-- runs the model on a single batch (no grad, AMP-enabled),
+- runs the model on a single batch (no grad),
 - extracts predictions in standardised coefficient space,
 - converts id-keyed outputs to name-keyed arrays,
 - decodes predictions via signal-specific codecs,
