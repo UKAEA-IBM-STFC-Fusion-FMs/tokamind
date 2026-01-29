@@ -66,23 +66,23 @@ loader:
 
 model:
   backbone:
-    d_model: 192
-    n_layers: 4
-    n_heads: 6
-    dim_ff: 768
+    d_model: 128
+    n_layers: 2
+    n_heads: 4
+    dim_ff: 384
     dropout: 0.05
     activation: relu
 
   modality_heads:
     timeseries:
-      hidden: 192
-      out_dim: 192
+      hidden: 128
+      out_dim: 128
     profile:
-      hidden: 192
-      out_dim: 192
+      hidden: 128
+      out_dim: 128
     video:
-      hidden: 192
-      out_dim: 192
+      hidden: 128
+      out_dim: 128
 
   output_adapters:
     hidden_dim:
@@ -126,10 +126,10 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 1e-3           # null: inherit from backbone
-          backbone: 5e-4
-          modality_heads: 1e-3
-          output_adapters: 1e-3
+          token_encoder: 5e-3           # null: inherit from backbone
+          backbone: 1e-3
+          modality_heads: 5e-3
+          output_adapters: 5e-3
         wd:
           token_encoder: 0.01              # null: inherit from backbone
           backbone: 0.01
