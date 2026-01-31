@@ -66,23 +66,23 @@ loader:
 
 model:
   backbone:
-    d_model: 128
-    n_layers: 2
-    n_heads: 4
-    dim_ff: 384
+    d_model: 192
+    n_layers: 4
+    n_heads: 6
+    dim_ff: 768
     dropout: 0.05
     activation: relu
 
   modality_heads:
     timeseries:
-      hidden: 128
-      out_dim: 128
+      hidden: 192
+      out_dim: 192
     profile:
-      hidden: 128
-      out_dim: 128
+      hidden: 192
+      out_dim: 192
     video:
-      hidden: 128
-      out_dim: 128
+      hidden: 192
+      out_dim: 192
 
   output_adapters:
     hidden_dim:
@@ -119,7 +119,7 @@ train:
 
   stages:
     - name: pretrain_main
-      epochs: 50
+      epochs: 20
 
       scheduler:
         grad_accum_steps: 1
