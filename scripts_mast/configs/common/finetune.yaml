@@ -75,7 +75,7 @@ model_source:
   #   - change some submodule shapes between pretrain and finetune.
   #
   # See docs/config_guide.md#warmstart for details.
-  run_dir: mmt_tiny_v1
+  run_dir: mmt_small_v1
 
   # Which model parts to warm-start. Defaults to True for all parts if omitted.
   load_parts:
@@ -128,7 +128,7 @@ train:
 
   stages:
     - name: ft_heads
-      epochs: 30
+      epochs: 5
 
       scheduler:
         grad_accum_steps: 1
@@ -137,8 +137,8 @@ train:
         lr:
           token_encoder: 5e-4
           backbone: 0.0
-          modality_heads: 5e-3
-          output_adapters: 5e-2
+          modality_heads: 1e-3
+          output_adapters: 1e-3
         wd:
           token_encoder: 0.01
           backbone: 0.0
@@ -151,26 +151,27 @@ train:
         modality_heads: false
         output_adapters: false
 
-#    - name: ft_full
-#      epochs: 40
-#
-#      scheduler:
-#        grad_accum_steps: 1
-#
-#      optimizer:
-#        lr:
-#          token_encoder: 0.0     # keep frozen in stage 2 (optional)
-#          backbone: 2e-5
-#          modality_heads: 1e-4
-#          output_adapters: 3e-4
-#        wd:
-#          token_encoder: 0.0
-#          backbone: 0.01
-#          modality_heads: 0.01
-#          output_adapters: 0.01
-#
-#      freeze:
-#        token_encoder: true
-#        backbone: false
-#        modality_heads: false
-#        output_adapters: false
+    - name: ft_full
+      # Stage 2: unfreeze backbone with a smaller LR (full finetune)
+      epochs: 10
+
+      scheduler:
+        grad_accum_steps: 1
+
+      optimizer:
+        lr:
+          token_encoder: 0.0     # keep frozen (optional)
+          backbone: 1e-4
+          modality_heads: 5e-4
+          output_adapters: 5e-3
+        wd:
+          token_encoder: 0.0
+          backbone: 0.01
+          modality_heads: 0.01
+          output_adapters: 0.01
+
+      freeze:
+        token_encoder: true
+        backbone: false
+        modality_heads: false
+        output_adapters: false
