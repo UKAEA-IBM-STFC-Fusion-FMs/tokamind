@@ -129,6 +129,23 @@ def train_finetune(
     early_delta = float(train_cfg["early_stop"]["delta"])
 
     output_weights = train_cfg["loss"]["output_weights"] or {}
+    # NOTE: config defines loss weights by *signal name*; model preds are keyed by signal_id (int).
+    # Resolve name -> signal_id once here (same convention used for output adapters).
+    _ow_cfg = output_weights
+    output_weights = {}
+    if isinstance(_ow_cfg, dict) and _ow_cfg:
+        name_to_sid = {spec.name: spec.signal_id for spec in getattr(model, 'output_specs', [])}
+        unknown = [k for k in _ow_cfg.keys() if str(k) not in name_to_sid]
+        if unknown:
+            raise KeyError(
+                f"Unknown output_weights keys: {unknown}. "
+                f"Expected output signal names among: {sorted(name_to_sid.keys())}"
+            )
+        for name, w in _ow_cfg.items():
+            output_weights[int(name_to_sid[str(name)])] = float(w)
+        # Overwrite train_cfg for consistent logging downstream
+        train_cfg['loss']['output_weights'] = output_weights
+
     use_adamw = train_cfg["optimizer"]["use_adamw"]
 
     warmup_frac = float(train_cfg["scheduler"]["warmup_steps_fraction"])
