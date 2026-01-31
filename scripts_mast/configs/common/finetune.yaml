@@ -135,10 +135,10 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 5e-4
+          token_encoder: 1e-4
           backbone: 0.0
           modality_heads: 1e-3
-          output_adapters: 1e-3
+          output_adapters: 5e-3
         wd:
           token_encoder: 0.01
           backbone: 0.0
@@ -153,7 +153,7 @@ train:
 
     - name: ft_full
       # Stage 2: unfreeze backbone with a smaller LR (full finetune)
-      epochs: 10
+      epochs: 15
 
       scheduler:
         grad_accum_steps: 1
