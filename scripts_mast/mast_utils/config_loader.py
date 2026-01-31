@@ -128,14 +128,57 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
+def _merge_stage_lists(base: list[Any], override: list[Any]) -> list[Any]:
+    """Merge train.stages lists by stage 'name' so overrides can be partial.
+
+    - If both lists contain dict items with a 'name' key, we deep-merge matching
+      stages (by name) and preserve the base order.
+    - Stages present only in the override are appended (in override order).
+    - If the lists are not in the expected format, we fall back to replacement.
+    """
+    if not (
+        all(isinstance(x, dict) and "name" in x for x in base)
+        and all(isinstance(x, dict) and "name" in x for x in override)
+    ):
+        return copy.deepcopy(override)
+
+    override_map: Dict[str, Dict[str, Any]] = {}
+    override_order: list[str] = []
+    for st in override:
+        name = str(st.get("name"))
+        override_map[name] = st
+        override_order.append(name)
+
+    base_names: set[str] = set()
+    merged_list: list[Any] = []
+    for st in base:
+        name = str(st.get("name"))
+        base_names.add(name)
+        if name in override_map:
+            merged_list.append(_deep_merge(st, override_map[name]))
+        else:
+            merged_list.append(copy.deepcopy(st))
+
+    # Append new stages defined only in overrides
+    for name in override_order:
+        if name not in base_names:
+            merged_list.append(copy.deepcopy(override_map[name]))
+
+    return merged_list
+
+
 def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any]:
     out = copy.deepcopy(base)
     for k, v in override.items():
         if k in out and isinstance(out[k], dict) and isinstance(v, dict):
             out[k] = _deep_merge(out[k], v)
+        elif k in out and k == "stages" and isinstance(out[k], list) and isinstance(v, list):
+            # Special-case: allow partial overrides of train.stages by merging on stage name.
+            out[k] = _merge_stage_lists(out[k], v)
         else:
             out[k] = copy.deepcopy(v)
     return out
+
 
 
 def _load_source_run_config_yaml(model_run_dir: Path) -> Dict[str, Any]:
