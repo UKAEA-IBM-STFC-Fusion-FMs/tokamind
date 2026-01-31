@@ -135,7 +135,7 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 1e-4
+          token_encoder: 5e-4
           backbone: 0.0
           modality_heads: 1e-3
           output_adapters: 5e-3
