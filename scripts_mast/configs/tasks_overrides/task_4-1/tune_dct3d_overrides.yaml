@@ -2,17 +2,37 @@
 
 
 tune_dct3d:
-  
   objective:
     thresholds:
       output: 0.999
     max_budget:
-      output: 6144
- 
-  # search_space:
-  #   keep_h: [ 1, 4, 8, 16, 32]
-  #   keep_w: [ 1 ]
-  #   keep_t: [ 224, 256, 320, 336, 384, 512, 768, 1024, 1280, 2048 ]
-
+      output: 36864
+  search_space:
+    keep_h:
+    - 1
+    - 2
+    - 4
+    - 8
+    - 16
+    - 32
+    keep_w:
+    - 1
+    keep_t:
+    - 128
+    - 192
+    - 224
+    - 256
+    - 384
+    - 512
+    - 768
+    - 1024
+    - 1280
+    - 2048
+    - 3072
+    - 4096
+    - 6144
+    - 8192
+    - 10240
+    - 12288
 
 
