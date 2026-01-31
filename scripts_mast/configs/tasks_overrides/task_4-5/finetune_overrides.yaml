@@ -11,7 +11,7 @@
 
 
 # Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: tuned_4-5_tiny_v0-0
+run_id: tuned_4-5_small_v1-1
 
 preprocess:
   valid_windows:
