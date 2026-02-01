@@ -6,10 +6,10 @@ embeddings:
         encoder_kwargs:
           keep_h: 3
           keep_w: 1
-          keep_t: 12288
+          keep_t: 3072
       magnetics-b_field_tor_probe_cc_field:
         encoder_name: dct3d
         encoder_kwargs:
           keep_h: 3
           keep_w: 1
-          keep_t: 12288
+          keep_t: 3072

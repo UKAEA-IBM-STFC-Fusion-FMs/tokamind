@@ -6,13 +6,13 @@ embeddings:
         encoder_kwargs:
           keep_h: 18
           keep_w: 1
-          keep_t: 2048
+          keep_t: 512
       soft_x_rays-horizontal_cam_upper:
         encoder_name: dct3d
         encoder_kwargs:
           keep_h: 18
           keep_w: 1
-          keep_t: 2048
+          keep_t: 512
       spectrometer_visible-filter_spectrometer_dalpha_voltage:
         encoder_name: dct3d
         encoder_kwargs:
