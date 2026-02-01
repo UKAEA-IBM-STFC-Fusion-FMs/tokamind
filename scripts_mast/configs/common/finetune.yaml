@@ -75,7 +75,7 @@ model_source:
   #   - change some submodule shapes between pretrain and finetune.
   #
   # See docs/config_guide.md#warmstart for details.
-  run_dir: mmt_base_v1
+  run_dir: mmt_tiny_v1
 
   # Which model parts to warm-start. Defaults to True for all parts if omitted.
   load_parts:
