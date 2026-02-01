@@ -119,7 +119,7 @@ train:
 
   stages:
     - name: pretrain_main
-      epochs: 20
+      epochs: 50
 
       scheduler:
         grad_accum_steps: 1

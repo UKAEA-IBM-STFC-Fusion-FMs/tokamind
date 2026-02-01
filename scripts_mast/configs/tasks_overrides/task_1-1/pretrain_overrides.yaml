@@ -4,7 +4,7 @@
 # LR/epochs, warm-start settings, etc.).
 
 # Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: trained_1-1_small_v1
+run_id: trained_1-1_small_v2
 
 preprocess:
   valid_windows:
