@@ -7,8 +7,8 @@
 
 model_source:
   # source model directory. It must be in runs/
-  run_dir: tuned_4-5_tiny_v1-2
-#  run_dir: trained_4-5_small_v1
+#  run_dir: tuned_4-5_tiny_v1-2
+  run_dir: trained_4-5_small_v1
 
 # If omitted, loader uses eval__<timestamp>.
 eval_id: eval
