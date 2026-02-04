@@ -7,7 +7,7 @@ Strict expectations (current VAE_fairmast refactor)
 ---------------------------------------------------
 - VAE_fairmast is installed and exposes the python package `vae_pipeline`.
 - Trained VAEs live under:
-    <VAE_fairmast>/src/vae_pipeline/data/trained_VAEs/<MODEL_DIR>/
+    <VAE_fairmast>/src/vae_pipeline/data/trained_vaes/<MODEL_DIR>/
   containing:
     - exactly one config_*.json
     - exactly one best_*.pt
@@ -103,7 +103,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
 
     # .../vae_pipeline/configs/config_setup.py -> .../vae_pipeline
     vae_pkg_dir = Path(cs_file).resolve().parent.parent
-    trained_root = (vae_pkg_dir / "data" / "trained_VAEs").resolve()
+    trained_root = (vae_pkg_dir / "data" / "trained_vaes").resolve()
     cand = trained_root / p
 
     if cand.is_dir():
@@ -123,6 +123,16 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
     """
     Read minimal metadata needed by MMT from a trained VAE folder.
 
+    STRICT (no backwards compatibility):
+    - Each model folder MUST contain:
+        - mmt_info.json
+        - exactly one config_*.json (used to build VAE settings)
+    - mmt_info.json MUST contain:
+        - latent_dim (int)
+        - in_channels (int)
+        - seq_len (int)
+        - checkpoint (str)  # filename or glob pattern relative to the model folder
+
     Returns a dict:
       - model_dir (Path)
       - config_path (Path)
@@ -133,6 +143,23 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
     """
     md = resolve_vae_model_dir(model_dir)
 
+    info_path = md / "mmt_info.json"
+    if not info_path.is_file():
+        raise FileNotFoundError(
+            f"Missing required mmt_info.json in VAE model directory: {md}\n"
+            "Create it with keys: latent_dim, in_channels, seq_len, checkpoint."
+        )
+    info = _read_json(info_path)
+
+    for k in ("latent_dim", "in_channels", "seq_len", "checkpoint"):
+        if k not in info:
+            raise KeyError(f"mmt_info.json missing required key {k!r}: {info_path}")
+
+    latent_dim = int(info["latent_dim"])
+    in_channels = int(info["in_channels"])
+    seq_len = int(info["seq_len"])
+    checkpoint_spec = str(info["checkpoint"])
+
     cfg_files = sorted(md.glob("config_*.json"))
     if len(cfg_files) != 1:
         raise FileNotFoundError(
@@ -140,102 +167,23 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
             + ", ".join([p.name for p in cfg_files])
         )
     config_path = cfg_files[0]
-    cfg = _read_json(config_path)
 
-    # latent dim
-    try:
-        latent_dim = int(cfg["beta-vae"]["latent_dim"])
-    except Exception as e:
-        raise KeyError(
-            f"Missing beta-vae.latent_dim in {config_path}. "
-            f"Original error: {type(e).__name__}: {e}"
-        ) from e
-
-    # expected input channels
-    #
-    # conv1d VAEs expose this as `in_channels` in the first Conv1d layer.
-    # linear VAEs (new) only expose `in_features` in the first Linear layer; in the
-    # current VAE_fairmast configs these linear models are trained on scalar signals
-    # so we assume 1 channel and validate in_features == seq_len.
-    in_channels = None
-    linear_in_features: Optional[int] = None
-
-    # ---- conv1d schemas (as in older + newer conv1d configs) ----
-    if isinstance(cfg.get("encoder_specs"), dict) and "conv1d_in_channels" in cfg["encoder_specs"]:
-        in_channels = int(cfg["encoder_specs"]["conv1d_in_channels"])
-    elif (
-        isinstance(cfg.get("encoder"), dict)
-        and isinstance(cfg["encoder"].get("layers"), list)
-        and len(cfg["encoder"]["layers"]) > 0
-        and isinstance(cfg["encoder"]["layers"][0], dict)
-        and isinstance(cfg["encoder"]["layers"][0].get("params"), dict)
-        and "in_channels" in cfg["encoder"]["layers"][0]["params"]
-    ):
-        in_channels = int(cfg["encoder"]["layers"][0]["params"]["in_channels"])
-    elif isinstance(cfg.get("conv1d_encoder"), dict) and "conv1d_in_channels" in cfg["conv1d_encoder"]:
-        in_channels = int(cfg["conv1d_encoder"]["conv1d_in_channels"])
-
-    # ---- linear schema (new linear_* VAEs) ----
-    if in_channels is None and isinstance(cfg.get("encoder"), dict) and cfg["encoder"].get("type") == "linear":
-        try:
-            linear_in_features = int(cfg["encoder"]["layers"][0]["params"]["in_features"])
-        except Exception as e:
-            raise KeyError(
-                f"Missing encoder.layers[0].params.in_features in {config_path} (linear VAE config). "
-                f"Original error: {type(e).__name__}: {e}"
-            ) from e
-
-        # Current VAE_fairmast linear models are trained on scalar signals -> 1 channel.
-        in_channels = 1
-
-
-    if in_channels is None:
-        raise KeyError(
-            f"Could not find expected input channels in {config_path}. Expected one of:\n"
-            "  - conv1d VAE: encoder_specs.conv1d_in_channels\n"
-            "  - conv1d VAE: encoder.layers[0].params.in_channels\n"
-            "  - conv1d VAE: conv1d_encoder.conv1d_in_channels\n"
-            "  - linear VAE: encoder.type == 'linear' and encoder.layers[0].params.in_features (assumed 1 channel)"
-        )
-
-
-    # seq_len: allow typo + correct
-    ts = None
-    if isinstance(cfg.get("time_settings"), dict):
-        if "tergeted_time_stamp_per_window" in cfg["time_settings"]:
-            ts = cfg["time_settings"]["tergeted_time_stamp_per_window"]
-        elif "targeted_time_stamps_per_window" in cfg["time_settings"]:
-            ts = cfg["time_settings"]["targeted_time_stamps_per_window"]
-    if ts is None:
-        raise KeyError(
-            f"Could not find seq_len in {config_path}. Expected either:\n"
-            "  - time_settings.tergeted_time_stamp_per_window\n"
-            "  - time_settings.targeted_time_stamps_per_window"
-        )
-    seq_len = int(ts)
-
-
-    if linear_in_features is not None:
-        # For linear VAEs, the first Linear layer operates on `in_features`.
-        # In the current VAE_fairmast configs this equals: in_channels * seq_len.
-        if seq_len <= 0:
-            raise ValueError(f"Invalid seq_len={seq_len} parsed from {config_path}.")
-        if int(linear_in_features) % int(seq_len) != 0:
-            raise ValueError(
-                "Linear VAE config inconsistent dimensions: "
-                f"in_features={linear_in_features} is not divisible by seq_len={seq_len} "
-                f"(from time_settings.targeted_time_stamps_per_window) in {config_path}."
+    # checkpoint_spec can be an exact filename or a glob (e.g. "best_*.pt")
+    has_glob = any(ch in checkpoint_spec for ch in ("*", "?", "["))
+    if has_glob:
+        matches = sorted(md.glob(checkpoint_spec))
+        if len(matches) != 1:
+            raise FileNotFoundError(
+                f"Checkpoint pattern {checkpoint_spec!r} in {info_path} must match exactly 1 file in {md}, "
+                f"matched {len(matches)}: " + ", ".join([p.name for p in matches])
             )
-        in_channels = int(linear_in_features) // int(seq_len)
-
-
-    ckpt_files = sorted(md.glob("best_*.pt"))
-    if len(ckpt_files) != 1:
-        raise FileNotFoundError(
-            f"Expected exactly 1 best_*.pt in {md}, found {len(ckpt_files)}: "
-            + ", ".join([p.name for p in ckpt_files])
-        )
-    checkpoint_path = ckpt_files[0]
+        checkpoint_path = matches[0]
+    else:
+        checkpoint_path = md / checkpoint_spec
+        if not checkpoint_path.is_file():
+            raise FileNotFoundError(
+                f"Checkpoint file {checkpoint_spec!r} from {info_path} not found in {md}."
+            )
 
     return {
         "model_dir": md,
@@ -245,8 +193,6 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
         "in_channels": in_channels,
         "seq_len": seq_len,
     }
-
-
 # --------------------------------------------------------------------------------------
 # Codec implementation
 # --------------------------------------------------------------------------------------
