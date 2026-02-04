@@ -309,9 +309,15 @@ class VAECodec:
             mu, logvar = self.model.encode(x_t)
             z_t = mu if self.use_mu else self.model.reparameterize(mu, logvar)
 
-        z = z_t.squeeze(0).detach().cpu().numpy().astype(np.float32, copy=False)
-        if z.ndim != 1 or z.shape[0] != self.latent_dim:
-            raise RuntimeError(f"VAECodec produced latent shape {z.shape}; expected ({self.latent_dim},).")
+        # beta_VAE implementations sometimes return mu/logvar with extra singleton dims
+        # (e.g. (B, 1, latent_dim)). We flatten and validate total length == latent_dim.
+        z = z_t.detach().cpu().numpy()
+        z = np.asarray(z, dtype=np.float32).reshape(-1)
+        if z.shape[0] != self.latent_dim:
+            raise RuntimeError(
+                f"VAECodec produced latent shape {tuple(z_t.shape)} (flattened to {z.shape}); "
+                f"expected latent_dim={self.latent_dim}."
+            )
         return z
 
     def decode(self, z: np.ndarray, original_shape: Tuple[int, ...]) -> np.ndarray:
@@ -326,7 +332,11 @@ class VAECodec:
         z_t = z_t.to(device=self.device, dtype=torch.float32)
 
         with torch.no_grad():
-            x_hat = self.model.decode(z_t)
+            try:
+                x_hat = self.model.decode(z_t)
+            except Exception:
+                # Some VAE_fairmast variants expect an extra singleton dim: (B, 1, D)
+                x_hat = self.model.decode(z_t.unsqueeze(1))
 
         if not isinstance(x_hat, torch.Tensor):
             raise RuntimeError(f"VAE decode returned {type(x_hat).__name__}, expected torch.Tensor")
