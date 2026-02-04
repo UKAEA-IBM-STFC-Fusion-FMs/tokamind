@@ -151,8 +151,16 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
             f"Original error: {type(e).__name__}: {e}"
         ) from e
 
-    # in_channels (support the two schemas currently present in your configs)
+    # expected input channels
+    #
+    # conv1d VAEs expose this as `in_channels` in the first Conv1d layer.
+    # linear VAEs (new) only expose `in_features` in the first Linear layer; in the
+    # current VAE_fairmast configs these linear models are trained on scalar signals
+    # so we assume 1 channel and validate in_features == seq_len.
     in_channels = None
+    linear_in_features: Optional[int] = None
+
+    # ---- conv1d schemas (as in older + newer conv1d configs) ----
     if isinstance(cfg.get("encoder_specs"), dict) and "conv1d_in_channels" in cfg["encoder_specs"]:
         in_channels = int(cfg["encoder_specs"]["conv1d_in_channels"])
     elif (
@@ -167,13 +175,29 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
     elif isinstance(cfg.get("conv1d_encoder"), dict) and "conv1d_in_channels" in cfg["conv1d_encoder"]:
         in_channels = int(cfg["conv1d_encoder"]["conv1d_in_channels"])
 
+    # ---- linear schema (new linear_* VAEs) ----
+    if in_channels is None and isinstance(cfg.get("encoder"), dict) and cfg["encoder"].get("type") == "linear":
+        try:
+            linear_in_features = int(cfg["encoder"]["layers"][0]["params"]["in_features"])
+        except Exception as e:
+            raise KeyError(
+                f"Missing encoder.layers[0].params.in_features in {config_path} (linear VAE config). "
+                f"Original error: {type(e).__name__}: {e}"
+            ) from e
+
+        # Current VAE_fairmast linear models are trained on scalar signals -> 1 channel.
+        in_channels = 1
+
+
     if in_channels is None:
         raise KeyError(
-            f"Could not find in_channels in {config_path}. Expected one of:\n"
-            "  - encoder_specs.conv1d_in_channels\n"
-            "  - encoder.layers[0].params.in_channels\n"
-            "  - conv1d_encoder.conv1d_in_channels"
+            f"Could not find expected input channels in {config_path}. Expected one of:\n"
+            "  - conv1d VAE: encoder_specs.conv1d_in_channels\n"
+            "  - conv1d VAE: encoder.layers[0].params.in_channels\n"
+            "  - conv1d VAE: conv1d_encoder.conv1d_in_channels\n"
+            "  - linear VAE: encoder.type == 'linear' and encoder.layers[0].params.in_features (assumed 1 channel)"
         )
+
 
     # seq_len: allow typo + correct
     ts = None
@@ -189,6 +213,21 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
             "  - time_settings.targeted_time_stamps_per_window"
         )
     seq_len = int(ts)
+
+
+    if linear_in_features is not None:
+        # For linear VAEs, the first Linear layer operates on `in_features`.
+        # In the current VAE_fairmast configs this equals: in_channels * seq_len.
+        if seq_len <= 0:
+            raise ValueError(f"Invalid seq_len={seq_len} parsed from {config_path}.")
+        if int(linear_in_features) % int(seq_len) != 0:
+            raise ValueError(
+                "Linear VAE config inconsistent dimensions: "
+                f"in_features={linear_in_features} is not divisible by seq_len={seq_len} "
+                f"(from time_settings.targeted_time_stamps_per_window) in {config_path}."
+            )
+        in_channels = int(linear_in_features) // int(seq_len)
+
 
     ckpt_files = sorted(md.glob("best_*.pt"))
     if len(ckpt_files) != 1:
