@@ -5,41 +5,28 @@ embeddings:
         encoder_name: vae
         encoder_kwargs:
           model_dir: conv1d_vae_config_flux_loop_flux
-#          device: cpu
 
       magnetics-b_field_pol_probe_ccbv_field:
         encoder_name: vae
         encoder_kwargs:
           model_dir: conv1d_vae_config_b_field_pol_probe_ccbv_field
-#          device: cpu
 
       magnetics-b_field_pol_probe_obr_field:
         encoder_name: vae
         encoder_kwargs:
           model_dir: conv1d_vae_config_b_field_pol_probe_obr_field
-#          device: cpu
 
       magnetics-b_field_pol_probe_obv_field:
         encoder_name: vae
         encoder_kwargs:
           model_dir: conv1d_vae_config_b_field_pol_probe_obv_field
-#          device: cpu
 
       pf_active-coil_current:
         encoder_name: vae
         encoder_kwargs:
           model_dir: conv1d_vae_config_coil_current
-#          device: cpu
-
-      pf_active-solenoid_current:
-        encoder_name: vae
-        encoder_kwargs:
-          model_dir: linear_vae_config_solenoid_current
-#          device: cpu
 
       summary-ip:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: linear_vae_config_summary_ip_linear
-#          device: cpu
-    
+          model_dir: linear_vae_config_summary_ip

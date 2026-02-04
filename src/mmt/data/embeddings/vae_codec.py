@@ -7,7 +7,7 @@ Strict expectations (current VAE_fairmast refactor)
 ---------------------------------------------------
 - VAE_fairmast is installed and exposes the python package `vae_pipeline`.
 - Trained VAEs live under:
-    <VAE_fairmast>/src/vae_pipeline/data/trained_vaes/<MODEL_DIR>/
+    <VAE_fairmast>/src/vae_pipeline/data/trained_VAEs/<MODEL_DIR>/
   containing:
     - exactly one config_*.json
     - exactly one best_*.pt
@@ -103,7 +103,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
 
     # .../vae_pipeline/configs/config_setup.py -> .../vae_pipeline
     vae_pkg_dir = Path(cs_file).resolve().parent.parent
-    trained_root = (vae_pkg_dir / "data" / "trained_vaes").resolve()
+    trained_root = (vae_pkg_dir / "data" / "trained_VAEs").resolve()
     cand = trained_root / p
 
     if cand.is_dir():
