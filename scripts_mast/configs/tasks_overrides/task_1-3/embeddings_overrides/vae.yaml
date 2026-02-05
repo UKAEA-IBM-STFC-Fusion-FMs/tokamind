@@ -16,6 +16,11 @@ embeddings:
         encoder_kwargs:
           model_dir: conv1d_vae_config_b_field_pol_probe_obr_field
 
+      magnetics-b_field_tor_probe_saddle_voltage:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_b_field_tor_probe_saddle_voltage
+
       magnetics-b_field_pol_probe_obv_field:
         encoder_name: vae
         encoder_kwargs:
@@ -29,4 +34,4 @@ embeddings:
       summary-ip:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: linear_vae_config_summary_ip
+          model_dir: linear_vae_config_summary_ip 
