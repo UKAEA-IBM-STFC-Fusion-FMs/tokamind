@@ -39,13 +39,16 @@ This submission consists of up to three local repositories (we suggest to leave 
 - `tokamind/` (TokaMind framework)
 - `vae-fairmast/` (optional: VAE embeddings used for Group-1 experiments)
 
-[//]: # (> **Recommended layout:** place the repositories side-by-side in the same parent folder.)
-
 ### 1) Create and activate a conda environment
-**Recommended Python:** **3.10+**
+**Recommended Python:** **3.11+**
 ```bash
 conda create -n tokamind-env python=3.12
 conda activate tokamind-env
+```
+
+**For Windows users, install `wheels` and `setuptools`:**
+```bash
+pip install -U pip setuptools wheel
 ```
 
 ### 2) Install the benchmark/data package
@@ -60,6 +63,10 @@ pip install -e .
 ```bash
 cd ../tokamind
 pip install -e .
+```
+Optional:
+
+```bash
 pip install -e ".[dev]"
 ```
 
@@ -69,15 +76,7 @@ Only needed to reproduce the VAE embedding experiments for Group-1.
 
 ```bash
 cd ../vae-fairmast
-pip install -e ."
-```
-
-### Quick sanity check
-
-From `tokamind/`:
-
-```bash
-python -c "import mmt; print('mmt import OK')"
+pip install -e .
 ```
 
 
