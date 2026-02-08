@@ -21,7 +21,6 @@ model_source:
   run_dir: "<training_run_id>"
 ```
 
-> Legacy naming: some configs may use `model_init.model_dir`. The meaning is the same:
 > it is the training run directory whose checkpoint weights will be loaded.
 
 Evaluation loads the **best** checkpoint if present, otherwise it falls back to the latest checkpoint.
