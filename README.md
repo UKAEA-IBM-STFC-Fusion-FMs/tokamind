@@ -11,7 +11,12 @@ If you’re new to the repo, start with the **toy example** in `examples/` (runs
 
 ## Description
 
-The core idea is to represent heterogeneous modalities as a **sequence of tokens**, where each token corresponds to a compressed representation of a chunk of data (e.g., a short time segment for time-series). Tokens from inputs/actuators are processed by a Transformer backbone, and outputs are produced by lightweight **per-output adapters**.
+This repo implements a schema-flexible tokenization pipeline and a modular Multi-Modal Transformer with per-output adapters.
+
+[![MMT architecture](assets/mmt_architecture.png)](assets/mmt_architecture.pdf)
+*Figure: Tokenization + model flow.* Windowed multimodal inputs/actuators are chunked and compressed by signal-specific codecs into tokens. 
+Tokens are projected to a shared model dimension (with metadata embeddings), processed by a Transformer backbone, and mapped 
+to targets via modality heads + per-output adapters; masks handle missing inputs/targets without imputation.
 
 Key features:
 
@@ -22,76 +27,153 @@ Key features:
 
 For deeper details, see:
 - `docs/model_architecture.md`
+- `docs/transforms.md`
 - `docs/model_flexibility.md`
 
----
-
-## Visuals
-
-Architecture and pipeline diagrams live in:
-- `docs/model_architecture.md`
-- `docs/transforms.md`
-
-(You can add figures/screenshots here later if desired.)
-
----
 
 ## 📦 Installation
 
-There are two common workflows:
+This submission consists of up to three local repositories (we suggest to leave them side-by-side in the same parent folder):
 
-1) **Core install + toy example** (recommended first; no benchmark required)  
-2) **Full MAST integration** (requires the benchmark repository and datasets)
+- `fairmast-data-preprocessing/` (TokaMark benchmark + data utilities)
+- `tokamind/` (TokaMind framework)
+- `vae-fairmast/` (optional: VAE embeddings used for Group-1 experiments)
 
-### 1) Install MMT (core library)
+[//]: # (> **Recommended layout:** place the repositories side-by-side in the same parent folder.)
 
-Clone and install in editable mode:
-
+### 1) Create and activate a conda environment
+**Recommended Python:** **3.10+**
 ```bash
-git clone https://github.com/<org>/multi-modal-transformer.git
-cd multi-modal-transformer
-
-python -m pip install -U pip
-pip install -e .
-# Optional developer extras:
-pip install -e ".[dev]"
+conda create -n tokamind-env python=3.12
+conda activate tokamind-env
 ```
 
-Smoke test with synthetic data:
+### 2) Install the benchmark/data package
 
 ```bash
-python examples/toy_train.py --config examples/configs/toy.yaml
+cd fairmast-data-preprocessing
+python -m pip install -e .
 ```
 
-### 2) Full MAST integration (benchmark repository)
-
-This repository is designed to run on top of a **Benchmark Environment** (FAIR/MAST preprocessing + datasets).
-
-Follow these steps:
-
-#### a) Install the benchmark repository
+### 3) Install TokaMind
 
 ```bash
-git clone https://github.com/<org>/<benchmark-repo>.git
-cd <benchmark-repo>
-
-# complete block (dataset + deps)
-```
-
-Make sure the benchmark repo is importable in the same Python environment used by MMT
-(e.g., via `pip install -e .` in the benchmark repo, or by setting `PYTHONPATH`).
-
-#### b) Install MMT
-
-```bash
-git clone https://github.com/<org>/multi-modal-transformer.git
-cd multi-modal-transformer
-
+cd ../tokamind
 pip install -e .
 pip install -e ".[dev]"
 ```
 
----
+### 4) (Optional) Install VAE embeddings support
+
+Only needed to reproduce the VAE embedding experiments for Group-1.
+
+```bash
+cd ../vae-fairmast
+pip install -e ."
+```
+
+### Quick sanity check
+
+From `tokamind/`:
+
+```bash
+python -c "import mmt; print('mmt import OK')"
+```
+
+
+
+[//]: # (## 📦 Installation)
+
+[//]: # ()
+[//]: # (There are two common workflows:)
+
+[//]: # ()
+[//]: # (1&#41; **Core install + toy example** &#40;recommended first; no benchmark required&#41;  )
+
+[//]: # (2&#41; **Full MAST integration** &#40;requires the benchmark repository and datasets&#41;)
+
+[//]: # ()
+[//]: # (### 1&#41; Install MMT &#40;core library&#41;)
+
+[//]: # ()
+[//]: # (Clone and install in editable mode:)
+
+[//]: # ()
+[//]: # (```bash)
+
+[//]: # (git clone https://github.com/<org>/multi-modal-transformer.git)
+
+[//]: # (cd multi-modal-transformer)
+
+[//]: # ()
+[//]: # (python -m pip install -U pip)
+
+[//]: # (pip install -e .)
+
+[//]: # (# Optional developer extras:)
+
+[//]: # (pip install -e ".[dev]")
+
+[//]: # (```)
+
+[//]: # ()
+[//]: # (Smoke test with synthetic data:)
+
+[//]: # ()
+[//]: # (```bash)
+
+[//]: # (python examples/toy_train.py --config examples/configs/toy.yaml)
+
+[//]: # (```)
+
+[//]: # ()
+[//]: # (### 2&#41; Full MAST integration &#40;benchmark repository&#41;)
+
+[//]: # ()
+[//]: # (This repository is designed to run on top of a **Benchmark Environment** &#40;FAIR/MAST preprocessing + datasets&#41;.)
+
+[//]: # ()
+[//]: # (Follow these steps:)
+
+[//]: # ()
+[//]: # (#### a&#41; Install the benchmark repository)
+
+[//]: # ()
+[//]: # (```bash)
+
+[//]: # (git clone https://github.com/<org>/<benchmark-repo>.git)
+
+[//]: # (cd <benchmark-repo>)
+
+[//]: # ()
+[//]: # (# complete block &#40;dataset + deps&#41;)
+
+[//]: # (```)
+
+[//]: # ()
+[//]: # (Make sure the benchmark repo is importable in the same Python environment used by MMT)
+
+[//]: # (&#40;e.g., via `pip install -e .` in the benchmark repo, or by setting `PYTHONPATH`&#41;.)
+
+[//]: # ()
+[//]: # (#### b&#41; Install MMT)
+
+[//]: # ()
+[//]: # (```bash)
+
+[//]: # (git clone https://github.com/<org>/multi-modal-transformer.git)
+
+[//]: # (cd multi-modal-transformer)
+
+[//]: # ()
+[//]: # (pip install -e .)
+
+[//]: # (pip install -e ".[dev]")
+
+[//]: # (```)
+
+[//]: # ()
+[//]: # (---)
 
 ## Usage
 
