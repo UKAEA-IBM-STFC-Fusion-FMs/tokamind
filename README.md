@@ -52,7 +52,7 @@ conda activate tokamind-env
 
 ```bash
 cd fairmast-data-preprocessing
-python -m pip install -e .
+pip install -e .
 ```
 
 ### 3) Install TokaMind
