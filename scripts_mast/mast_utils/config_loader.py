@@ -50,13 +50,15 @@ Model + preprocess inheritance from model_source
 ------------------------------------------------
 To ensure consistent evaluation and avoid config drift:
 
-- ``finetune`` requires ``model_source.run_dir`` (a run id under ``runs/``).
+- ``finetune`` requires ``model_source.run_id`` (a run id under ``runs/``), with optional
+  ``model_source.model_path`` to override where the checkpoints are loaded from.
+
   The loader loads ``model`` and ``preprocess.chunk``/``preprocess.trim_chunks`` from the
-  source run config YAML (``runs/<run_id>/<run_id>.yaml``), then applies any finetune-side
+  source run config YAML (``<run_dir>/<run_id>.yaml``), then applies any finetune-side
   overrides on top.
 
-- ``eval`` requires ``model_source.run_dir`` and rebuilds the model spec from the
-  source run config YAML, taking:
+- ``eval`` requires ``model_source.run_id`` (or ``model_source.model_path``) and rebuilds
+  the model spec from the source run config YAML, taking:
     - ``model``
     - ``embeddings``
     - ``preprocess.chunk`` / ``preprocess.trim_chunks``
@@ -108,7 +110,7 @@ def _resolve_run_id_to_run_dir(run_id: str) -> Path:
     s = str(run_id).strip()
     if not s:
         raise ValueError(
-            "model_source.run_dir must be a non-empty run id (folder name under <repo_root>/runs/)."
+            "model_source.run_id must be a non-empty run id (folder name under <repo_root>/runs/)."
         )
 
     p = Path(s)
@@ -116,11 +118,62 @@ def _resolve_run_id_to_run_dir(run_id: str) -> Path:
     # Enforce "run id only" (no relative/absolute paths).
     if p.is_absolute() or len(p.parts) != 1:
         raise ValueError(
-            "model_source.run_dir must be a run id (folder name under <repo_root>/runs/), "
+            "model_source.run_id must be a run id (folder name under <repo_root>/runs/), "
             "e.g. 'pretrain_base'. Do not include 'runs/' or any path separators."
         )
 
     return (get_repo_root() / "runs" / p.parts[0]).resolve()
+
+
+def _resolve_model_source_dir(model_source: Dict[str, Any], *, phase: str) -> tuple[Path, str | None]:
+    """Resolve model_source to an absolute directory.
+
+    Recommended config:
+      model_source:
+        run_id: pretrain_12345
+        model_path: null   # if set, overrides run_id
+
+    Backward-compatible:
+      model_source:
+        run_dir: pretrain_12345   # legacy name for run_id
+
+    Returns
+    -------
+    (src_run_dir, src_run_id_for_yaml)
+        src_run_dir: absolute path to the directory containing checkpoints/
+        src_run_id_for_yaml: run_id to locate <run_id>.yaml inside src_run_dir (may be None)
+    """
+    if not isinstance(model_source, dict):
+        raise TypeError("Config key 'model_source' must be a mapping (dict).")
+
+    model_path = model_source.get("model_path", None)
+    run_id = model_source.get("run_id", None)
+
+    # Legacy support: run_dir used to store the run id string.
+    if run_id is None and model_source.get("run_dir", None) is not None:
+        run_id = model_source.get("run_dir")
+
+    # External directory override.
+    if model_path is not None:
+        mp = str(model_path).strip()
+        if not mp:
+            raise ValueError("model_source.model_path, if provided, must be a non-empty path string.")
+        p = _resolve_from_repo_root(mp)
+        if not p.is_dir():
+            raise FileNotFoundError(
+                f"{phase} phase requires model_source.model_path to point to an existing directory.\n"
+                f"Got: {p}"
+            )
+        return p, None
+
+    # Otherwise require a run id under runs/
+    if run_id is None:
+        raise ValueError(
+            f"{phase} phase requires model_source.run_id (a training run id under <repo_root>/runs/) "
+            "or model_source.model_path (external run directory)."
+        )
+
+    return _resolve_run_id_to_run_dir(str(run_id)), str(run_id).strip()
 
 
 def _load_yaml(path: Path) -> Dict[str, Any]:
@@ -180,9 +233,12 @@ def _deep_merge(base: Dict[str, Any], override: Dict[str, Any]) -> Dict[str, Any
     return out
 
 
-
 def _load_source_run_config_yaml(model_run_dir: Path) -> Dict[str, Any]:
-    """Load the saved merged config YAML for a previous training run."""
+    """Load the saved merged config YAML for a previous training run.
+
+    Convention: the merged config snapshot lives at:
+        <run_dir>/<run_dir.name>.yaml
+    """
     src_cfg_path = model_run_dir / f"{model_run_dir.name}.yaml"
     if not src_cfg_path.is_file():
         raise FileNotFoundError(
@@ -191,6 +247,7 @@ def _load_source_run_config_yaml(model_run_dir: Path) -> Dict[str, Any]:
             f"  {src_cfg_path}\n"
         )
     return _load_yaml(src_cfg_path)
+
 
 
 def _inherit_preprocess_chunk_trim(
@@ -234,20 +291,14 @@ def _inherit_preprocess_chunk_trim(
 
     if allow_override:
         if override_chunk is not None:
-            if isinstance(override_chunk, dict) and isinstance(
-                merged_pre["chunk"], dict
-            ):
+            if isinstance(override_chunk, dict) and isinstance(merged_pre["chunk"], dict):
                 merged_pre["chunk"] = _deep_merge(merged_pre["chunk"], override_chunk)
             else:
                 merged_pre["chunk"] = override_chunk
 
         if override_trim is not None:
-            if isinstance(override_trim, dict) and isinstance(
-                merged_pre["trim_chunks"], dict
-            ):
-                merged_pre["trim_chunks"] = _deep_merge(
-                    merged_pre["trim_chunks"], override_trim
-                )
+            if isinstance(override_trim, dict) and isinstance(merged_pre["trim_chunks"], dict):
+                merged_pre["trim_chunks"] = _deep_merge(merged_pre["trim_chunks"], override_trim)
             else:
                 merged_pre["trim_chunks"] = override_trim
 
@@ -291,15 +342,12 @@ def _compute_paths(
 
     # eval writes into <model_run_dir>/<eval_id>
     # NOTE: do *not* create directories here.
-    # We only create the eval folder after confirming the source run config exists
     if phase == "eval":
         init_cfg = merged.get("model_source", {})
-        model_dir = init_cfg.get("run_dir") if isinstance(init_cfg, dict) else None
-        if model_dir is None:
-            raise ValueError(
-                "Eval phase requires model_source.run_dir set to a training run id (folder name under <repo_root>/runs/)."
-            )
-        model_dir = _resolve_run_id_to_run_dir(str(model_dir))
+        if not isinstance(init_cfg, dict):
+            raise TypeError("Config key 'model_source' must be a mapping (dict).")
+
+        model_dir, _ = _resolve_model_source_dir(init_cfg, phase="eval")
 
         eval_id = merged.get("eval_id") or f"{task}__eval__{timestamp}"
         eval_dir = model_dir / eval_id
@@ -361,9 +409,7 @@ def load_experiment_config(
 
     configs_root_path = _resolve_from_repo_root(str(configs_root))
     common_dir = configs_root_path / "common"
-    tasks_overrides_dir = (
-        configs_root_path / "tasks_overrides" / task
-    )  # may not exist (OK)
+    tasks_overrides_dir = configs_root_path / "tasks_overrides" / task  # may not exist (OK)
 
     # Required common files
     embeddings_path = common_dir / "embeddings.yaml"
@@ -429,18 +475,14 @@ def load_experiment_config(
     # ------------------------------------------------------------------
     src_run_dir: Path | None = None
     src_cfg: Dict[str, Any] | None = None
+    src_run_id_for_yaml: str | None = None
+
     if phase in ("finetune", "eval"):
         init_cfg = merged.get("model_source", {})
         if not isinstance(init_cfg, dict):
             raise TypeError("Config key 'model_source' must be a mapping (dict).")
 
-        src_run_id = init_cfg.get("run_dir", None)
-        if src_run_id is None:
-            raise ValueError(
-                f"{phase} phase requires model_source.run_dir set to a training run id (folder name under <repo_root>/runs/)."
-            )
-
-        src_run_dir = _resolve_run_id_to_run_dir(str(src_run_id))
+        src_run_dir, src_run_id_for_yaml = _resolve_model_source_dir(init_cfg, phase=phase)
 
         # 1) Source run config must exist (and we load it once here).
         src_cfg = _load_source_run_config_yaml(src_run_dir)
@@ -472,11 +514,9 @@ def load_experiment_config(
     # ------------------------------------------------------------------
     # Phase-specific inheritance from the *source run config*.
     #
-    # - finetune requires model_source.run_dir and inherits model + preprocess chunk/trim,
+    # - finetune requires model_source.run_id/model_path and inherits model + preprocess chunk/trim,
     #   then applies finetune-side overrides on top.
-    # - eval requires model_source.run_dir and rebuilds model + embeddings + preprocess chunk/trim.
-    #
-    # NOTE: src_run_dir/src_cfg are validated + loaded above (before _compute_paths).
+    # - eval requires model_source.run_id/model_path and rebuilds model + embeddings + preprocess chunk/trim.
     # ------------------------------------------------------------------
     if phase in ("finetune", "eval"):
         if src_run_dir is None or src_cfg is None:
@@ -487,7 +527,7 @@ def load_experiment_config(
         if "model" not in src_cfg:
             raise KeyError(
                 "Source run config YAML is missing required key 'model'.\n"
-                f"path={src_run_dir}/{src_run_dir.name}.yaml"
+                f"path={src_run_dir}/{(src_run_id_for_yaml or src_run_dir.name)}.yaml"
             )
 
         if phase == "finetune":
@@ -496,9 +536,7 @@ def load_experiment_config(
             merged["model"] = copy.deepcopy(src_cfg["model"])
             if model_override:
                 if not isinstance(model_override, dict):
-                    raise TypeError(
-                        "Finetune 'model' overrides must be a mapping (dict)."
-                    )
+                    raise TypeError("Finetune 'model' overrides must be a mapping (dict).")
                 merged["model"] = _deep_merge(merged["model"], model_override)
 
             # Preprocess: inherit chunk/trim from source (keep finetune valid_windows, etc.).
@@ -508,26 +546,30 @@ def load_experiment_config(
             if "embeddings" not in src_cfg:
                 raise KeyError(
                     "Source run config YAML is missing required key 'embeddings'.\n"
-                    f"path={src_run_dir}/{src_run_dir.name}.yaml"
+                    f"path={src_run_dir}/{(src_run_id_for_yaml or src_run_dir.name)}.yaml"
                 )
 
             merged["model"] = copy.deepcopy(src_cfg["model"])
             merged["embeddings"] = copy.deepcopy(src_cfg["embeddings"])
 
-            # For eval, the embedding profile is defined by the source run.
-            # Any CLI/profile selection is ignored to avoid config drift.
+            # For eval, embedding profile is defined by the source run.
             merged["embeddings_profile"] = src_cfg.get(
                 "embeddings_profile", merged.get("embeddings_profile")
             )
             _inherit_preprocess_chunk_trim(merged, src_cfg, allow_override=False)
 
-    # Resolve model_source.run_dir to absolute path (if present)
-    if isinstance(merged.get("model_source"), dict):
-        model_dir = merged["model_source"].get("run_dir", None)
-        if model_dir is not None:
-            merged["model_source"]["run_dir"] = str(
-                _resolve_run_id_to_run_dir(str(model_dir))
-            )
+        # Normalize model_source for downstream code: set run_dir to absolute dir.
+        if isinstance(merged.get("model_source"), dict):
+            merged["model_source"]["run_dir"] = str(src_run_dir)
+            if src_run_id_for_yaml is not None:
+                merged["model_source"]["run_id"] = str(src_run_id_for_yaml)
+
+    # model_source is only valid for finetune/eval
+    if phase not in ("finetune", "eval") and "model_source" in merged:
+        logger.warning(
+            "Ignoring 'model_source' in phase=%s (only used for finetune/eval).", phase
+        )
+
 
     # Save merged config
     if phase == "tune_dct3d":

@@ -42,10 +42,10 @@ These settings define *what* was trained and must not drift between training and
 
   `runs/<run_id>/<run_id>.yaml`
 
-- **finetune** requires `model_source.run_dir` and **inherits `model` + `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
+- **finetune** requires `model_source.run_id` (or `model_source.model_path`) and **inherits `model` + `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
   Finetune-side YAML should focus on *training settings* (stages, LR/WD, freezing, window selection, etc.).
 
-- **eval** requires `model_source.run_dir` and **rebuilds `model`, `embeddings`, and `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
+- **eval** requires `model_source.run_id` (or `model_source.model_path`) and **rebuilds `model`, `embeddings`, and `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
   Eval-side YAML should focus on *metrics/traces* and *evaluation window selection*.
 
 This design prevents “config drift” (e.g., changing adapter sizing in finetune but forgetting to mirror it in eval).
@@ -159,7 +159,7 @@ Finetune defines *how to adapt a pretrained model*:
 - Finetune-side model knobs that are intended to be captured in the finetune snapshot (e.g., output adapter policy)
 
 **Do not rely on finetune.yaml to define `model` or `preprocess.{chunk, trim_chunks}`**.
-Those are inherited from `model_source.run_dir`.
+Those are inherited from `model_source.run_id` (or `model_source.model_path`).
 
 ### `common/eval.yaml`
 
@@ -201,7 +201,7 @@ A task can override phase defaults by adding any of the following (all optional)
 Typical contents:
 
 - `run_id` / `eval_id`
-- `model_source.run_dir` *(required for finetune and eval)*
+- `model_source.run_id` / `model_source.model_path` *(required for finetune and eval)*
 - phase-specific `preprocess.valid_windows.window_stride_sec`
 - any task-specific `collate` drop probabilities
 
@@ -281,11 +281,12 @@ There are two distinct behaviors:
 
 ### Warm-start (pretrain / finetune)
 
-Use `model_source.run_dir` (run id under `runs/`) in the phase overrides:
+Use `model_source.run_id` (run id under `runs/`) in the phase overrides:
 
 ```yaml
 model_source:
-  run_dir: "some_previous_run"
+  run_id: \"some_previous_run\"
+  model_path: null
   load_parts:
     token_encoder: true
     backbone: true
@@ -355,15 +356,20 @@ Use:
 
 ```yaml
 model_source:
-  run_dir: "pretrain_base"   # ✅
+  run_id: "tokamind_base_v1"   # ✅
+  model_path: null
 ```
 
 Not:
 
 ```yaml
 model_source:
-  run_dir: "runs/pretrain_base"   # ❌
+  run_id: "runs/tokamind_base_v1"   # ❌
+  model_path: null
 ```
+
+If checkpoints live outside `runs/`, set `model_source.model_path` to that external run folder; it overrides `run_id` for checkpoint loading.
+
 
 3) **Eval/finetune requires the source run snapshot YAML**
 

@@ -18,10 +18,11 @@ Recommended config key:
 
 ```yaml
 model_source:
-  run_dir: "<training_run_id>"
+  run_id: "<training_run_id>"
+  model_path: null   # if set, overrides run_id
 ```
 
-> it is the training run directory whose checkpoint weights will be loaded.
+> it is the source run whose checkpoint weights will be loaded.
 
 Evaluation loads the **best** checkpoint if present, otherwise it falls back to the latest checkpoint.
 
@@ -31,10 +32,10 @@ To keep evaluation consistent across models, the config loader rebuilds the **mo
 - `embeddings`
 - `preprocess.chunk` and `preprocess.trim_chunks`
 
-It reads them from:
+It reads them from the source run folder's saved merged config:
 
 ```
-runs/<training_run_id>/<training_run_id>.yaml
+<source_run_dir>/<run_id>.yaml
 ```
 
 So your `eval.yaml` / `eval_overrides.yaml` should focus on evaluation knobs (drop lists, metrics, traces, etc.), not architecture.
@@ -44,10 +45,10 @@ So your `eval.yaml` / `eval_overrides.yaml` should focus on evaluation knobs (dr
 
 ## Output location
 
-Eval outputs are written under the training run directory:
+Eval outputs are written under the source run directory:
 
 ```
-runs/<training_run_id>/<eval_id>/
+<source_run_dir>/<eval_id>/
   <eval_id>.yaml
   benchmark/
   metrics/
@@ -219,7 +220,7 @@ number of batches/windows to iterate over (depending on your evaluation loop).
 ## Common evaluation workflows
 
 ### Evaluate a trained run (default)
-1. Set `model_source.run_dir` to the training run you want to evaluate.
+1. Set `model_source.run_id` to the training run you want to evaluate.
 2. Run `run_eval.py --task <task>`.
 
 ### Evaluate under missing inputs

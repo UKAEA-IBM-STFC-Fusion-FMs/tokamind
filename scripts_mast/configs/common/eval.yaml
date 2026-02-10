@@ -16,7 +16,14 @@ runtime:
   debug_logging: false
 
 model_source:
-  run_dir: null   # REQUIRED for eval; set in task eval overrides
+  # Model to evaluate (required).
+  #
+  # - run_id: <run_id>          -> evaluate a run under <repo_root>/runs/<run_id>/
+  # - model_path: <path>|null   -> if set, overrides run_id and evaluates an external run folder
+  #
+  # The source folder must contain checkpoints/ and the saved merged config <run_id>.yaml.
+  run_id: null
+  model_path: null
 
 # optional; if omitted, loader uses eval__<timestamp>
 eval_id: null
