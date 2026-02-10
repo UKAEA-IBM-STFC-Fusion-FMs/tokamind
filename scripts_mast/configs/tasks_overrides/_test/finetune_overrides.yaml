@@ -8,6 +8,7 @@
 model_source:
   # Source training run to warm-start from. If omitted/null, train from scratch.
   run_dir: test_pretrain
+  model_path: null
   # load_parts: { token_encoder: true, backbone: true, modality_heads: true, output_adapters: true }
 
 

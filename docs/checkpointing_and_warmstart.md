@@ -105,12 +105,13 @@ This is the recommended workflow for:
 
 In the config system, the source run is specified by:
 
-`model_source.run_dir` is the **run id** (folder name under `runs/`), not a path.
+`model_source.run_id` is the **run id** (folder name under `runs/`), not a path.
 
 
 ```yaml
 model_source:
-  run_dir: "some_previous_run"
+  run_id: "some_previous_run"
+  model_path: null   # if set, overrides run_id
   load_parts:
     token_encoder: true
     backbone: true
@@ -161,13 +162,14 @@ You still **cannot** warm-start across structural changes that alter the core sh
 ## Practical recipes
 
 ### 1) Finetune requires a source run
-In the new config system, `finetune` always requires `model_source.run_dir` (a run id under `runs/`).
+In the new config system, `finetune` always requires `model_source.run_id` (a run id under `runs/`).
 If you want to train a model from scratch, use `pretrain`.
 
 ### 2) Finetune from a pretrained run (common)
 ```yaml
 model_source:
-  run_dir: "pretrain_some_task"
+  run_id: "pretrain_some_task"
+  model_path: null   # if set, overrides run_id
   load_parts:
     token_encoder: true
     backbone: true
@@ -178,7 +180,8 @@ model_source:
 ### 3) Warm-start backbone only (re-learn token projections / heads)
 ```yaml
 model_source:
-  run_dir: "pretrain_some_task"
+  run_id: "pretrain_some_task"
+  model_path: null   # if set, overrides run_id
   load_parts:
     token_encoder: false
     backbone: true
@@ -193,7 +196,7 @@ model_source:
 By convention:
 
 - Put warm-start defaults in `common/pretrain.yaml` (as `null`)
-- For `finetune`, set `model_source.run_dir` in the task's `finetune_overrides.yaml` (required)
+- For `finetune`, set `model_source.run_id` in the task's `finetune_overrides.yaml` (required)
 - Set task/run-specific warm-start sources in:
   - `tasks_overrides/<task>/finetune_overrides.yaml`
   - `tasks_overrides/<task>/pretrain_overrides.yaml`
@@ -217,4 +220,4 @@ Check logs: warm-start reports counts per block and often per-signal details.
 ### “Resume and warm-start conflict”
 Use exactly one:
 - `train.resume=true` to continue the same run
-- `model_source.run_dir=...` to initialize a new run
+- `model_source.run_id=...` to initialize a new run

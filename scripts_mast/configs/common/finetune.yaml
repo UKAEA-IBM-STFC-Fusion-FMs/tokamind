@@ -60,22 +60,30 @@ loader:
   batches_per_epoch: null  # Required only when data.cache.enable=false (streaming)
 
 model_source:
-  # Optional warm-start source run directory.
+  # Warm-start source model (required for finetune).
   #
-  # - run_dir: REQUIRED for finetune (set it in tasks_overrides/<task>/finetune_overrides.yaml)
-  # - run_dir: <run_id> -> warm-start weights from another run (partial/overlap load)
+  # Recommended:
+  #   - run_id: <run_id>            -> load from <repo_root>/runs/<run_id>/
+  #   - model_path: <path>|null     -> if set, overrides run_id and loads from an external run folder
   #
-  # Overlap loading reuses parameters only when (key, shape) match; missing or
-  # incompatible parameters are initialized. This is different from resume
-  # (resume continues the *same* run_dir with full optimizer/scheduler state).
+  # Notes:
+  # - Provide only the run id (folder name), not a path like "runs/<run_id>".
+  # - The source folder must contain:
+  #     - checkpoints/{best,latest}/
+  #     - <run_id>.yaml  (the saved merged config snapshot)
   #
-  # Overlap loading allows to:
-  #   - add/remove outputs,
-  #   - add/remove modalities,
-  #   - change some submodule shapes between pretrain and finetune.
+  # Warm-start loading reuses parameters only when (key, shape) match; missing or
+  # incompatible parameters are freshly initialized. This is different from resume
+  # (resume continues the same run with full optimizer/scheduler state).
+  #
+  # Warm-start enables:
+  #   - adding/removing outputs,
+  #   - adding/removing modalities,
+  #   - changing some submodule shapes between pretrain and finetune.
   #
   # See docs/config_guide.md#warmstart for details.
-  run_dir: mmt_tiny_v1
+  run_dir: tokamind_base_v1
+  model_path: null
 
   # Which model parts to warm-start. Defaults to True for all parts if omitted.
   load_parts:
