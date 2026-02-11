@@ -1,4 +1,4 @@
-# MMT: Multi-Modal Transformer
+# Tokamind
 
 MMT is a **multi-modal, token-based Transformer** designed for scientific / industrial sensor data (e.g. time-series, profiles, video) with a **clean separation** between:
 
@@ -40,6 +40,9 @@ This submission consists of up to three local repositories (we suggest to leave 
 - `vae-fairmast/` (optional: VAE embeddings used for Group-1 experiments)
 
 ### 1) Create and activate a conda environment
+
+> **TO UPDATE**: add git folder address of benchmark and VAE when available
+
 **Recommended Python:** **3.11+**
 ```bash
 conda create -n tokamind-env python=3.12
