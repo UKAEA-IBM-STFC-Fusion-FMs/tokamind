@@ -17,7 +17,7 @@ The architecture is intentionally modular:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, cast
 
 import torch
 import torch.nn as nn
@@ -332,7 +332,8 @@ class MultiModalTransformer(nn.Module):
 
         for spec in output_specs:
             g = spec.modality
-            G_mod = int(self.modality_heads[g].out_dim)
+            head = cast(ModalityHead, self.modality_heads[g])
+            G_mod = int(head.out_dim)
 
             # Target dimension: stored in SignalSpec.embedding_dim
             K_t = getattr(spec, "embedding_dim", None)
