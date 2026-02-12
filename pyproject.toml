@@ -1,13 +1,13 @@
 [build-system]
-requires = ["setuptools>=61"]
+requires = ["setuptools>=61", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "multi-modal-transformer"
+name = "tokamind"
 version = "0.1.0"
 description = "Multi-modal transformer for plasma fusion models"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { text = "MIT" }  # or whatever you choose later
 authors = [
   { name = "XXX" }
@@ -28,16 +28,16 @@ classifiers = [
 # they come from the benchmark repo environment.
 # Otherwise, you can populate the dependencies field
 dependencies = [
-#    "torch>=2.2",
-    "google_crc32c>=1.7",
+    "torch>=2.10",
+    "numpy>=2.4",
+    "PyYAML>=6.0",
+    "psutil>=7.2",
+    "scipy>=1.17",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "ruff>=0.6",
-#  "black>=24.0",
-#  "pytest>=8.0",
-#  "mypy>=1.10",
+#  "ruff>=0.6",
 ]
 
 [tool.setuptools]

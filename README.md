@@ -54,23 +54,21 @@ conda activate tokamind-env
 pip install -U pip setuptools wheel
 ```
 
-### 2) Install the benchmark/data package
-
-```bash
-cd fairmast-data-preprocessing
-pip install -e .
-```
-
-### 3) Install TokaMind
+### 2) Install TokaMind
 
 ```bash
 cd ../tokamind
 pip install -e .
+# pip install -e ".[dev]"
 ```
-Optional:
+
+### 3) Install the benchmark/data package
+
+Benchmark integration to run Script MAST
 
 ```bash
-pip install -e ".[dev]"
+cd fairmast-data-preprocessing
+pip install -e .
 ```
 
 ### 4) (Optional) Install VAE embeddings support
@@ -181,10 +179,10 @@ pip install -e .
 
 ### 1) Benchmark-free toy example (synthetic data)
 
-Runs a tiny training loop on synthetic data to demonstrate the core APIs:
+Runs a tiny training loop on synthetic data to demonstrate the core APIs::
 
 ```bash
-python examples/toy_train.py --config examples/configs/toy.yaml
+python src/mmt/examples/toy_train.py --config src/mmt/examples/configs/toy.yaml
 ```
 
 ### 2) Run training/evaluation with MAST integration
