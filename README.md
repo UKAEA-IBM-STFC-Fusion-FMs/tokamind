@@ -1,4 +1,4 @@
-# Tokamind
+# TokaMind
 
 MMT is a **multi-modal, token-based Transformer** designed for scientific / industrial sensor data (e.g. time-series, profiles, video) with a **clean separation** between:
 
