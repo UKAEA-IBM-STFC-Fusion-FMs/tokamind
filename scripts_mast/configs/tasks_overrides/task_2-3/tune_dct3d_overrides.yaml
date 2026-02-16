@@ -7,7 +7,7 @@ tune_dct3d:
     thresholds:
       output: 0.999
     max_budget:
-      output: 6144
+      output: 9216
 
 
 
