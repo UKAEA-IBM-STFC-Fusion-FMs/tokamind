@@ -1,15 +1,33 @@
 embeddings:
   per_signal_overrides:
     output:
-      magnetics-b_field_pol_probe_omv_voltage:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 3
-          keep_w: 1
-          keep_t: 3072
       magnetics-b_field_tor_probe_cc_field:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 3
-          keep_w: 1
-          keep_t: 3072
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-b_field_tor_probe_cc_field.npy
+          coeff_shape:
+          - 3
+          - 1
+          - 50000
+          num_coeffs: 9216
+          explained_energy: 0.8575844935303929
+          dim_distribution:
+            unique_h: 3
+            unique_w: 1
+            unique_t: 5071
+      magnetics-b_field_pol_probe_omv_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-b_field_pol_probe_omv_voltage.npy
+          coeff_shape:
+          - 3
+          - 1
+          - 50000
+          num_coeffs: 9216
+          explained_energy: 0.4562595965091557
+          dim_distribution:
+            unique_h: 3
+            unique_w: 1
+            unique_t: 6225

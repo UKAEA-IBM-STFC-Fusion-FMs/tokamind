@@ -1,21 +1,48 @@
 embeddings:
   per_signal_overrides:
     output:
-      soft_x_rays-horizontal_cam_lower:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 18
-          keep_w: 1
-          keep_t: 512
-      soft_x_rays-horizontal_cam_upper:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 18
-          keep_w: 1
-          keep_t: 512
       spectrometer_visible-filter_spectrometer_dalpha_voltage:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 3
-          keep_w: 1
-          keep_t: 1024
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_spectrometer_visible-filter_spectrometer_dalpha_voltage.npy
+          coeff_shape:
+          - 3
+          - 1
+          - 2500
+          num_coeffs: 2415
+          explained_energy: 0.9990001430023098
+          dim_distribution:
+            unique_h: 3
+            unique_w: 1
+            unique_t: 920
+      soft_x_rays-horizontal_cam_lower:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_soft_x_rays-horizontal_cam_lower.npy
+          coeff_shape:
+          - 18
+          - 1
+          - 2500
+          num_coeffs: 9216
+          explained_energy: 0.9986881811251263
+          dim_distribution:
+            unique_h: 18
+            unique_w: 1
+            unique_t: 2371
+      soft_x_rays-horizontal_cam_upper:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_soft_x_rays-horizontal_cam_upper.npy
+          coeff_shape:
+          - 18
+          - 1
+          - 2500
+          num_coeffs: 9216
+          explained_energy: 0.9963192895937898
+          dim_distribution:
+            unique_h: 18
+            unique_w: 1
+            unique_t: 1864

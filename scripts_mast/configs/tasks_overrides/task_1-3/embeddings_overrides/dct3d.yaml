@@ -4,6 +4,15 @@ embeddings:
       equilibrium-psi:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 32
-          keep_w: 16
-          keep_t: 1
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-psi.npy
+          coeff_shape:
+          - 65
+          - 65
+          - 1
+          num_coeffs: 132
+          explained_energy: 0.9990109347585644
+          dim_distribution:
+            unique_h: 17
+            unique_w: 24
+            unique_t: 1

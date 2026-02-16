@@ -1,171 +1,513 @@
 embeddings:
   per_signal_overrides:
     output:
-      equilibrium-beta_pol:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
-      equilibrium-beta_tor:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
-      equilibrium-bphi_rmag:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
-      equilibrium-lcfs_r:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 4
-          keep_w: 1
-          keep_t: 2
-      equilibrium-lcfs_z:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 8
-          keep_w: 1
-          keep_t: 2
-      equilibrium-magnetic_axis_r:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
-      equilibrium-magnetic_axis_z:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
-      equilibrium-minor_radius:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
-      equilibrium-psi:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 16
-          keep_w: 16
-          keep_t: 4
-      equilibrium-q95:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
-      equilibrium-x_point_r:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 2
-          keep_w: 1
-          keep_t: 4
-      equilibrium-x_point_z:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 2
-          keep_w: 1
-          keep_t: 1
-      interferometer-n_e_line:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 16
       magnetics-b_field_pol_probe_ccbv_field:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 40
-          keep_w: 1
-          keep_t: 8
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-b_field_pol_probe_ccbv_field.npy
+          coeff_shape:
+          - 40
+          - 1
+          - 250
+          num_coeffs: 82
+          explained_energy: 0.9950645170782241
+          dim_distribution:
+            unique_h: 40
+            unique_w: 1
+            unique_t: 10
       magnetics-b_field_pol_probe_obr_field:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 18
-          keep_w: 1
-          keep_t: 8
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-b_field_pol_probe_obr_field.npy
+          coeff_shape:
+          - 18
+          - 1
+          - 250
+          num_coeffs: 20
+          explained_energy: 0.9951060258644844
+          dim_distribution:
+            unique_h: 17
+            unique_w: 1
+            unique_t: 2
       magnetics-b_field_pol_probe_obv_field:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 18
-          keep_w: 1
-          keep_t: 8
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-b_field_pol_probe_obv_field.npy
+          coeff_shape:
+          - 18
+          - 1
+          - 250
+          num_coeffs: 32
+          explained_energy: 0.9952238491880773
+          dim_distribution:
+            unique_h: 18
+            unique_w: 1
+            unique_t: 6
       magnetics-b_field_pol_probe_omv_voltage:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 3
-          keep_w: 1
-          keep_t: 1280
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-b_field_pol_probe_omv_voltage.npy
+          coeff_shape:
+          - 3
+          - 1
+          - 25000
+          num_coeffs: 4096
+          explained_energy: 0.4286068840190721
+          dim_distribution:
+            unique_h: 3
+            unique_w: 1
+            unique_t: 2934
       magnetics-b_field_tor_probe_cc_field:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 3
-          keep_w: 1
-          keep_t: 1280
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-b_field_tor_probe_cc_field.npy
+          coeff_shape:
+          - 3
+          - 1
+          - 25000
+          num_coeffs: 4096
+          explained_energy: 0.848097974664472
+          dim_distribution:
+            unique_h: 3
+            unique_w: 1
+            unique_t: 2334
       magnetics-b_field_tor_probe_saddle_voltage:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 12
-          keep_w: 1
-          keep_t: 4
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-b_field_tor_probe_saddle_voltage.npy
+          coeff_shape:
+          - 12
+          - 1
+          - 2500
+          num_coeffs: 14
+          explained_energy: 0.995272916386311
+          dim_distribution:
+            unique_h: 12
+            unique_w: 1
+            unique_t: 3
       magnetics-flux_loop_flux:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 15
-          keep_w: 1
-          keep_t: 2
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_magnetics-flux_loop_flux.npy
+          coeff_shape:
+          - 15
+          - 1
+          - 250
+          num_coeffs: 17
+          explained_energy: 0.995078536845738
+          dim_distribution:
+            unique_h: 15
+            unique_w: 1
+            unique_t: 2
       pf_active-coil_current:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 10
-          keep_w: 1
-          keep_t: 8
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_pf_active-coil_current.npy
+          coeff_shape:
+          - 10
+          - 1
+          - 200
+          num_coeffs: 38
+          explained_energy: 0.9950127439779268
+          dim_distribution:
+            unique_h: 9
+            unique_w: 1
+            unique_t: 9
       pf_active-solenoid_current:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 2
-      soft_x_rays-horizontal_cam_lower:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 18
-          keep_w: 1
-          keep_t: 224
-      soft_x_rays-horizontal_cam_upper:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 18
-          keep_w: 1
-          keep_t: 224
-      spectrometer_visible-filter_spectrometer_dalpha_voltage:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 3
-          keep_w: 1
-          keep_t: 256
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_pf_active-solenoid_current.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 200
+          num_coeffs: 2
+          explained_energy: 0.9987776041315382
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 2
       summary-ip:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_summary-ip.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 200
+          num_coeffs: 5
+          explained_energy: 0.995012185324906
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 5
+      equilibrium-psi:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-psi.npy
+          coeff_shape:
+          - 65
+          - 65
+          - 10
+          num_coeffs: 120
+          explained_energy: 0.995071406290581
+          dim_distribution:
+            unique_h: 12
+            unique_w: 17
+            unique_t: 10
+      interferometer-n_e_line:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_interferometer-n_e_line.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 200
+          num_coeffs: 10
+          explained_energy: 0.9950742859848011
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 10
+      soft_x_rays-horizontal_cam_lower:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_soft_x_rays-horizontal_cam_lower.npy
+          coeff_shape:
+          - 18
+          - 1
+          - 2500
+          num_coeffs: 934
+          explained_energy: 0.9950000026013408
+          dim_distribution:
+            unique_h: 18
+            unique_w: 1
+            unique_t: 247
+      soft_x_rays-horizontal_cam_upper:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_soft_x_rays-horizontal_cam_upper.npy
+          coeff_shape:
+          - 18
+          - 1
+          - 2500
+          num_coeffs: 4096
+          explained_energy: 0.9932798214106109
+          dim_distribution:
+            unique_h: 18
+            unique_w: 1
+            unique_t: 936
+      spectrometer_visible-filter_spectrometer_dalpha_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_spectrometer_visible-filter_spectrometer_dalpha_voltage.npy
+          coeff_shape:
+          - 3
+          - 1
+          - 2500
+          num_coeffs: 586
+          explained_energy: 0.9950000159975735
+          dim_distribution:
+            unique_h: 3
+            unique_w: 1
+            unique_t: 242
+      equilibrium-beta_normal:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-beta_normal.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 9
+          explained_energy: 0.9973351665804664
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 9
+      equilibrium-beta_pol:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-beta_pol.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 9
+          explained_energy: 0.9951386510682496
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 9
+      equilibrium-beta_tor:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-beta_tor.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 6
+          explained_energy: 0.9958491249073183
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 6
+      equilibrium-bphi_rmag:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-bphi_rmag.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 3
+          explained_energy: 0.9954608042507621
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 3
+      equilibrium-bvac_rmag:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-bvac_rmag.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 2
+          explained_energy: 0.9989822117907774
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 2
+      equilibrium-elongation:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-elongation.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 5
+          explained_energy: 0.9951883697000383
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 5
+      equilibrium-elongation_axis:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-elongation_axis.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 7
+          explained_energy: 0.9963549874634293
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 7
+      equilibrium-lcfs_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-lcfs_r.npy
+          coeff_shape:
+          - 170
+          - 1
+          - 10
+          num_coeffs: 5
+          explained_energy: 0.9954410004940167
+          dim_distribution:
+            unique_h: 4
+            unique_w: 1
+            unique_t: 2
+      equilibrium-lcfs_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-lcfs_z.npy
+          coeff_shape:
+          - 170
+          - 1
+          - 10
+          num_coeffs: 7
+          explained_energy: 0.9954918835340035
+          dim_distribution:
+            unique_h: 6
+            unique_w: 1
+            unique_t: 2
+      equilibrium-magnetic_axis_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-magnetic_axis_r.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 4
+          explained_energy: 0.9965484405907868
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 4
+      equilibrium-magnetic_axis_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-magnetic_axis_z.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 6
+          explained_energy: 0.9953670209601486
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 6
+      equilibrium-minor_radius:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-minor_radius.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 5
+          explained_energy: 0.9957700639849535
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 5
+      equilibrium-q95:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-q95.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 4
+          explained_energy: 0.9967288699515903
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 4
+      equilibrium-triangularity_lower:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-triangularity_lower.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 8
+          explained_energy: 0.9956753249446609
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 8
+      equilibrium-triangularity_upper:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-triangularity_upper.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 10
+          num_coeffs: 8
+          explained_energy: 0.9956958272396585
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 8
       thomson_scattering-n_e:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 96
-          keep_w: 1
-          keep_t: 10
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_thomson_scattering-n_e.npy
+          coeff_shape:
+          - 120
+          - 1
+          - 10
+          num_coeffs: 658
+          explained_energy: 0.9950105096580056
+          dim_distribution:
+            unique_h: 120
+            unique_w: 1
+            unique_t: 10
       thomson_scattering-t_e:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 120
-          keep_w: 1
-          keep_t: 10
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_thomson_scattering-t_e.npy
+          coeff_shape:
+          - 120
+          - 1
+          - 10
+          num_coeffs: 803
+          explained_energy: 0.9950029789646397
+          dim_distribution:
+            unique_h: 118
+            unique_w: 1
+            unique_t: 10
+      equilibrium-x_point_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-x_point_r.npy
+          coeff_shape:
+          - 2
+          - 1
+          - 10
+          num_coeffs: 9
+          explained_energy: 0.9971597421002693
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 9
+      equilibrium-x_point_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-x_point_z.npy
+          coeff_shape:
+          - 2
+          - 1
+          - 10
+          num_coeffs: 1
+          explained_energy: 0.9963125858444938
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1

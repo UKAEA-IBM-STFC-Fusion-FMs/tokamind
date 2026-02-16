@@ -1,15 +1,33 @@
 embeddings:
   per_signal_overrides:
     output:
-      thomson_scattering-n_e:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 120
-          keep_w: 1
-          keep_t: 10
       thomson_scattering-t_e:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 120
-          keep_w: 1
-          keep_t: 10
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_thomson_scattering-t_e.npy
+          coeff_shape:
+          - 120
+          - 1
+          - 10
+          num_coeffs: 1095
+          explained_energy: 0.9990102274682661
+          dim_distribution:
+            unique_h: 120
+            unique_w: 1
+            unique_t: 10
+      thomson_scattering-n_e:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_thomson_scattering-n_e.npy
+          coeff_shape:
+          - 120
+          - 1
+          - 10
+          num_coeffs: 1030
+          explained_energy: 0.999005445946882
+          dim_distribution:
+            unique_h: 120
+            unique_w: 1
+            unique_t: 10

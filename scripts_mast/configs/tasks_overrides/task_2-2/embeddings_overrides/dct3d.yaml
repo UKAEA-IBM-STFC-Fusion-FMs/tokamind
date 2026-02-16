@@ -4,12 +4,30 @@ embeddings:
       equilibrium-lcfs_r:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 16
-          keep_w: 1
-          keep_t: 2
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-lcfs_r.npy
+          coeff_shape:
+          - 170
+          - 1
+          - 5
+          num_coeffs: 11
+          explained_energy: 0.9990565474276747
+          dim_distribution:
+            unique_h: 8
+            unique_w: 1
+            unique_t: 3
       equilibrium-lcfs_z:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 16
-          keep_w: 1
-          keep_t: 4
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-lcfs_z.npy
+          coeff_shape:
+          - 170
+          - 1
+          - 5
+          num_coeffs: 19
+          explained_energy: 0.9990651964325982
+          dim_distribution:
+            unique_h: 15
+            unique_w: 1
+            unique_t: 3

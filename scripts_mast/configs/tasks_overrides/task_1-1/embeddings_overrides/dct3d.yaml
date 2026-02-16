@@ -1,93 +1,228 @@
 embeddings:
   per_signal_overrides:
     output:
-      equilibrium-beta_normal:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-beta_pol:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-beta_tor:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-bphi_rmag:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-bvac_rmag:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
       equilibrium-elongation:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-elongation.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
       equilibrium-elongation_axis:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-magnetic_axis_r:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-magnetic_axis_z:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-minor_radius:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-q95:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
-      equilibrium-triangularity_lower:
-        encoder_name: dct3d
-        encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-elongation_axis.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
       equilibrium-triangularity_upper:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 1
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-triangularity_upper.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-triangularity_lower:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-triangularity_lower.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-minor_radius:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-minor_radius.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-magnetic_axis_r:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-magnetic_axis_r.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-magnetic_axis_z:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-magnetic_axis_z.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-q95:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-q95.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-beta_tor:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-beta_tor.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-beta_pol:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-beta_pol.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-beta_normal:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-beta_normal.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-bvac_rmag:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-bvac_rmag.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
+      equilibrium-bphi_rmag:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-bphi_rmag.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 1
+          num_coeffs: 1
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1
       equilibrium-x_point_r:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 2
-          keep_w: 1
-          keep_t: 1
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-x_point_r.npy
+          coeff_shape:
+          - 2
+          - 1
+          - 1
+          num_coeffs: 2
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 2
+            unique_w: 1
+            unique_t: 1
       equilibrium-x_point_z:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 2
-          keep_w: 1
-          keep_t: 1
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-x_point_z.npy
+          coeff_shape:
+          - 2
+          - 1
+          - 1
+          num_coeffs: 2
+          explained_energy: 1.0
+          dim_distribution:
+            unique_h: 2
+            unique_w: 1
+            unique_t: 1

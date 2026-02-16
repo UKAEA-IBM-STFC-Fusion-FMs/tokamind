@@ -4,6 +4,15 @@ embeddings:
       equilibrium-magnetic_axis_z:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 20
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_equilibrium-magnetic_axis_z.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 20
+          num_coeffs: 18
+          explained_energy: 0.9991651301437376
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 18
