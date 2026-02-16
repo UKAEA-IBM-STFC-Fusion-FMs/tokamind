@@ -219,19 +219,29 @@ Note: per-token signal names and per-window output name/shape metadata are not s
 
 ---
 
-## Tuning pipeline: `TuneDCT3DTransform`
+## Tuning pipeline: `TuneRankedDCT3DTransform`
 
 During DCT3D tuning, the chain is typically:
 
-`ChunkWindows → SelectValidWindows → TrimChunks → TuneDCT3D → (optional EmbedChunks)`
+`ChunkWindows → SelectValidWindows → TrimChunks → TuneRankedDCT3D → (optional EmbedChunks)`
 
-`TuneDCT3DTransform`:
+`TuneRankedDCT3DTransform`:
 
-- observes raw chunk arrays + output arrays,
-- accumulates explained energy (variance) for each candidate `(keep_h, keep_w, keep_t)`,
-- selects a per-(role, signal) configuration based on thresholds.
-- can be configured to tune only a subset of roles via `roles` (any of: `input`, `actuator`, `output`),
-  which is useful to avoid re-tuning inputs/actuators when you only care about outputs.
+- Computes full DCT for each chunk
+- Accumulates per-coefficient energy `E[c_i²]` across all windows
+- After streaming, selects top-K coefficients by variance for each signal
+- Writes coefficient indices to `.npy` files
+- Generates config with `selection_mode: rank`
+- Can be configured to tune only a subset of roles via `roles` (any of: `input`, `actuator`, `output`)
+
+**Key differences from old grid search approach:**
+- **Rank mode** (current): Selects coefficients by variance, regardless of spatial position
+  - 50-200x faster (no grid search)
+  - Better compression: coefficients selected by actual importance
+  - Adapts to each signal's spectral characteristics
+- **Spatial mode** (legacy): Selects top-left-front block `(keep_h, keep_w, keep_t)`
+  - Grid search over candidate dimensions
+  - Assumes low-frequency components are most important
 
 It is intentionally a **pass-through transform** so it can be inserted without changing the rest of the pipeline.
 
@@ -240,6 +250,8 @@ The `scripts_mast/run_tune_dct3d.py` runner exposes this as a CLI flag:
 ```bash
 python scripts_mast/run_tune_dct3d.py --task <task> --roles output
 ```
+
+See [Tuning DCT3D](tuning_dct3d.md) for detailed usage and configuration.
 
 ---
 

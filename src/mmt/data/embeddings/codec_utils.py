@@ -16,7 +16,10 @@ the trained VAE artifacts under: vae_pipeline/data/trained_vaes/<MODEL_DIR>.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Dict, Mapping, Tuple
+
+import numpy as np
 
 from .dct3d_codec import DCT3DCodec
 from .identity_codec import IdentityCodec
@@ -49,6 +52,34 @@ def _prod(shape: Tuple[int, ...]) -> int:
     return int(out)
 
 
+def load_coeff_indices(config_dir: Path, rel_path: str) -> np.ndarray:
+    """
+    Load coefficient indices from .npy file for rank mode DCT3D.
+    
+    Parameters
+    ----------
+    config_dir : Path
+        Base directory containing the config (e.g., tasks_overrides/<task>/embeddings_overrides/)
+    rel_path : str
+        Relative path to .npy file (e.g., "dct3d_indices/input_signal.npy")
+    
+    Returns
+    -------
+    np.ndarray
+        1D array of coefficient indices (dtype: int32)
+    """
+    full_path = config_dir / rel_path
+    if not full_path.exists():
+        raise FileNotFoundError(
+            f"Coefficient indices file not found: {full_path}\n"
+            f"Make sure to run tune_dct3d.py first to generate indices."
+        )
+    indices = np.load(full_path)
+    if indices.ndim != 1:
+        raise ValueError(f"Expected 1D array, got shape {indices.shape} from {full_path}")
+    return indices.astype(np.int32)
+
+
 def compute_embedding_dim_for_encoder(
     *,
     encoder_name: str,
@@ -73,18 +104,30 @@ def compute_embedding_dim_for_encoder(
         return int(n_samples * spatial_dim)
 
     if encoder_name == "dct3d":
-        H, W = infer_hw_from_values_shape(values_shape)
-        T = n_samples
+        selection_mode = encoder_kwargs.get("selection_mode", "spatial")
+        
+        if selection_mode == "rank":
+            # Rank mode: dimension is number of selected coefficients
+            num_coeffs = encoder_kwargs.get("num_coeffs")
+            if num_coeffs is None:
+                raise KeyError(
+                    "encoder_kwargs.num_coeffs is required for DCT3D rank mode"
+                )
+            return int(num_coeffs)
+        else:
+            # Spatial mode: dimension is keep_h * keep_w * keep_t (clamped)
+            H, W = infer_hw_from_values_shape(values_shape)
+            T = n_samples
 
-        keep_h = int(encoder_kwargs.get("keep_h", H))
-        keep_w = int(encoder_kwargs.get("keep_w", W))
-        keep_t = int(encoder_kwargs.get("keep_t", T))
+            keep_h = int(encoder_kwargs.get("keep_h", H))
+            keep_w = int(encoder_kwargs.get("keep_w", W))
+            keep_t = int(encoder_kwargs.get("keep_t", T))
 
-        h_eff = min(keep_h, H)
-        w_eff = min(keep_w, W)
-        t_eff = min(keep_t, T)
+            h_eff = min(keep_h, H)
+            w_eff = min(keep_w, W)
+            t_eff = min(keep_t, T)
 
-        return int(h_eff * w_eff * t_eff)
+            return int(h_eff * w_eff * t_eff)
 
     if encoder_name == "vae":
         if "model_dir" not in encoder_kwargs:
@@ -117,16 +160,69 @@ def compute_embedding_dim_for_encoder(
     raise ValueError(f"Unknown encoder_name={encoder_name!r} in compute_embedding_dim_for_encoder")
 
 
-def build_codecs(signal_specs) -> Dict[int, Any]:
+def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]:
     """
     Build one codec instance per signal.
 
-    Returns: mapping signal_id -> codec.
+    Parameters
+    ----------
+    signal_specs : SignalSpecRegistry
+        Registry of signal specifications.
+    config_dir : Path | None, optional
+        Base directory for loading coefficient indices (DCT3D rank mode only).
+        Only required if any signal uses selection_mode="rank".
+        Typically: tasks_overrides/<task>/embeddings_overrides/
+        
+        For spatial mode or other encoders, this parameter is not needed.
+
+    Returns
+    -------
+    Dict[int, Any]
+        Mapping signal_id -> codec instance.
+        
+    Raises
+    ------
+    ValueError
+        If config_dir is None but a signal requires rank mode.
     """
     codecs: Dict[int, Any] = {}
     for spec in signal_specs.specs:
         if spec.encoder_name == "dct3d":
-            codecs[spec.signal_id] = DCT3DCodec(**spec.encoder_kwargs)
+            kw = dict(spec.encoder_kwargs or {})
+            selection_mode = kw.get("selection_mode", "spatial")
+            
+            if selection_mode == "rank":
+                # Rank mode: load coefficient indices from .npy file
+                if config_dir is None:
+                    raise ValueError(
+                        f"config_dir required for DCT3D rank mode (signal {spec.role}:{spec.name}). "
+                        f"Pass config_dir=Path(cfg.paths['config_dir']) / 'embeddings_overrides' "
+                        f"to build_codecs()."
+                    )
+                coeff_indices_path = kw.get("coeff_indices_path")
+                if coeff_indices_path is None:
+                    raise KeyError(
+                        f"encoder_kwargs.coeff_indices_path required for rank mode "
+                        f"(signal {spec.role}:{spec.name})"
+                    )
+                
+                # Load indices
+                coeff_indices = load_coeff_indices(config_dir, coeff_indices_path)
+                
+                # Build codec with loaded indices
+                codec_kw = {
+                    "keep_h": kw.get("keep_h", 1),  # Dummy values for rank mode
+                    "keep_w": kw.get("keep_w", 1),
+                    "keep_t": kw.get("keep_t", 1),
+                    "selection_mode": "rank",
+                    "coeff_indices": coeff_indices,
+                    "coeff_shape": tuple(kw["coeff_shape"]) if "coeff_shape" in kw else None,
+                }
+                codecs[spec.signal_id] = DCT3DCodec(**codec_kw)
+            else:
+                # Spatial mode: use keep_h/w/t directly (no config_dir needed)
+                codecs[spec.signal_id] = DCT3DCodec(**kw)
+                
         elif spec.encoder_name == "identity":
             codecs[spec.signal_id] = IdentityCodec()
         elif spec.encoder_name == "vae":

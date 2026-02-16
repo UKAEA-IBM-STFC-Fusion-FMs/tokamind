@@ -471,7 +471,7 @@ def _compute_paths(
             "repo_root": str(repo_root),
             "configs_root": str(configs_root),
             "run_dir": str(task_dir),
-            "config_dir": str(task_dir),
+            "task_config_dir": str(task_dir),
             "tune_dir": str(task_dir / "embeddings_overrides"),
         }
 
@@ -490,6 +490,7 @@ def _compute_paths(
             "phase": str(phase),
             "run_id": str(run_id),
             "run_dir": str(run_dir),
+            "task_config_dir": str(task_dir),
         }
 
     # eval writes into runs/<model_id>/eval/
@@ -522,6 +523,7 @@ def _compute_paths(
             "eval_id": str(eval_id),
             "run_dir": str(eval_dir),
             "model_run_dir": str(model_dir),
+            "task_config_dir": str(task_dir),
         }
 
     raise ValueError(f"Unsupported phase: {phase}")

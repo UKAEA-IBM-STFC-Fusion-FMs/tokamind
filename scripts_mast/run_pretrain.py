@@ -18,6 +18,8 @@ from __future__ import annotations
 import argparse
 import logging
 
+from pathlib import Path
+
 from mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
     initialize_model_dataset,
@@ -80,7 +82,7 @@ def parse_args_pretrain() -> argparse.Namespace:
     parser.add_argument(
         "--tag",
         type=str,
-        default="tag",
+        default=None,
         help="Optional tag for versioning. Creates run_id as {task}_{tag}. "
         "If neither --run-id nor --tag provided, uses task name as run_id.",
     )
@@ -195,7 +197,9 @@ def main() -> None:
         chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
     )
 
-    codecs = build_codecs(signal_specs)
+    # For rank mode DCT3D: pass embeddings_overrides dir to load .npy coefficient indices
+    embeddings_dir = Path(cfg_mmt.paths["task_config_dir"]) / "embeddings_overrides"
+    codecs = build_codecs(signal_specs, config_dir=embeddings_dir)
 
     # ------------------------------------------------------------------
     # Model-specific transform chain (shot -> windows)

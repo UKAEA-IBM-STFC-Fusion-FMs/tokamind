@@ -1,38 +1,34 @@
 """
-DCT3D tuning entrypoint for MMT (per-task embedding hyperparameters).
+DCT3D tuning entrypoint for MMT - RANK MODE ONLY.
 
 This script:
-- parses `--task` and `--roles`,
-- loads and validates the merged config for phase="tune_dct3d",
-- resolves the benchmark task_config and builds datasets/metadata,
-- streams windows and evaluates candidate (keep_h, keep_w, keep_t) settings,
-- selects the best per-signal configuration,
-- writes tuned results to:
+- Computes per-coefficient energy E[c_i²] over a sample of windows
+- Selects top-K coefficients by explained variance for each signal
+- Writes coefficient indices to .npy files and updated config
 
-    tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
+Output files:
+  tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
+  tasks_overrides/<task>/embeddings_overrides/dct3d_indices/*.npy
+  tasks_overrides/<task>/embeddings_overrides/history/dct3d_<timestamp>.yaml
+  tasks_overrides/<task>/embeddings_overrides/history/dct3d_indices_<timestamp>/*.npy
 
-  and also archives a timestamped copy to:
-
-    tasks_overrides/<task>/embeddings_overrides/history/dct3d_<timestamp>.yaml
-
-This phase does not train the transformer; it tunes embedding parameters only.
+For spatial mode (no tuning), users manually specify keep_h/w/t in config.
 
 Notes
 -----
-- This script is specific to the DCT3D embedding family and always writes into
-  the "dct3d" embedding profile file.
-- The tuner writes ONLY per-signal overrides; defaults remain in
-  scripts_mast/configs/common/embeddings.yaml.
+- This script uses TuneRankedDCT3DTransform (variance-based selection)
+- No grid search - much faster than old approach
+- Outputs rank mode configs with coeff_indices_path references
 """
 
 from __future__ import annotations
 
 import argparse
-import copy
 import logging
 import datetime
 from pathlib import Path
 
+import numpy as np
 import yaml
 
 from mast_utils.benchmark_imports import (
@@ -57,7 +53,7 @@ from mmt.data import (
     ChunkWindowsTransform,
     SelectValidWindowsTransform,
     TrimChunksTransform,
-    TuneDCT3DTransform,
+    TuneRankedDCT3DTransform,
     ComposeTransforms,
     WindowStreamedDataset,
 )
@@ -188,11 +184,8 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model-specific transform chain (shot -> windows)
     # ------------------------------------------------------------------
-    tune_transform = TuneDCT3DTransform(
+    tune_transform = TuneRankedDCT3DTransform(
         signal_specs=signal_specs,
-        keep_h=cfg_tune["search_space"]["keep_h"],
-        keep_w=cfg_tune["search_space"]["keep_w"],
-        keep_t=cfg_tune["search_space"]["keep_t"],
         thresholds=cfg_tune["objective"]["thresholds"],
         max_budget=cfg_tune["objective"]["max_budget"],
         roles=roles,
@@ -230,8 +223,9 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Window-level dataset (streaming)
     # ------------------------------------------------------------------
+    assert model_dataset_train is not None, "model_dataset_train should not be None"
     ds_windows = WindowStreamedDataset(
-        model_dataset_train,
+        model_dataset_train,  # type: ignore[arg-type]
         shuffle_shots=False,  # we shuffle when loading using get_train_test_val_shots
         seed=cfg_mmt.seed,
     )
@@ -258,21 +252,32 @@ def main() -> None:
     for role, by_sig in best.items():
         for name, info in by_sig.items():
             logger.info(
-                "[%s:%s] shape=%s keep=(%s,%s,%s) expl_energy=%.4f eff_dim=%s",
+                "[%s:%s] shape=%s num_coeffs=%d expl_energy=%.4f",
                 role,
                 name,
-                info["rep_shape"],
-                info["eff_keep_h"],
-                info["eff_keep_w"],
-                info["eff_keep_t"],
-                info["explained_energy_mean_windows"],
-                info["effective_dim"],
+                info["coeff_shape"],
+                info["num_coeffs"],
+                info["explained_energy"],
             )
 
     # ------------------------------------------------------------------
-    # Write tuned overrides to: tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
-    # (ONLY per-signal overrides; no defaults)
+    # Write coefficient indices (.npy files) and config (rank mode)
     # ------------------------------------------------------------------
+    base_dir = Path(cfg_mmt.paths["tune_dir"])
+    base_dir.mkdir(parents=True, exist_ok=True)
+
+    # Create indices directory
+    indices_dir = base_dir / "dct3d_indices"
+    indices_dir.mkdir(exist_ok=True)
+
+    # Timestamp for history
+    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    hist_dir = base_dir / "history"
+    hist_dir.mkdir(parents=True, exist_ok=True)
+    hist_indices_dir = hist_dir / f"dct3d_indices_{ts}"
+    hist_indices_dir.mkdir(exist_ok=True)
+
+    # Build config with rank mode
     overrides_out = {"embeddings": {"per_signal_overrides": {}}}
 
     for role, by_sig in best.items():
@@ -281,35 +286,42 @@ def main() -> None:
             if spec is None or spec.encoder_name != "dct3d":
                 continue
 
-            tuned_keep_h = int(info["eff_keep_h"])
-            tuned_keep_w = int(info["eff_keep_w"])
-            tuned_keep_t = int(info["eff_keep_t"])
+            # Save coefficient indices to .npy files
+            coeff_indices = info["coeff_indices"]
+            filename = f"{role}_{name}.npy"
 
-            base_kwargs = dict(spec.encoder_kwargs or {})
-            base_keep_h = int(base_kwargs.get("keep_h", tuned_keep_h))
-            base_keep_w = int(base_kwargs.get("keep_w", tuned_keep_w))
-            base_keep_t = int(base_kwargs.get("keep_t", tuned_keep_t))
+            # Save to main location
+            np.save(indices_dir / filename, coeff_indices)
+            # Save to history
+            np.save(hist_indices_dir / filename, coeff_indices)
 
-            # Always write tuned overrides for all tuned signals (even if equal to base).
-
-            new_kwargs = copy.deepcopy(base_kwargs)
-            new_kwargs.update(
-                {"keep_h": tuned_keep_h, "keep_w": tuned_keep_w, "keep_t": tuned_keep_t}
-            )
-
+            # Compute dimension distribution statistics
+            h, w, t = info["coeff_shape"]
+            indices_3d = np.unravel_index(coeff_indices, (h, w, t))
+            unique_h = len(np.unique(indices_3d[0]))
+            unique_w = len(np.unique(indices_3d[1]))
+            unique_t = len(np.unique(indices_3d[2]))
+            
+            # Build config entry (rank mode)
             overrides_out["embeddings"]["per_signal_overrides"].setdefault(role, {})
             overrides_out["embeddings"]["per_signal_overrides"][role][name] = {
                 "encoder_name": "dct3d",
-                "encoder_kwargs": new_kwargs,
+                "encoder_kwargs": {
+                    "selection_mode": "rank",
+                    "coeff_indices_path": f"dct3d_indices/{filename}",
+                    "coeff_shape": list(info["coeff_shape"]),
+                    "num_coeffs": int(info["num_coeffs"]),
+                    "explained_energy": float(info["explained_energy"]),
+                    "dim_distribution": {
+                        "unique_h": int(unique_h),
+                        "unique_w": int(unique_w),
+                        "unique_t": int(unique_t),
+                    },
+                },
             }
 
-    out_path = Path(cfg_mmt.paths["tune_dir"]) / "dct3d.yaml"
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Also archive a timestamped copy for history (to avoid losing prior good runs).
-    ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
-    hist_dir = out_path.parent / "history"
-    hist_dir.mkdir(parents=True, exist_ok=True)
+    # Write YAML configs
+    out_path = base_dir / "dct3d.yaml"
     hist_path = hist_dir / f"dct3d_{ts}.yaml"
 
     for p in (out_path, hist_path):
@@ -317,7 +329,8 @@ def main() -> None:
             yaml.safe_dump(overrides_out, f, sort_keys=False, default_flow_style=False)
 
     logger.info("Wrote tuned embedding overrides to %s", out_path)
-    logger.info("Archived tuned embedding overrides to %s", hist_path)
+    logger.info("Wrote coefficient indices to %s", indices_dir)
+    logger.info("Archived to %s and %s", hist_path, hist_indices_dir)
 
 
 if __name__ == "__main__":

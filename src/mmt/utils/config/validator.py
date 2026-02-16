@@ -97,7 +97,7 @@ REQUIRED_COMMON_FIELDS: List[Tuple[str, type]] = [
 # These fields are required for *all* phases. They capture execution/runtime knobs
 # that should be explicit in the selected phase config rather than implicitly
 # provided by the loader.
-REQUIRED_RUN_CONTEXT_FIELDS: List[Tuple[str, type]] = [
+REQUIRED_RUN_CONTEXT_FIELDS: List[Tuple[str, Union[type, Tuple[type, ...]]]] = [
     ("seed", int),
     ("runtime", dict),
     ("data.local", bool),
@@ -119,7 +119,7 @@ REQUIRED_TRAIN_FIELDS: List[Tuple[str, type]] = [
     ("train.stages", list),
 ]
 
-REQUIRED_STAGE_FIELDS: List[Tuple[str, type]] = [
+REQUIRED_STAGE_FIELDS: List[Tuple[str, Union[type, Tuple[type, ...]]]] = [
     ("name", str),
     ("epochs", int),
     ("scheduler.grad_accum_steps", int),
@@ -450,18 +450,20 @@ def validate_eval_config(cfg: Dict[str, Any]) -> None:
 
 def validate_tune_dct3d_config(cfg: Dict[str, Any]) -> None:
     """
-    Minimal validation for tune_dct3d phase.
+    Minimal validation for tune_dct3d phase (rank mode).
+    
+    Note: search_space is no longer required (removed grid search).
+    Tuning now uses variance-based coefficient selection.
     """
     td = cfg.get("tune_dct3d", None)
     if not isinstance(td, dict):
         raise KeyError("For phase='tune_dct3d', missing required block: tune_dct3d")
 
-    # Required: search_space.keep_h/keep_w/keep_t
-    ss = td.get("search_space", None)
-    if not isinstance(ss, dict):
-        raise KeyError("Missing required block: tune_dct3d.search_space")
-
-    for k in ("keep_h", "keep_w", "keep_t"):
-        v = ss.get(k)
-        if not isinstance(v, list) or not v:
-            raise ValueError(f"tune_dct3d.search_space.{k} must be a non-empty list.")
+    # Required: objective.thresholds
+    obj = td.get("objective", None)
+    if not isinstance(obj, dict):
+        raise KeyError("Missing required block: tune_dct3d.objective")
+    
+    thresholds = obj.get("thresholds", None)
+    if not isinstance(thresholds, dict):
+        raise KeyError("Missing required block: tune_dct3d.objective.thresholds")

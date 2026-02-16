@@ -1,14 +1,18 @@
-# Default configuration for the DCT3D tuning phase.
+# Default configuration for the DCT3D tuning phase - RANK MODE ONLY.
 #
-# This file defines settings shared across tasks_overrides for run_tune_dct3d.py:
+# This file defines settings for run_tune_dct3d.py:
 #   • preprocess.valid_windows thresholds used to select windows for tuning
-#   • tune_dct3d sampling policy, objective thresholds, and search space
+#   • tune_dct3d sampling policy and objective thresholds
 #
-# Do NOT add task-specific values here. Task-specific changes (e.g. different
-# search space, objective thresholds, or tuned parameters output) should go in:
-#   scripts_mast/configs/tasks_overrides/<task>/tune_dct3d_overrides.yaml   (optional)
-# and tuned encoder parameters should be written to:
-#   scripts_mast/configs/tasks_overrides/<task>/dct3d.yaml   (generated)
+# The tuner uses TuneRankedDCT3DTransform (variance-based coefficient selection).
+# No grid search - coefficients are selected by explained variance E[c_i²].
+#
+# Task-specific overrides can go in:
+#   scripts_mast/configs/tasks_overrides/<task>/tune_dct3d_overrides.yaml
+#
+# Tuned outputs are written to:
+#   scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
+#   scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d_indices/*.npy
 
 seed: 54
 
@@ -46,8 +50,3 @@ tune_dct3d:
       input: 4096
       actuator: 4096
       output: 4096
-
-  search_space:
-    keep_h: [ 1, 4, 8, 16, 32, 64, 96, 128 ]
-    keep_w: [ 1, 4, 8, 16, 24, 32, 65 ] # video is 65
-    keep_t: [ 1, 2, 4, 8, 16, 32, 64, 96, 128, 192, 224, 256, 512, 768, 1024, 1280, 2048 ]

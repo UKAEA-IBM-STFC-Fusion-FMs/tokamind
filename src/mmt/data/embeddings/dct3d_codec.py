@@ -124,40 +124,77 @@ class DCT3DCodec:
       - video/map:  (H, W, T)
 
     Internally, all inputs are viewed as (H, W, T), a 3D DCT is applied,
-    and only the top-left-front (keep_h, keep_w, keep_t) coefficients are
-    kept and flattened.
+    and coefficients are selected using one of two modes:
+
+    **Spatial mode** (default):
+      Keeps the top-left-front (keep_h, keep_w, keep_t) block of DCT
+      coefficients (low-frequency components).
+
+    **Rank mode**:
+      Keeps the top-K coefficients by explained variance (energy),
+      regardless of spatial position. Requires coeff_indices parameter.
 
     Parameters
     ----------
     keep_h : int
-        Number of DCT coefficients to keep along the "H" dimension.
+        Number of DCT coefficients to keep along the "H" dimension (spatial mode).
     keep_w : int
-        Number of DCT coefficients to keep along the "W" dimension.
+        Number of DCT coefficients to keep along the "W" dimension (spatial mode).
     keep_t : int
-        Number of DCT coefficients to keep along the "T" (time) dimension.
+        Number of DCT coefficients to keep along the "T" (time) dimension (spatial mode).
+    dtype : np.dtype
+        Data type for encoded coefficients (default: float32).
+    selection_mode : str
+        Coefficient selection strategy: "spatial" or "rank" (default: "spatial").
+    coeff_indices : np.ndarray | None
+        1D array of coefficient indices for rank mode. Required if selection_mode="rank".
+    coeff_shape : tuple[int, int, int] | None
+        Expected (H, W, T) shape for validation in rank mode (optional).
 
     Notes
     -----
-    - The actual number of coefficients kept in each dimension is:
+    - **Spatial mode**: The actual number of coefficients kept is:
+          D = min(keep_h, H) * min(keep_w, W) * min(keep_t, T)
 
-          h_eff = min(keep_h, H)
-          w_eff = min(keep_w, W)
-          t_eff = min(keep_t, T)
+    - **Rank mode**: The number of coefficients is:
+          D = len(coeff_indices)
 
-      where (H, W, T) is the 3D shape of the input view.
-
-    - The encoder returns a (D,) array, where:
-
-          D = h_eff * w_eff * t_eff
-
-    - The decoder requires the original input shape and reconstructs an
-      array of the same shape via zero-padding in DCT space + inverse DCT.
+    - The encoder returns a (D,) array.
+    - The decoder requires the original input shape and reconstructs via
+      zero-padding in DCT space + inverse DCT.
     """
 
     keep_h: int
     keep_w: int
     keep_t: int
-    dtype: np.dtype = np.float32
+    dtype: type = np.float32
+    selection_mode: str = "spatial"
+    coeff_indices: np.ndarray | None = None
+    coeff_shape: Tuple[int, int, int] | None = None
+
+    def __post_init__(self):
+        """Validate codec parameters."""
+        if self.selection_mode not in ("spatial", "rank"):
+            raise ValueError(
+                f"selection_mode must be 'spatial' or 'rank', got {self.selection_mode!r}"
+            )
+        
+        if self.selection_mode == "rank":
+            if self.coeff_indices is None:
+                raise ValueError(
+                    "coeff_indices required when selection_mode='rank'"
+                )
+            self.coeff_indices = np.asarray(self.coeff_indices, dtype=np.int32)
+            if self.coeff_indices.ndim != 1:
+                raise ValueError(
+                    f"coeff_indices must be 1D array, got shape {self.coeff_indices.shape}"
+                )
+            if len(self.coeff_indices) == 0:
+                raise ValueError("coeff_indices cannot be empty")
+            
+            # Validate indices are non-negative
+            if np.any(self.coeff_indices < 0):
+                raise ValueError("coeff_indices must contain non-negative integers")
 
     @property
     def keep_shape(self) -> Tuple[int, int, int]:
@@ -176,7 +213,8 @@ class DCT3DCodec:
         Returns
         -------
         z : np.ndarray
-            Encoded representation of shape (1, D), dtype = self.dtype.
+            Encoded representation of shape (D,), dtype = self.dtype.
+            D = h_eff * w_eff * t_eff (spatial mode) or len(coeff_indices) (rank mode).
         """
         if not isinstance(x, np.ndarray):
             x = np.asarray(x)
@@ -188,14 +226,34 @@ class DCT3DCodec:
         # Apply 3D DCT
         X = _dct3(x3)
 
-        # Effective keep dims (cannot exceed actual dims)
-        h_eff = min(self.keep_h, H)
-        w_eff = min(self.keep_w, W)
-        t_eff = min(self.keep_t, T)
-
-        X_crop = X[:h_eff, :w_eff, :t_eff]
-
-        z = X_crop.reshape(-1).astype(self.dtype, copy=False)  # shape (D,)
+        if self.selection_mode == "rank":
+            # Rank mode: select coefficients by variance-ordered indices
+            if self.coeff_shape is not None:
+                expected_H, expected_W, expected_T = self.coeff_shape
+                if (H, W, T) != (expected_H, expected_W, expected_T):
+                    raise ValueError(
+                        f"Input shape mismatch: expected coeff_shape={self.coeff_shape}, "
+                        f"got (H,W,T)={H,W,T} from input shape {x.shape}"
+                    )
+            
+            X_flat = X.reshape(-1)
+            
+            # Validate indices are within bounds
+            max_idx = H * W * T
+            if np.any(self.coeff_indices >= max_idx):
+                raise ValueError(
+                    f"coeff_indices contains out-of-bounds indices (max={max_idx-1})"
+                )
+            
+            z = X_flat[self.coeff_indices].astype(self.dtype, copy=False)
+        else:
+            # Spatial mode: keep top-left-front block
+            h_eff = min(self.keep_h, H)
+            w_eff = min(self.keep_w, W)
+            t_eff = min(self.keep_t, T)
+            
+            X_crop = X[:h_eff, :w_eff, :t_eff]
+            z = X_crop.reshape(-1).astype(self.dtype, copy=False)
 
         return z
 
@@ -206,7 +264,7 @@ class DCT3DCodec:
         Parameters
         ----------
         z : np.ndarray
-            Encoded representation of shape or (D,).
+            Encoded representation of shape (D,).
         original_shape : tuple of int
             Original input shape used in encode:
                 (T,), (C, T), or (H, W, T).
@@ -222,7 +280,7 @@ class DCT3DCodec:
         z = z.astype(self.dtype, copy=False)
 
         if z.ndim != 1:
-            raise ValueError(f"Expected z of shape (D,), got {z.shape}. ")
+            raise ValueError(f"Expected z of shape (D,), got {z.shape}")
 
         # Recover the 3D full shape from original_shape
         # match conventions of _to_3d_view
@@ -235,23 +293,46 @@ class DCT3DCodec:
         else:
             raise ValueError(f"Unsupported original_shape={original_shape!r}")
 
-        h_eff = min(self.keep_h, H_full)
-        w_eff = min(self.keep_w, W_full)
-        t_eff = min(self.keep_t, T_full)
-
-        expected_dim = h_eff * w_eff * t_eff
-        if z.size != expected_dim:
-            raise ValueError(
-                f"Encoded vector has size {z.size}, but expected "
-                f"{expected_dim} for original_shape={original_shape!r} "
-                f"with keep=(h={self.keep_h}, w={self.keep_w}, t={self.keep_t})"
-            )
-
-        X_crop = z.reshape(h_eff, w_eff, t_eff)
-
-        # Build full DCT tensor with zeros outside the kept region
+        # Build full DCT tensor with zeros
         X_full = np.zeros((H_full, W_full, T_full), dtype=self.dtype)
-        X_full[:h_eff, :w_eff, :t_eff] = X_crop
+
+        if self.selection_mode == "rank":
+            # Rank mode: scatter coefficients to variance-ordered positions
+            if self.coeff_shape is not None:
+                expected_H, expected_W, expected_T = self.coeff_shape
+                if (H_full, W_full, T_full) != (expected_H, expected_W, expected_T):
+                    raise ValueError(
+                        f"Shape mismatch: expected coeff_shape={self.coeff_shape}, "
+                        f"got (H,W,T)={H_full,W_full,T_full} from original_shape={original_shape}"
+                    )
+            
+            assert self.coeff_indices is not None  # Already validated in __post_init__
+            expected_dim = len(self.coeff_indices)
+            if z.size != expected_dim:
+                raise ValueError(
+                    f"Encoded vector has size {z.size}, but expected "
+                    f"{expected_dim} (len(coeff_indices)) for original_shape={original_shape!r}"
+                )
+            
+            X_flat = X_full.reshape(-1)
+            X_flat[self.coeff_indices] = z
+            X_full = X_flat.reshape(H_full, W_full, T_full)
+        else:
+            # Spatial mode: place in top-left-front block
+            h_eff = min(self.keep_h, H_full)
+            w_eff = min(self.keep_w, W_full)
+            t_eff = min(self.keep_t, T_full)
+
+            expected_dim = h_eff * w_eff * t_eff
+            if z.size != expected_dim:
+                raise ValueError(
+                    f"Encoded vector has size {z.size}, but expected "
+                    f"{expected_dim} for original_shape={original_shape!r} "
+                    f"with keep=(h={self.keep_h}, w={self.keep_w}, t={self.keep_t})"
+                )
+
+            X_crop = z.reshape(h_eff, w_eff, t_eff)
+            X_full[:h_eff, :w_eff, :t_eff] = X_crop
 
         x3_hat = _idct3(X_full)
         x_hat = _from_3d_view(x3_hat, original_shape)

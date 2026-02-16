@@ -1,22 +1,95 @@
 embeddings:
   per_signal_overrides:
+    input:
+      pf_active-coil_current:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/input_pf_active-coil_current.npy
+          coeff_shape:
+          - 10
+          - 1
+          - 20
+          num_coeffs: 15
+          explained_energy: 0.9991559890473584
+          dim_distribution:
+            unique_h: 10
+            unique_w: 1
+            unique_t: 3
+      summary-ip:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/input_summary-ip.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 20
+          num_coeffs: 2
+          explained_energy: 0.9995735187428638
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 2
     actuator:
+      pf_active-coil_voltage:
+        encoder_name: dct3d
+        encoder_kwargs:
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/actuator_pf_active-coil_voltage.npy
+          coeff_shape:
+          - 4
+          - 1
+          - 20
+          num_coeffs: 18
+          explained_energy: 0.9990264129404829
+          dim_distribution:
+            unique_h: 4
+            unique_w: 1
+            unique_t: 5
       summary-power_nbi:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 8
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/actuator_summary-power_nbi.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 20
+          num_coeffs: 4
+          explained_energy: 0.999067534412115
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 4
     output:
       pf_active-coil_current:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 10
-          keep_w: 1
-          keep_t: 1
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_pf_active-coil_current.npy
+          coeff_shape:
+          - 10
+          - 1
+          - 20
+          num_coeffs: 9
+          explained_energy: 0.9958645327188045
+          dim_distribution:
+            unique_h: 9
+            unique_w: 1
+            unique_t: 1
       pf_active-solenoid_current:
         encoder_name: dct3d
         encoder_kwargs:
-          keep_h: 1
-          keep_w: 1
-          keep_t: 2
+          selection_mode: rank
+          coeff_indices_path: dct3d_indices/output_pf_active-solenoid_current.npy
+          coeff_shape:
+          - 1
+          - 1
+          - 20
+          num_coeffs: 1
+          explained_energy: 0.9996431923945807
+          dim_distribution:
+            unique_h: 1
+            unique_w: 1
+            unique_t: 1

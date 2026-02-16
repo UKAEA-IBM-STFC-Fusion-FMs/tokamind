@@ -20,7 +20,7 @@ from .transforms.select_valid_windows import SelectValidWindowsTransform
 from .transforms.embed_chunks import EmbedChunksTransform
 from .transforms.build_tokens import BuildTokensTransform
 from .transforms.finalize_window import FinalizeWindowTransform
-from .transforms.tune_dct3d import TuneDCT3DTransform
+from .transforms.tune_ranked_dct3d import TuneRankedDCT3DTransform
 from .transforms.compose import ComposeTransforms
 
 
@@ -49,7 +49,7 @@ __all__ = [
     "EmbedChunksTransform",
     "BuildTokensTransform",
     "FinalizeWindowTransform",
-    "TuneDCT3DTransform",
+    "TuneRankedDCT3DTransform",
     "ComposeTransforms",
     "MMTCollate",
     "initialize_mmt_dataloader",
