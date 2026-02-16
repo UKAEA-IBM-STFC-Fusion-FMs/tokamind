@@ -1,7 +1,5 @@
 # Task-specific overrides for the PRETRAIN phase.
 # Use this file only when a given pretrain task needs settings beyond the
-# shared defaults in config/common/pretrain.yaml (e.g. a fixed run_id, different
+# shared defaults in config/common/pretrain.yaml (e.g. different
 # LR/epochs, warm-start settings, etc.).
 
-# Optional: name the eval subfolder. If omitted, loader uses run_<timestamp>.
-run_id: pretrain_inputs_actuators_to_outputs

@@ -64,6 +64,19 @@ def parse_args_finetune() -> argparse.Namespace:
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
     parser.add_argument(
+        "--model",
+        type=str,
+        default="tokamind_base_v1",
+        help="Source model for warm-start (run_id or path). Example: tokamind_base_v1",
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        default=None,
+        help="Optional experiment tag for versioning (e.g., 'lr1e-4', 'exp1'). "
+        "Used in run_id generation: ft_{task}_{tag}_from_{model}",
+    )
+    parser.add_argument(
         "--emb_profile",
         type=str,
         default="dct3d",
@@ -88,6 +101,8 @@ def main() -> None:
         task=args.task,
         phase="finetune",
         embeddings_profile=args.emb_profile,
+        model=args.model,
+        tag=args.tag,
     )
     validate_config(cfg_mmt)
 
@@ -308,7 +323,7 @@ def main() -> None:
                 model,
                 run_init,
                 load_parts=load_parts,
-                map_location=device,
+                map_location=str(device),
             )
 
     # ------------------------------------------------------------------

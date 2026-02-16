@@ -68,6 +68,13 @@ def parse_args_eval() -> argparse.Namespace:
         default="_test",
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
+    parser.add_argument(
+        "--model",
+        type=str,
+        # required=True,
+        default="ft-_test-tokamind_base_v1",
+        help="Model to evaluate (run_id or path). Example: ft_task_1-1_from_base_v1",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -85,6 +92,7 @@ def main() -> None:
     cfg_mmt = load_experiment_config(
         task=args.task,
         phase="eval",
+        model=args.model,
     )
     validate_config(cfg_mmt)
 
@@ -261,7 +269,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     train_run_dir = cfg_mmt.model_source["run_dir"]
     epoch_best, best_val, _metadata = load_best_weights(
-        run_dir=train_run_dir, model=model, map_location=device
+        run_dir=train_run_dir, model=model, map_location=str(device)
     )
 
     logger = logging.getLogger("mmt.Eval")

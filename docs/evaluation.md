@@ -220,8 +220,17 @@ number of batches/windows to iterate over (depending on your evaluation loop).
 ## Common evaluation workflows
 
 ### Evaluate a trained run (default)
-1. Set `model_source.run_id` to the training run you want to evaluate.
-2. Run `run_eval.py --task <task>`.
+Specify the model to evaluate via the `--model` CLI argument:
+
+```bash
+# Evaluate a finetuned model
+python scripts_mast/run_eval.py --task task_2-1 --model ft-task_2-1-exp1-pretrain_base_v1
+
+# Evaluate a pretrained model directly
+python scripts_mast/run_eval.py --task task_2-1 --model pretrain_base_v1
+```
+
+Evaluation results are saved in `runs/{model}/eval/`.
 
 ### Evaluate under missing inputs
 Set:

@@ -1,10 +1,8 @@
 # Task-specific overrides for the PRETRAIN phase.
 # Use this file only when a given pretrain task needs settings beyond the
-# shared defaults in config/common/pretrain.yaml (e.g. a fixed run_id, different
+# shared defaults in config/common/pretrain.yaml (e.g. different
 # LR/epochs, warm-start settings, etc.).
 
-# Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: trained_3-2_small_v2
 
 preprocess:
   valid_windows:

@@ -70,6 +70,20 @@ def parse_args_pretrain() -> argparse.Namespace:
         help="embeddings_profile chosen for the task: "
         "scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml",
     )
+    parser.add_argument(
+        "--run-id",
+        type=str,
+        default=None,
+        help="Explicit run identifier (takes precedence over --tag). "
+        "If not provided, uses --tag or defaults to task name.",
+    )
+    parser.add_argument(
+        "--tag",
+        type=str,
+        default="tag",
+        help="Optional tag for versioning. Creates run_id as {task}_{tag}. "
+        "If neither --run-id nor --tag provided, uses task name as run_id.",
+    )
     args, _ = parser.parse_known_args()
     return args
 
@@ -88,6 +102,8 @@ def main() -> None:
         task=args.task,
         phase="pretrain",
         embeddings_profile=args.emb_profile,
+        run_id=args.run_id,
+        tag=args.tag,
     )
     validate_config(cfg_mmt)
 
@@ -308,7 +324,7 @@ def main() -> None:
                 model,
                 run_init,
                 load_parts=load_parts,
-                map_location=device,
+                map_location=str(device),
             )
 
     # ------------------------------------------------------------------

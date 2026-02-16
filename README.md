@@ -192,32 +192,44 @@ All phase scripts use the same pattern: pass a **task folder name** under
 All phase scripts also accept `--emb_profile <profile>` to select which task-level embedding overrides to use (default: `dct3d`).
 `scripts_mast/configs/tasks_overrides/<task>/`.
 
-Finetune:
+**Pretrain** (supports `--run-id` or `--tag` for naming):
 
 ```bash
-python scripts_mast/run_finetune.py --task task_2-1
+# Foundation model with explicit name
+python scripts_mast/run_pretrain.py --task pretrain_inputs_actuators_to_inputs_outputs --run-id tokamind_v1
+
+# Task-specific model with tag (creates: task_1-1_small_v2)
+python scripts_mast/run_pretrain.py --task task_1-1 --tag small_v2
+
+# Default: uses task name as run_id
+python scripts_mast/run_pretrain.py --task task_1-1
 ```
 
-Pretrain (example):
+**Priority:** `--run-id` (explicit) > `--tag` (generates `{task}_{tag}`) > task name
+
+**Finetune** (requires `--model` to specify source model):
 
 ```bash
-python scripts_mast/run_pretrain.py --task pretrain_inputs_actuators_to_inputs_outputs
+# Finetune from a pretrained model
+python scripts_mast/run_finetune.py --task task_2-1 --model pretrain_inputs_actuators_to_inputs_outputs
+
+# With optional experiment tag for versioning
+python scripts_mast/run_finetune.py --task task_2-1 --model pretrain_inputs_actuators_to_inputs_outputs --tag experiment1
 ```
 
-Evaluate:
+This auto-generates run_id as: `ft-{task}-{tag}-{model_id}` (or `ft-{task}-{model_id}` if no tag)
 
-1. In `scripts_mast/configs/tasks_overrides/<task>/eval_overrides.yaml`, set:
+**Evaluate** (requires `--model` to specify which model to evaluate):
 
-   ```yaml
-   model_source:
-     run_dir: "<training_run_id>"
-   ```
+```bash
+# Evaluate a finetuned model
+python scripts_mast/run_eval.py --task task_2-1 --model ft-task_2-1-experiment1-pretrain_inputs_actuators_to_inputs_outputs
 
-2. Run:
+# Or evaluate a pretrained model directly
+python scripts_mast/run_eval.py --task task_2-1 --model pretrain_inputs_actuators_to_inputs_outputs
+```
 
-   ```bash
-   python scripts_mast/run_eval.py --task task_2-1
-   ```
+Evaluation results are saved in `runs/{model}/eval/`
 
 Tune embedding parameters (DCT3D) for a task:
 
@@ -233,19 +245,27 @@ scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
 
 ### 3) Configuration
 
-Configuration is **convention-based** (no pointers inside YAML). The loader merges:
+Configuration is **convention-based** with **CLI-based model selection**. The loader merges:
 
-1) `scripts_mast/configs/common/embeddings.yaml`  
-2) `scripts_mast/configs/common/<phase>.yaml`  
-3) `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*  
-4) `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune/eval; create an empty file if you do not want task-specific overrides yet)*
+1) `scripts_mast/configs/common/embeddings.yaml`
+2) `scripts_mast/configs/common/<phase>.yaml`
+3) `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` *(optional)*
+4) `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` *(required for pretrain/finetune; create an empty file if you do not want task-specific overrides yet)*
 
-Notes:
-- Each phase config must explicitly define: `seed`, `runtime`, `data.local`, `data.subset_of_shots`.
-- `finetune` and `eval` must set `model_source.run_dir` to a run id under `runs/`.
+**Key Changes:**
+- **Model selection via CLI**: Use `--model` argument instead of editing YAML configs
+- **Auto-generated run IDs**: Finetune runs are named `ft-{task}-{tag}-{model_id}`
+- **No manual config editing**: Model sources and run IDs are set automatically from CLI arguments
+
+**Notes:**
+- Each phase config must explicitly define: `seed`, `runtime`, `data.local`, `data.subset_of_shots`
+- Finetune and eval phases require `--model` CLI argument (no longer in YAML)
+- Optional `--tag` for finetune allows experiment versioning
+- All phases accept `--emb_profile <profile>` to select embedding overrides (default: `dct3d`)
 
 See:
-- `docs/config_guide.md`
+- `docs/config_guide.md` — detailed configuration guide
+- `docs/config_reference.md` — CLI arguments and config reference
 
 ---
 

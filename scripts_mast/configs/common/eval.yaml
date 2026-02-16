@@ -1,36 +1,18 @@
 # Default configuration for EVAL phase.
 #
-# This file contains eval settings shared across tasks_overrides.
+# Model to evaluate is now specified via CLI: --model <run_id_or_path>
 #
-# IMPORTANT:
-#   - model_source.run_dir must point to the TRAINING run to evaluate.
-#   - Do NOT set it here (common config).
-#     Set it in: scripts_mast/configs/tasks_overrides/<task>/eval_overrides.yaml
-#
-# Outputs are saved under:
-#   <model_source.run_dir>/<eval_id>/   (or eval__<timestamp> if eval_id is omitted)
+# Outputs are automatically saved under:
+#   runs/<model_id>/eval/
 
 seed: 54
 
 runtime:
   debug_logging: false
 
-model_source:
-  # Model to evaluate (required).
-  #
-  # - run_id: <run_id>          -> evaluate a run under <repo_root>/runs/<run_id>/
-  # - model_path: <path>|null   -> if set, overrides run_id and evaluates an external run folder
-  #
-  # The source folder must contain checkpoints/ and the saved merged config <run_id>.yaml.
-  run_id: null
-  model_path: null
-
-# optional; if omitted, loader uses eval__<timestamp>
-eval_id: null
-
 data:
-  local: true         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: null   # None / null → uses all shots
+  local: false         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: 10   # None / null → uses all shots
 
   keep_output_native: true
   cache:

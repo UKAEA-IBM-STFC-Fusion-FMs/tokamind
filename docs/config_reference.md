@@ -86,18 +86,30 @@ phase: "pretrain"
 
 ### `run_id`
 
-**Type:** `str | null`  
-**Required:** No  
-**Default:** `null` (auto-generated as `<task>__<phase>__<timestamp>`)
+**Type:** `str`
+**Required:** No (auto-generated from CLI)
+**CLI Arguments:** `--run-id <name>` or `--tag <version>` (pretrain only)
 
 Identifier for the training run. Determines the output directory under [`runs/<run_id>/`](../runs/).
 
-**Example:**
-```yaml
-run_id: "tokamind_base_v1"
-```
+**Pretrain:** Specified via CLI with flexible naming:
+- `--run-id <name>`: Explicit name (e.g., `tokamind_v1`)
+- `--tag <version>`: Generates `{task}_{tag}` (e.g., `task_1-1_small_v2`)
+- No arguments: Uses task name (e.g., `task_1-1`)
 
-**Auto-generated format:** `task_1-1__pretrain__20260213_102030`
+**Finetune:** Auto-generated as `ft-{task}-{tag}-{model_id}` (or `ft-{task}-{model_id}` if no `--tag`)
+
+**Examples:**
+```bash
+# Pretrain with explicit name
+python run_pretrain.py --task pretrain_inputs_actuators_to_inputs_outputs --run-id tokamind_v1
+
+# Pretrain with tag
+python run_pretrain.py --task task_1-1 --tag small_v2  # Creates: task_1-1_small_v2
+
+# Finetune (auto-generated)
+python run_finetune.py --task task_1-1 --model tokamind_v1 --tag exp1  # Creates: ft-task_1-1-exp1-tokamind_v1
+```
 
 **Used in:** pretrain, finetune
 
@@ -1573,27 +1585,79 @@ loader:
 
 ---
 
-## Model Source Configuration
+## CLI Arguments
 
-Model source configuration specifies which trained model to load for warm-start (finetune) or evaluation.
+**IMPORTANT:** Model sources and run IDs are now specified via CLI arguments, not YAML configs.
 
-### `model_source.run_id`
+### Pretrain CLI Arguments
 
-**Type:** `str | null`  
-**Required:** Yes (finetune, eval) unless `model_path` is set  
+**`--run-id <name>`** (optional)
+
+Explicit run identifier. Takes precedence over `--tag` and task name.
+
+**`--tag <version>`** (optional)
+
+Version tag for the run. Generates run_id as `{task}_{tag}`.
+
+**Examples:**
+```bash
+# Foundation model with explicit name
+python run_pretrain.py --task pretrain_inputs_actuators_to_inputs_outputs --run-id tokamind_v1
+
+# Task-specific with tag
+python run_pretrain.py --task task_1-1 --tag small_v2  # Creates: task_1-1_small_v2
+
+# Default (uses task name)
+python run_pretrain.py --task task_1-1  # Creates: task_1-1
+```
+
+**Priority:** `--run-id` > `--tag` > task name
+
+### Finetune & Eval CLI Arguments
+
+**`--model <run_id_or_path>`** (required)
+
+Specifies the source model to load. Accepts either:
+- A run_id (folder name under `runs/`)
+- An absolute path to an external checkpoint directory
+
+**`--tag <experiment_tag>`** (optional for finetune)
+
+Adds an experiment tag to the auto-generated run_id for versioning multiple experiments.
+
+**Examples:**
+```bash
+# Finetune from a pretrained model
+python run_finetune.py --task task_2-1 --model tokamind_v1
+
+# Finetune with experiment tag
+python run_finetune.py --task task_2-1 --model tokamind_v1 --tag experiment1
+
+# Evaluate a model
+python run_eval.py --task task_2-1 --model ft-task_2-1-experiment1-tokamind_v1
+```
+
+---
+
+### `model_source.run_id` (YAML - Pretrain Only)
+
+**Type:** `str | null`
+**Required:** No (optional for pretrain warm-start)
 **Default:** `null`
 
-Run identifier of the source model under [`runs/<run_id>/`](../runs/).
+For **pretrain phase only**, you can optionally set this in `pretrain_overrides.yaml` to warm-start from another pretrain run.
 
 **Example:**
 ```yaml
 model_source:
-  run_id: "tokamind_base_v1"
+  run_id: "pretrain_base_v1"
 ```
 
-**Note:** Provide only the run id (folder name), not a path like `"runs/tokamind_base_v1"`.
+**Note:**
+- For **finetune and eval**, use the `--model` CLI argument instead
+- Provide only the run id (folder name), not a path like `"runs/pretrain_base_v1"`
 
-**Used in:** finetune, eval
+**Used in:** pretrain (optional warm-start)
 
 ---
 
@@ -1919,13 +1983,13 @@ Path configuration is automatically computed by the config loader and should not
 
 ### `paths.run_dir`
 
-**Type:** `str`  
-**Computed:** Yes  
+**Type:** `str`
+**Computed:** Yes
 **Description:** Absolute path to the run output directory.
 
 **Format:**
 - Pretrain/Finetune: `<repo_root>/runs/<run_id>/`
-- Eval: `<repo_root>/runs/<model_run_id>/<eval_id>/`
+- Eval: `<repo_root>/runs/<model_id>/eval/`
 - Tune DCT3D: `<repo_root>/scripts_mast/configs/tasks_overrides/<task>/`
 
 **Used in:** All phases
@@ -1934,8 +1998,8 @@ Path configuration is automatically computed by the config loader and should not
 
 ### `paths.task`
 
-**Type:** `str`  
-**Computed:** Yes  
+**Type:** `str`
+**Computed:** Yes
 **Description:** Task identifier.
 
 **Used in:** pretrain, finetune, eval
@@ -1944,19 +2008,19 @@ Path configuration is automatically computed by the config loader and should not
 
 ### `paths.phase`
 
-**Type:** `str`  
-**Computed:** Yes  
-**Description:** Phase identifier.
+**Type:** `str`
+**Computed:** Yes
+**Description:** Phase identifier (pretrain, finetune, eval, or tune_dct3d).
 
-**Used in:** pretrain, finetune, eval
+**Used in:** All phases
 
 ---
 
 ### `paths.run_id`
 
-**Type:** `str`  
-**Computed:** Yes  
-**Description:** Run identifier for training phases.
+**Type:** `str`
+**Computed:** Yes
+**Description:** Run identifier for training phases. Auto-generated for finetune as `ft-{task}-{tag}-{model_id}` (or `ft-{task}-{model_id}` if no tag).
 
 **Used in:** pretrain, finetune
 
@@ -1964,9 +2028,9 @@ Path configuration is automatically computed by the config loader and should not
 
 ### `paths.eval_id`
 
-**Type:** `str`  
-**Computed:** Yes  
-**Description:** Evaluation identifier.
+**Type:** `str`
+**Computed:** Yes
+**Description:** Evaluation identifier (always "eval").
 
 **Used in:** eval
 
@@ -1974,11 +2038,35 @@ Path configuration is automatically computed by the config loader and should not
 
 ### `paths.model_run_dir`
 
-**Type:** `str`  
-**Computed:** Yes  
-**Description:** Absolute path to the source model's run directory.
+**Type:** `str`
+**Computed:** Yes
+**Description:** Absolute path to the source model's run directory (`<repo_root>/runs/<model_id>/`).
 
 **Used in:** eval
+
+---
+
+### `paths.config_dir`
+
+**Type:** `str`
+**Computed:** Yes
+**Description:** Absolute path to the task configuration directory.
+
+**Format:** `<repo_root>/scripts_mast/configs/tasks_overrides/<task>/`
+
+**Used in:** tune_dct3d
+
+---
+
+### `paths.tune_dir`
+
+**Type:** `str`
+**Computed:** Yes
+**Description:** Absolute path to the embeddings tuning directory.
+
+**Format:** `<repo_root>/scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/`
+
+**Used in:** tune_dct3d
 
 ---
 

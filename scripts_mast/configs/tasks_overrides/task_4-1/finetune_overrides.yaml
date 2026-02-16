@@ -1,17 +1,12 @@
 # Task-specific overrides for finetuning.
-# Typical uses:
-#   - warm-start settings (model_source.run_dir + optional load_parts)
+#
+# Model source is now specified via CLI:
+#   python run_finetune.py --task task_4-1 --model MODEL [--tag TAG]
+#
+# This file contains only task-specific settings:
 #   - task-specific training knobs (epochs, lr, batch_size, etc.)
 #   - per-signal collate drop rates or masking policies
-#   - per-signal adapter sizes (if you prefer not to keep them in task.yaml)
-
-#model_source:
-#  # Source training run to warm-start from. If omitted/null, train from scratch.
-#  run_dir: mmt_tiny_v0
-
-
-# Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: tuned_4-1_tiny_v1-2
+#   - preprocess settings specific to this task
 
 preprocess:
   valid_windows:

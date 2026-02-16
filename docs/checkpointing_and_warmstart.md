@@ -103,10 +103,21 @@ This is the recommended workflow for:
 
 ### Config key: `model_source` (recommended)
 
-In the config system, the source run is specified by:
+**For finetune and eval**, the source model is specified via CLI:
 
-`model_source.run_id` is the **run id** (folder name under `runs/`), not a path.
+```bash
+# Finetune from a pretrained model
+python scripts_mast/run_finetune.py --task task_2-1 --model pretrain_base_v1
 
+# Evaluate a model
+python scripts_mast/run_eval.py --task task_2-1 --model ft-task_2-1-exp1-pretrain_base_v1
+```
+
+The `--model` argument accepts either:
+- A run_id (folder name under `runs/`)
+- An absolute path to an external checkpoint directory
+
+**For pretrain** (optional warm-start), set in `pretrain_overrides.yaml`:
 
 ```yaml
 model_source:
@@ -118,9 +129,6 @@ model_source:
     modality_heads: true
     output_adapters: true
 ```
-
-> Legacy naming: some configs may still call this `model_init.model_dir`.  
-> The semantics are the same: it is the **source run directory** for loading weights.
 
 ### What warm-start does
 - picks `run_dir/checkpoints/best/` if it exists, else `run_dir/checkpoints/latest/`
@@ -161,11 +169,21 @@ You still **cannot** warm-start across structural changes that alter the core sh
 
 ## Practical recipes
 
-### 1) Finetune requires a source run
-In the new config system, `finetune` always requires `model_source.run_id` (a run id under `runs/`).
+### 1) Finetune requires a source model
+Finetune always requires the `--model` CLI argument to specify the source model.
 If you want to train a model from scratch, use `pretrain`.
 
-### 2) Finetune from a pretrained run (common)
+```bash
+# Finetune from a pretrained model
+python scripts_mast/run_finetune.py --task task_2-1 --model pretrain_base_v1
+
+# With experiment tag for versioning
+python scripts_mast/run_finetune.py --task task_2-1 --model pretrain_base_v1 --tag experiment1
+```
+
+### 2) Pretrain with warm-start (optional)
+For pretrain, you can optionally warm-start from another pretrain run by setting in `pretrain_overrides.yaml`:
+
 ```yaml
 model_source:
   run_id: "pretrain_some_task"
@@ -181,7 +199,7 @@ model_source:
 ```yaml
 model_source:
   run_id: "pretrain_some_task"
-  model_path: null   # if set, overrides run_id
+  model_path: null
   load_parts:
     token_encoder: false
     backbone: true
@@ -195,11 +213,9 @@ model_source:
 
 By convention:
 
+- **Finetune**: Specify source model via `--model` CLI argument (not in YAML)
+- **Pretrain** (optional warm-start): Set `model_source` in `tasks_overrides/<task>/pretrain_overrides.yaml`
 - Put warm-start defaults in `common/pretrain.yaml` (as `null`)
-- For `finetune`, set `model_source.run_id` in the task's `finetune_overrides.yaml` (required)
-- Set task/run-specific warm-start sources in:
-  - `tasks_overrides/<task>/finetune_overrides.yaml`
-  - `tasks_overrides/<task>/pretrain_overrides.yaml`
 
 This keeps `common/*` task-agnostic and makes runs reproducible.
 

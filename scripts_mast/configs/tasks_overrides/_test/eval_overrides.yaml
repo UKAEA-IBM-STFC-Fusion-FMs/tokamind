@@ -1,18 +1,14 @@
 # Task-specific overrides for evaluation.
-# Typical uses:
-#   - point to the training run to evaluate (model_source.run_dir)
-#   - optionally set a human-readable eval_id (otherwise timestamp is used)
-#   - tweak metrics/traces settings for this task
-#   - tighten/relax preprocess.valid_windows thresholds for eval
-
-model_source:
-  # run_id of the TRAINING run directory whose weights will be evaluated.
-  # Example: <run_id>
-  run_dir: test_pretrain
-  model_path: null
-
-# Optional: name the eval subfolder. If omitted, loader uses eval__<timestamp>.
-eval_id: eval
+#
+# Model to evaluate is now specified via CLI:
+#   python run_eval.py --task _test --model MODEL
+#
+# Eval results are automatically saved in: runs/<model_id>/eval/
+#
+# This file contains only task-specific eval settings:
+#   - metrics/traces settings
+#   - preprocess.valid_windows thresholds
+#   - eval-specific data selection
 
 eval:
   drop:

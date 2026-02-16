@@ -1,15 +1,18 @@
 # Configuration Guide
 
-This repository uses a **convention-based** configuration system.
+This repository uses a **convention-based configuration system with CLI-based model selection**.
 
 - The core Python package (`src/mmt/`) is dataset-agnostic.
 - Dataset/task integration lives under `scripts_mast/`.
 - Runs are configured by selecting a **task** and a **phase**; the loader finds and merges YAML files by convention.
+- **Model sources are specified via CLI arguments** (not in YAML configs).
 
 The goals are:
 
 - **Explicit phase configs** (no hidden globals)
 - **Small per-task overrides**
+- **CLI-based model selection** (no manual config editing)
+- **Auto-generated run IDs** (consistent naming conventions)
 - **Stable model/eval behavior** (no architecture drift at eval time)
 - **Predictable output locations**
 
@@ -42,13 +45,17 @@ These settings define *what* was trained and must not drift between training and
 
   `runs/<run_id>/<run_id>.yaml`
 
-- **finetune** requires `model_source.run_id` (or `model_source.model_path`) and **inherits `model` + `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
-  Finetune-side YAML should focus on *training settings* (stages, LR/WD, freezing, window selection, etc.).
+- **finetune** requires `--model <run_id_or_path>` CLI argument and **inherits `model` + `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
+  - Auto-generates run_id as: `ft-{task}-{tag}-{model_id}` (or `ft-{task}-{model_id}` if no `--tag`)
+  - Finetune-side YAML should focus on *training settings* (stages, LR/WD, freezing, window selection, etc.)
+  - No need to edit YAML configs for model selection
 
-- **eval** requires `model_source.run_id` (or `model_source.model_path`) and **rebuilds `model`, `embeddings`, and `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
-  Eval-side YAML should focus on *metrics/traces* and *evaluation window selection*.
+- **eval** requires `--model <run_id_or_path>` CLI argument and **rebuilds `model`, `embeddings`, and `preprocess.{chunk, trim_chunks}`** from the source run config snapshot.
+  - Auto-generates eval_id and saves results in `runs/{model}/eval/`
+  - Eval-side YAML should focus on *metrics/traces* and *evaluation window selection*
+  - No need to edit YAML configs for model selection
 
-This design prevents “config drift” (e.g., changing adapter sizing in finetune but forgetting to mirror it in eval).
+This design prevents "config drift" (e.g., changing adapter sizing in finetune but forgetting to mirror it in eval) and eliminates manual config editing for model selection.
 
 ---
 
@@ -92,10 +99,38 @@ Supported phases:
 Each phase has a corresponding runner:
 
 ```bash
-python scripts_mast/run_pretrain.py --task <task>
-python scripts_mast/run_finetune.py --task <task>
-python scripts_mast/run_eval.py --task <task>
+# Pretrain (supports --run-id or --tag for naming)
+python scripts_mast/run_pretrain.py --task <task> [--run-id <name>] [--tag <version>]
+
+# Finetune (requires --model, optional --tag)
+python scripts_mast/run_finetune.py --task <task> --model <source_model> [--tag <experiment_tag>]
+
+# Eval (requires --model)
+python scripts_mast/run_eval.py --task <task> --model <model_to_evaluate>
+
+# Tune DCT3D embeddings
 python scripts_mast/run_tune_dct3d.py --task <task>
+```
+
+**Examples:**
+```bash
+# Pretrain foundation model with explicit name
+python scripts_mast/run_pretrain.py --task pretrain_inputs_actuators_to_inputs_outputs --run-id tokamind_v1
+
+# Pretrain task-specific model with tag (creates: task_1-1_small_v2)
+python scripts_mast/run_pretrain.py --task task_1-1 --tag small_v2
+
+# Pretrain with default naming (uses task name)
+python scripts_mast/run_pretrain.py --task task_1-1
+
+# Finetune from pretrained model
+python scripts_mast/run_finetune.py --task task_2-1 --model tokamind_v1
+
+# Finetune with experiment tag
+python scripts_mast/run_finetune.py --task task_2-1 --model tokamind_v1 --tag lr1e-4
+
+# Evaluate a finetuned model
+python scripts_mast/run_eval.py --task task_2-1 --model ft-task_2-1-lr1e-4-tokamind_v1
 ```
 
 ---
@@ -159,7 +194,10 @@ Finetune defines *how to adapt a pretrained model*:
 - Finetune-side model knobs that are intended to be captured in the finetune snapshot (e.g., output adapter policy)
 
 **Do not rely on finetune.yaml to define `model` or `preprocess.{chunk, trim_chunks}`**.
-Those are inherited from `model_source.run_id` (or `model_source.model_path`).
+Those are inherited from the source model specified via `--model` CLI argument.
+
+**Do not set `model_source` or `run_id` in finetune.yaml**.
+These are auto-generated from CLI arguments.
 
 ### `common/eval.yaml`
 
@@ -171,9 +209,10 @@ Evaluation defaults:
 - `eval.metrics.*` and `eval.traces.*`
 - `preprocess.valid_windows` *(allowed to differ by phase)*
 
-The training run to evaluate must be provided in:
+**The model to evaluate is specified via `--model` CLI argument**, not in YAML configs.
 
-- `tasks_overrides/<task>/eval_overrides.yaml`
+**Do not set `model_source` or `eval_id` in eval.yaml**.
+These are auto-generated from CLI arguments.
 
 ### `common/tune_dct3d.yaml`
 
@@ -200,45 +239,39 @@ A task can override phase defaults by adding any of the following (all optional)
 
 Typical contents:
 
-- `run_id` / `eval_id`
-- `model_source.run_id` / `model_source.model_path` *(required for finetune and eval)*
-- phase-specific `preprocess.valid_windows.window_stride_sec`
-- any task-specific `collate` drop probabilities
+- Phase-specific `preprocess.valid_windows.window_stride_sec`
+- Task-specific `collate` drop probabilities
+- Task-specific training settings (learning rates, batch sizes, etc.)
+
+**What NOT to include:**
+- ❌ `run_id` / `eval_id` (auto-generated from CLI)
+- ❌ `model_source.run_id` / `model_source.model_path` (specified via `--model` CLI argument)
 
 If you want a task-wide change to apply to multiple phases, copy it into each relevant `<phase>_overrides.yaml`.
 
 ---
 
-## 6) Run ids and output locations
+## 6) Run IDs and output locations
 
-### `run_id` (training phases)
+### Auto-generated run IDs
 
-Set in either:
+**Pretrain:**
+- Specified via CLI arguments with flexible naming:
+  - `--run-id <name>`: Explicit name (e.g., `tokamind_v1`)
+  - `--tag <version>`: Generates `{task}_{tag}` (e.g., `task_1-1_small_v2`)
+  - No arguments: Uses task name as run_id (e.g., `task_1-1`)
+- **Priority:** `--run-id` > `--tag` > task name
 
-- `tasks_overrides/<task>/pretrain_overrides.yaml`
-- `tasks_overrides/<task>/finetune_overrides.yaml`
+**Finetune:**
+- Auto-generated from CLI arguments: `ft-{task}-{tag}-{model_id}`
+- If no `--tag`: `ft-{task}-{model_id}`
+- Examples:
+  - `ft-task_2-1-experiment1-tokamind_v1`
+  - `ft-task_2-1-tokamind_v1`
 
-Example:
-
-```yaml
-run_id: "task_2-1__finetune__v1"
-```
-
-If `run_id` is omitted, the loader creates a timestamped one:
-
-```
-<task>__<phase>__YYYYMMDD_HHMMSS
-```
-
-### `eval_id` (evaluation)
-
-Set in `tasks_overrides/<task>/eval_overrides.yaml`:
-
-```yaml
-eval_id: "eval_test"
-```
-
-If omitted, eval defaults to a timestamped id.
+**Eval:**
+- Auto-generated based on model being evaluated
+- Saves in `runs/{model}/eval/` directory
 
 ### Output folders
 
@@ -281,12 +314,18 @@ There are two distinct behaviors:
 
 ### Warm-start (pretrain / finetune)
 
-Use `model_source.run_id` (run id under `runs/`) in the phase overrides:
+**For finetune**, use the `--model` CLI argument:
+
+```bash
+python scripts_mast/run_finetune.py --task task_2-1 --model pretrain_base_v1
+```
+
+**For pretrain** (optional warm-start from another pretrain run), set in `pretrain_overrides.yaml`:
 
 ```yaml
 model_source:
-  run_id: \"some_previous_run\"
-  model_path: null
+  run_id: "some_previous_pretrain_run"
+  model_path: null  # or path to external checkpoint directory
   load_parts:
     token_encoder: true
     backbone: true
@@ -344,39 +383,70 @@ Avoid duplicating defaults in this file.
 
 1) **Missing task-level embedding overrides file**
 
-If you see an error like “Missing required task-level embedding overrides file”, create:
+If you see an error like "Missing required task-level embedding overrides file", create:
 
 - `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
 
 It can be empty.
 
-2) **Finetune/eval run id must be a run id, not a path**
+2) **Forgot to specify --model for finetune/eval**
 
-Use:
+Finetune and eval require the `--model` CLI argument:
 
-```yaml
-model_source:
-  run_id: "tokamind_base_v1"   # ✅
-  model_path: null
+```bash
+# ✅ Correct
+python scripts_mast/run_finetune.py --task task_2-1 --model pretrain_base_v1
+
+# ❌ Wrong - missing --model
+python scripts_mast/run_finetune.py --task task_2-1
 ```
 
-Not:
+3) **Model argument is a run_id, not a path**
 
-```yaml
-model_source:
-  run_id: "runs/tokamind_base_v1"   # ❌
-  model_path: null
+Use the run_id directly:
+
+```bash
+# ✅ Correct
+--model tokamind_base_v1
+
+# ❌ Wrong - don't include runs/ prefix
+--model runs/tokamind_base_v1
 ```
 
-If checkpoints live outside `runs/`, set `model_source.model_path` to that external run folder; it overrides `run_id` for checkpoint loading.
+If checkpoints live outside `runs/`, you can pass the full path:
 
+```bash
+--model /path/to/external/checkpoint/dir
+```
 
-3) **Eval/finetune requires the source run snapshot YAML**
+4) **Eval/finetune requires the source run snapshot YAML**
 
-If `runs/<source_run_id>/<source_run_id>.yaml` is missing, evaluation/finetune should fail.
-Copying model knobs into eval config is intentionally avoided.
+If `runs/<source_run_id>/<source_run_id>.yaml` is missing, evaluation/finetune will fail.
+The system intentionally avoids copying model knobs into eval config to prevent drift.
 
-4) **Streaming windows without `loader.batches_per_epoch`**
+5) **Streaming windows without `loader.batches_per_epoch`**
 
 If `data.cache.enable: false` (streaming), training must define `loader.batches_per_epoch`.
+
+6) **Don't set model_source or run_id in YAML configs**
+
+These are now specified via CLI arguments. Remove them from your task override files:
+
+```yaml
+# ❌ Don't do this anymore (finetune/eval)
+model_source:
+  run_id: "some_model"
+
+# ❌ Don't do this anymore (pretrain/finetune)
+run_id: "my_custom_id"
+```
+
+**Instead, use CLI arguments:**
+```bash
+# Pretrain: use --run-id or --tag
+python run_pretrain.py --task task_1-1 --run-id my_model_v1
+
+# Finetune/Eval: use --model
+python run_finetune.py --task task_1-1 --model source_model
+```
 

@@ -13,12 +13,12 @@ seed: 54
 runtime:
   debug_logging: false
 
-# Optional: name the training run folder under runs/. If omitted, loader generates one.
-run_id: null
+# run_id is now specified via CLI: --run-id (explicit) or --tag (generates {task}_{tag}) or defaults to task name
+# See: python run_pretrain.py --help
 
 data:
-  local: true         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: null   # None / null → uses all shots;
+  local: false         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: 10   # None / null → uses all shots;
 
   keep_output_native: false
   cache:
