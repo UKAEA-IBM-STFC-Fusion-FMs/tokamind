@@ -11,8 +11,8 @@ runtime:
   debug_logging: false
 
 data:
-  local: false         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: 10   # None / null → uses all shots
+  local: true         # True = uses local dataset, False = HPC / remote
+  subset_of_shots: null   # None / null → uses all shots
 
   keep_output_native: true
   cache:
