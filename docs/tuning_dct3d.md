@@ -173,7 +173,7 @@ embeddings:
         encoder_name: dct3d
         encoder_kwargs:
           selection_mode: rank
-          coeff_indices_path: dct3d_indices/input_pf_active-coil_current.npy
+          coeff_indices_path: @common/dct3d_indices/input_pf_active-coil_current.npy
           coeff_shape: [16, 1, 128]
           num_coeffs: 512
           explained_energy: 0.9985
@@ -187,6 +187,34 @@ embeddings:
           num_coeffs: 2048
           explained_energy: 0.9972
 ```
+
+### Path Resolution
+
+The `coeff_indices_path` supports two formats:
+
+**1. Relative paths** (for task-specific outputs):
+```yaml
+coeff_indices_path: dct3d_indices/output_equilibrium-psi.npy
+```
+Resolved relative to the task's embeddings_overrides directory:
+```
+scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d_indices/
+```
+
+**2. @common/ prefix** (for shared input/actuator indices):
+```yaml
+coeff_indices_path: @common/dct3d_indices/input_pf_active-coil_current.npy
+```
+Resolved to the common config directory:
+```
+scripts_mast/configs/common/dct3d_indices/
+```
+
+**Why use @common/?**
+- Input and actuator signals use the same 5ms chunk representation across all tasks
+- Their indices are tuned once (on the pretrain task) and reused everywhere
+- Output signals are task-specific and have their own indices per task
+- The @common/ prefix avoids duplicating shared indices in every task directory
 
 **Understanding the output:**
 

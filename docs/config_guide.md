@@ -71,6 +71,9 @@ scripts_mast/configs/
     finetune.yaml
     eval.yaml
     tune_dct3d.yaml
+    dct3d_indices/                   # shared coefficient indices (input/actuator)
+      input_*.npy                    # referenced via @common/ prefix
+      actuator_*.npy
 
   tasks_overrides/
     <task>/
@@ -81,6 +84,8 @@ scripts_mast/configs/
       embeddings_overrides/          # task-level embedding overrides (selected by profile)
         <profile>.yaml               # required for pretrain/finetune/eval (can be empty)
                                      # (DCT3D tuning writes to: dct3d.yaml by default)
+        dct3d_indices/               # task-specific coefficient indices (output)
+          output_*.npy               # referenced via relative paths
 ```
 
 A **task** is simply a folder under `scripts_mast/configs/tasks_overrides/<task>/`.

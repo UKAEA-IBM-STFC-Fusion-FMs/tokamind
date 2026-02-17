@@ -56,23 +56,45 @@ def load_coeff_indices(config_dir: Path, rel_path: str) -> np.ndarray:
     """
     Load coefficient indices from .npy file for rank mode DCT3D.
     
+    Supports two path formats:
+    - Regular relative path: resolved relative to config_dir
+      Example: "dct3d_indices/output_signal.npy"
+    - @common/ prefix: resolved relative to scripts_mast/configs/common/
+      Example: "@common/dct3d_indices/input_signal.npy"
+    
+    The @common/ prefix is used for shared input/actuator indices that are
+    reused across multiple tasks.
+    
     Parameters
     ----------
     config_dir : Path
         Base directory containing the config (e.g., tasks_overrides/<task>/embeddings_overrides/)
     rel_path : str
-        Relative path to .npy file (e.g., "dct3d_indices/input_signal.npy")
+        Relative path to .npy file, optionally prefixed with @common/
     
     Returns
     -------
     np.ndarray
         1D array of coefficient indices (dtype: int32)
     """
-    full_path = config_dir / rel_path
+    # Handle @common/ prefix for shared indices
+    if rel_path.startswith("@common/"):
+        # Remove @common/ prefix and resolve relative to configs/common/
+        path_without_prefix = rel_path[8:]  # len("@common/") = 8
+        # Navigate from config_dir up to scripts_mast/configs/common/
+        # config_dir is typically: scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/
+        # We need to go up to scripts_mast/configs/ then into common/
+        common_dir = config_dir.parent.parent.parent / "common"
+        full_path = common_dir / path_without_prefix
+    else:
+        # Regular relative path
+        full_path = config_dir / rel_path
+    
     if not full_path.exists():
         raise FileNotFoundError(
             f"Coefficient indices file not found: {full_path}\n"
-            f"Make sure to run tune_dct3d.py first to generate indices."
+            f"Make sure to run tune_dct3d.py first to generate indices.\n"
+            f"Original path: {rel_path}"
         )
     indices = np.load(full_path)
     if indices.ndim != 1:
