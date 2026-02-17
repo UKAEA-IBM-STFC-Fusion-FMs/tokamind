@@ -45,7 +45,7 @@ This submission consists of up to three local repositories (we suggest to leave 
 
 **Recommended Python:** **3.11+**
 ```bash
-conda create -n tokamind-env python=3.12
+conda create -n tokamind-env python=3.14
 conda activate tokamind-env
 ```
 
