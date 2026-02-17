@@ -229,6 +229,8 @@ def main() -> None:
             window_iterable_test,
             max_windows=None,  # No limit for eval
             num_workers_cache=cfg_cache.get("num_workers", 0),
+            shuffle_shots=False,  # Never shuffle test set
+            seed=cfg_mmt.seed,
             dtype=cfg_cache.get("dtype", None),
         )
     else:

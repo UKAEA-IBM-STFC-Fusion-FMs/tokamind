@@ -264,6 +264,8 @@ def main() -> None:
             window_iterable_train,
             max_windows=mw.get("train", None),
             num_workers_cache=cfg_cache.get("num_workers", 0),
+            shuffle_shots=cfg_loader["shuffle_train"],  # Shuffle during caching if enabled
+            seed=cfg_mmt.seed,
             dtype=cfg_cache.get("dtype", None),
         )
         
@@ -271,6 +273,8 @@ def main() -> None:
             window_iterable_val,
             max_windows=mw.get("val", None),
             num_workers_cache=cfg_cache.get("num_workers", 0),
+            shuffle_shots=False,  # Never shuffle validation
+            seed=cfg_mmt.seed,
             dtype=cfg_cache.get("dtype", None),
         )
     else:
