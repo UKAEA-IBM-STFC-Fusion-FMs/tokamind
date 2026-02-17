@@ -173,7 +173,7 @@ embeddings:
         encoder_name: dct3d
         encoder_kwargs:
           selection_mode: rank
-          coeff_indices_path: @common/dct3d_indices/input_pf_active-coil_current.npy
+          coeff_indices_path: "@common/dct3d_indices/input_pf_active-coil_current.npy"
           coeff_shape: [16, 1, 128]
           num_coeffs: 512
           explained_energy: 0.9985
@@ -203,8 +203,9 @@ scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d_indices/
 
 **2. @common/ prefix** (for shared input/actuator indices):
 ```yaml
-coeff_indices_path: @common/dct3d_indices/input_pf_active-coil_current.npy
+coeff_indices_path: "@common/dct3d_indices/input_pf_active-coil_current.npy"
 ```
+**Note:** The path must be quoted in YAML because `@` is a special character.
 Resolved to the common config directory:
 ```
 scripts_mast/configs/common/dct3d_indices/
