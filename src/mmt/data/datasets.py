@@ -52,7 +52,7 @@ import random
 import numpy as np
 import psutil
 import torch
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 logger = logging.getLogger("mmt.Cache")
 
@@ -204,32 +204,41 @@ class WindowCachedDataset(Dataset):
 
 
 # -----------------------------------------------------------------------------
-# Flattened dataset wrapper for efficient parallel caching
+# Shot-batched wrapper for efficient IPC during parallel caching
 # -----------------------------------------------------------------------------
 
 
-class FlattenedStreamingDataset(Dataset):
-    """Wrap an IterableDataset to enable efficient map-style access for caching.
+class _ShotBatchedIterableDataset(IterableDataset):
+    """Wrapper that batches windows by shot to reduce IPC overhead.
     
-    This adapter materializes windows from an IterableDataset into a list,
-    allowing DataLoader to distribute work at the window level (not shot level)
-    for better load balancing across workers.
-    
-    Note: This is only used during caching, not during training.
+    Instead of yielding individual windows (causing many small pickle operations),
+    this collects all windows from each shot and yields them as a list.
+    This matches the old map-style dataset behavior where each worker returned
+    List[window_dict] per shot, dramatically reducing serialization overhead.
     """
-
-    def __init__(self, iterable_dataset: Any) -> None:
-        # Materialize all windows from the iterable
-        self.windows: List[Dict[str, Any]] = []
-        for window in iterable_dataset:
-            if window is not None:
-                self.windows.append(window)
-
-    def __len__(self) -> int:
-        return len(self.windows)
-
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
-        return self.windows[idx]
+    
+    def __init__(self, base_iterable: IterableDataset):
+        super().__init__()
+        self.base_iterable = base_iterable
+    
+    def __iter__(self):
+        current_shot_id = None
+        current_batch = []
+        
+        for window in self.base_iterable:
+            shot_id = window.get("shot_id")
+            
+            # If shot changed and we have accumulated windows, yield the batch
+            if shot_id != current_shot_id and current_batch:
+                yield current_batch
+                current_batch = []
+            
+            current_shot_id = shot_id
+            current_batch.append(window)
+        
+        # Yield final batch if any
+        if current_batch:
+            yield current_batch
 
 
 # -----------------------------------------------------------------------------
@@ -258,23 +267,26 @@ def materialize_tokenized_split_to_ram(
 ) -> WindowCachedDataset:
     """Materialise windows from an IterableDataset into a RAM-backed window dataset.
     
-    This function first materializes all windows from the IterableDataset into a
-    FlattenedStreamingDataset (map-style), then uses parallel DataLoader workers
-    to efficiently process and cache them.
+    This function uses DataLoader with multiple workers to parallelize window
+    processing from an IterableDataset. Each worker processes a subset of shots,
+    and windows are collected into RAM. Shuffling happens after caching.
     
     Parameters
     ----------
     streaming_dataset:
         An IterableDataset that yields windows directly (e.g., TaskModelTransformWrapperIterable).
+        The IterableDataset's __iter__ method handles worker splitting internally.
     max_windows:
         Optional cap on number of windows to cache.
     num_workers_cache:
-        Number of DataLoader workers for parallel caching. Higher values improve
-        throughput by distributing work at the window level.
+        Number of DataLoader workers for parallel processing. Each worker processes
+        a subset of shots. Higher values improve throughput (e.g., 32 workers).
     shuffle_shots:
-        If True, shuffle windows before caching (uses seed for reproducibility).
+        If True, shuffle windows AFTER caching (uses seed for reproducibility).
+        Note: IterableDataset doesn't support DataLoader shuffle, so shuffling
+        happens post-caching on the materialized list.
     seed:
-        Random seed for shuffling (only used if shuffle_shots=True).
+        Random seed for post-caching shuffle (only used if shuffle_shots=True).
     dtype:
         Optional dtype for cached embeddings ("float16" or "float32").
         
@@ -285,54 +297,37 @@ def materialize_tokenized_split_to_ram(
         
     Notes
     -----
-    Performance: This implementation materializes windows into a map-style dataset
-    before parallel caching, which provides better load balancing across workers
-    compared to directly iterating the IterableDataset (5x faster with 32 workers).
+    - Parallelization: Workers process different shots simultaneously via IterableDataset
+    - Shuffling: Post-caching shuffle (fast, operates on already-processed windows)
+    - Load balancing: IterableDataset.__iter__ handles worker splitting internally
     """
 
     dtype_np = _normalize_cache_dtype(dtype)
     
-    logger.info("Materializing windows from IterableDataset...")
-    
-    # Step 1: Materialize all windows from the IterableDataset into a list
-    # This allows us to use map-style access for efficient parallel caching
-    ds_flat = FlattenedStreamingDataset(streaming_dataset)
-    
-    logger.info(
-        "Materialized %d windows from iterable. Starting parallel caching with %d workers...",
-        len(ds_flat),
-        num_workers_cache,
-    )
+    # Note on shuffling: IterableDataset doesn't support DataLoader shuffling.
+    # Shuffling must be configured in the IterableDataset itself (e.g., shuffle_windows=True).
+    # The shuffle_shots parameter here will shuffle the final cached list instead.
 
     def _iter_windows() -> Iterable[Dict[str, Any]]:
-        # Multi-worker path: parallelise ds_flat.__getitem__()
+        # Use DataLoader for parallel iteration if num_workers_cache > 0
         if num_workers_cache > 0:
-            gen = None
-            if shuffle_shots:
-                gen = torch.Generator()
-                gen.manual_seed(int(seed))
-
+            # Wrap IterableDataset to batch windows by shot for efficient IPC
+            batched_dataset = _ShotBatchedIterableDataset(streaming_dataset)
             loader = DataLoader(
-                ds_flat,
+                batched_dataset,
                 batch_size=1,
-                shuffle=bool(shuffle_shots),
                 num_workers=int(num_workers_cache),
                 collate_fn=_cache_collate_identity,
-                prefetch_factor=2,  # Increased from 1 for better throughput
-                generator=gen,
+                prefetch_factor=1,
+                persistent_workers=False,
             )
-            
-            for window in loader:
-                yield window
-            return
-
-        # Single-process path: direct indexing (optionally shuffled)
-        indices = list(range(len(ds_flat)))
-        if shuffle_shots and indices:
-            random.Random(int(seed)).shuffle(indices)
-
-        for idx in indices:
-            yield ds_flat[idx]
+            # Each batch is a list of windows from one shot
+            for window_list in loader:
+                for window in window_list:
+                    yield window
+        else:
+            # Single-process: iterate directly
+            yield from streaming_dataset
 
     flat_windows: List[Dict[str, Any]] = []
 
@@ -351,6 +346,11 @@ def materialize_tokenized_split_to_ram(
                 len(flat_windows),
                 get_ram_gb(),
             )
+
+    # Shuffle after caching if requested (since IterableDataset doesn't support DataLoader shuffle)
+    if shuffle_shots and flat_windows:
+        logger.info("Shuffling %d cached windows (seed=%d)...", len(flat_windows), seed)
+        random.Random(int(seed)).shuffle(flat_windows)
 
     logger.info(
         "Materialised %d tokenised windows (num_workers_cache=%d, shuffle_shots=%s, dtype=%s, Final RAM: %.3f GB)",
