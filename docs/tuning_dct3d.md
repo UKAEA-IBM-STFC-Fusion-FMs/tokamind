@@ -97,10 +97,25 @@ The `TuneRankedDCT3DTransform`:
 4. Writes coefficient indices to `.npy` files
 5. Generates config with `selection_mode: rank`
 
-**Key difference from old approach:**
-- No grid search over `(keep_h, keep_w, keep_t)` combinations
-- Much faster: 50-200x speedup
-- Better compression: coefficients selected by actual importance
+### Aggregation Strategy
+
+The tuning process uses a **pooled energy aggregation** approach:
+
+1. **For each window/chunk**: Compute full DCT: `z = DCT(x)`
+2. **Accumulate energies**: `acc_energy[i] += z[i]²` for all coefficients
+3. **After all windows**: Compute mean energy per coefficient: `E[c_i²] = acc_energy[i] / n_windows`
+4. **Compute explained energy**: `sum(E[c_i²] for selected) / sum(E[c_i²] for all)`
+
+This computes the **ratio of expected energies**: `E[sum(z_selected²)] / E[sum(z_all²)]`
+
+**Important:** This differs from the old `TuneDCT3DTransform` which computed the **expected ratio**: `E[sum(z_selected²) / sum(z_all²)]` by averaging per-window ratios. The pooled approach is more robust to windows with varying signal energy and provides a more accurate estimate of compression performance on the overall dataset.
+
+### Key Differences from Old Approach
+
+- ✅ No grid search over `(keep_h, keep_w, keep_t)` combinations
+- ✅ Much faster: 50-200x speedup
+- ✅ Better compression: coefficients selected by actual importance
+- ✅ More robust aggregation: pools energy across all windows before computing ratios
 
 ---
 

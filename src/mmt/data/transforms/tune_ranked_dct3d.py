@@ -19,10 +19,26 @@ For an orthonormal DCT, the explained energy ratio is:
 
     explained_energy = sum(c_i² for i in selected) / sum(c_i² for all i)
 
+Aggregation Strategy
+--------------------
+This transform uses a **pooled energy aggregation** approach:
+
+  1. For each window/chunk, compute full DCT: z = DCT(x)
+  2. Accumulate coefficient energies: acc_energy[i] += z[i]²
+  3. After all windows, compute mean energy: E[c_i²] = acc_energy[i] / n_windows
+  4. Compute explained energy: sum(E[c_i²] for selected) / sum(E[c_i²] for all)
+
+This computes the **ratio of expected energies**: E[sum(z_selected²)] / E[sum(z_all²)]
+
+**Note:** This differs from the old TuneDCT3DTransform which computed the
+**expected ratio**: E[sum(z_selected²) / sum(z_all²)] by averaging per-window ratios.
+The pooled approach is more robust to windows with varying signal energy and provides
+a more accurate estimate of compression performance on the overall dataset.
+
 Selection Strategy
 ------------------
 For each (role, signal):
-  1. Compute mean(c_i²) across all windows
+  1. Compute mean(c_i²) across all windows (pooled energy)
   2. Sort coefficients descending by energy
   3. Find smallest K where cumsum(energy[:K])/total >= threshold
   4. Apply max_budget cap if provided
