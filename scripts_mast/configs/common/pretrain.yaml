@@ -24,7 +24,7 @@ data:
   cache:
     enable: true
     dtype: float16          # or float32
-    num_workers: 32
+    num_workers: 64
     max_windows:
       train: null
       val: null
