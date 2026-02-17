@@ -163,7 +163,7 @@ class WindowCachedDataset(Dataset):
     @classmethod
     def from_streaming(
         cls,
-        streaming_dataset: Sequence[Any],
+        streaming_dataset: Any,
         max_windows: int | None = None,
         num_workers_cache: int = 0,
         *,
@@ -171,6 +171,28 @@ class WindowCachedDataset(Dataset):
         seed: int = 0,
         dtype: Optional[str] = None,
     ) -> "WindowCachedDataset":
+        """Create a WindowCachedDataset from an IterableDataset.
+        
+        Parameters
+        ----------
+        streaming_dataset:
+            An IterableDataset that yields windows (e.g., TaskModelTransformWrapperIterable).
+        max_windows:
+            Optional cap on number of windows to cache.
+        num_workers_cache:
+            Number of DataLoader workers for parallel iteration.
+        shuffle_shots:
+            Ignored (kept for API compatibility). Configure shuffling in the iterable.
+        seed:
+            Ignored (kept for API compatibility). Configure seed in the iterable.
+        dtype:
+            Optional dtype for cached embeddings.
+            
+        Returns
+        -------
+        WindowCachedDataset
+            Materialized in-RAM dataset.
+        """
         return materialize_tokenized_split_to_ram(
             streaming_dataset=streaming_dataset,
             max_windows=max_windows,
@@ -182,39 +204,13 @@ class WindowCachedDataset(Dataset):
 
 
 # -----------------------------------------------------------------------------
-# Collate function used *only* for parallel caching
+# Collate function used for parallel caching
 # -----------------------------------------------------------------------------
 
 
 def _cache_collate_identity(batch):
-    """Collate used during caching only (batch_size=1)."""
+    """Identity collate for caching (batch_size=1, just unwrap the single item)."""
     return batch[0]
-
-
-# -----------------------------------------------------------------------------
-# Wrapper for multiprocessing caching
-# -----------------------------------------------------------------------------
-
-
-class FlattenedStreamingDataset(Dataset):
-    """Wrap a shot-level dataset so __getitem__ returns a *list* of window dicts."""
-
-    def __init__(self, ds: Sequence[Any]) -> None:
-        self.ds = ds
-
-    def __len__(self) -> int:
-        return len(self.ds)
-
-    def __getitem__(self, idx: int) -> List[Dict[str, Any]]:
-        item = self.ds[idx]
-        if item is None:
-            return []
-
-        if isinstance(item, dict):
-            return [item]
-
-        # Materialise iterables (e.g. generators) so the result is picklable
-        return [w for w in item if w is not None]
 
 
 # -----------------------------------------------------------------------------
@@ -224,51 +220,74 @@ class FlattenedStreamingDataset(Dataset):
 
 def materialize_tokenized_split_to_ram(
     *,
-    streaming_dataset: Sequence[Any],
+    streaming_dataset: Any,
     max_windows: Optional[int] = None,
     num_workers_cache: int = 0,
     shuffle_shots: bool = False,
     seed: int = 0,
     dtype: Optional[str] = None,
 ) -> WindowCachedDataset:
-    """Materialise a *shot-level* dataset adapter into a RAM-backed window dataset."""
+    """Materialise windows from an IterableDataset into a RAM-backed window dataset.
+    
+    Parameters
+    ----------
+    streaming_dataset:
+        An IterableDataset that yields windows directly (e.g., TaskModelTransformWrapperIterable).
+    max_windows:
+        Optional cap on number of windows to cache.
+    num_workers_cache:
+        Number of DataLoader workers for parallel iteration.
+        Note: The IterableDataset itself handles worker splitting internally.
+    shuffle_shots:
+        Ignored. Shuffling must be configured in the IterableDataset constructor.
+    seed:
+        Ignored. Seed must be configured in the IterableDataset constructor.
+    dtype:
+        Optional dtype for cached embeddings ("float16" or "float32").
+        
+    Returns
+    -------
+    WindowCachedDataset
+        In-RAM dataset of windows.
+        
+    Notes
+    -----
+    This function now expects an IterableDataset (new benchmark API) that yields
+    windows directly. The old shot-level map-style dataset path has been removed.
+    
+    Shuffling and worker splitting are handled by the IterableDataset itself
+    (e.g., TaskModelTransformWrapperIterable has shuffle_windows and handles
+    worker splitting in __iter__).
+    """
 
     dtype_np = _normalize_cache_dtype(dtype)
+    
+    # Warn about ignored parameters
+    if shuffle_shots:
+        logger.warning(
+            "shuffle_shots parameter is ignored. Configure shuffling via "
+            "the IterableDataset constructor (e.g., shuffle_windows=True)."
+        )
+    if seed != 0:
+        logger.warning(
+            "seed parameter is ignored. Configure seed via the IterableDataset constructor."
+        )
 
     def _iter_windows() -> Iterable[Dict[str, Any]]:
-        ds_flat = FlattenedStreamingDataset(streaming_dataset)
-
-        # Multi-worker path: parallelise ds_flat.__getitem__()
+        # Use DataLoader for parallel iteration if num_workers_cache > 0
         if num_workers_cache > 0:
-            gen = None
-            if shuffle_shots:
-                gen = torch.Generator()
-                gen.manual_seed(int(seed))
-
-            # NOTE: prefetch_factor is only valid when num_workers > 0.
             loader = DataLoader(
-                ds_flat,
+                streaming_dataset,
                 batch_size=1,
-                shuffle=bool(shuffle_shots),
                 num_workers=int(num_workers_cache),
                 collate_fn=_cache_collate_identity,
                 prefetch_factor=1,
-                generator=gen,
             )
-
-            for window_list in loader:  # each is List[window_dict]
-                for w in window_list:
-                    yield w
-            return
-
-        # Single-process path: direct indexing (optionally shuffled)
-        indices = list(range(len(ds_flat)))
-        if shuffle_shots and indices:
-            random.Random(int(seed)).shuffle(indices)
-
-        for idx in indices:
-            for w in ds_flat[idx]:
-                yield w
+            for window in loader:
+                yield window
+        else:
+            # Single-process: iterate directly
+            yield from streaming_dataset
 
     flat_windows: List[Dict[str, Any]] = []
 

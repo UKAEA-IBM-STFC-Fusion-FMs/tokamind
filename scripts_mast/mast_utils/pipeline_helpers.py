@@ -65,7 +65,6 @@ from mmt.data import (
     BuildTokensTransform,
     FinalizeWindowTransform,
     ComposeTransforms,
-    WindowStreamedDataset,
     WindowCachedDataset,
     MMTCollate,
 )
@@ -205,77 +204,6 @@ def build_default_transform(
             FinalizeWindowTransform(keep_output_native=keep_output_native),
         ]
     )
-
-
-# -----------------------------------------------------------------------------
-# Window datasets (streaming vs cached)
-# -----------------------------------------------------------------------------
-
-
-def build_window_dataset(
-    *,
-    model_dataset: Any,
-    enable_cache: bool,
-    num_workers_cache: int,
-    seed: int,
-    shuffle: Optional[bool] = False,
-    cache_max_windows: Optional[int] = None,
-    cache_dtype: Optional[str] = None,
-) -> Any:
-    """Create window-level datasets from shot-level wrapped datasets.
-
-    Parameters
-    ----------
-    model_dataset:
-        shot-level dataset wrapper.
-    enable_cache:
-        If True, cache selected splits to RAM using WindowCachedDataset.
-    num_workers_cache:
-        Number of workers used by the caching materialisation.
-    seed:
-        Random seed (used by WindowStreamedDataset when shuffle_shots is enabled).
-    shuffle:
-        Shot-level shuffling for streaming datasets
-    cache_max_windows:
-        Optional hard cap passed to WindowCachedDataset.from_streaming.
-    cache_dtype:
-        str, "float16" or "float32"
-
-    Returns
-    -------
-    Any
-        window-level dataset (cached or streaming), or None.
-    """
-
-    if model_dataset is None:
-        return None
-
-    if enable_cache:
-        logger = logging.getLogger("mmt.Cache")
-        logger.info("Starting caching")
-        t0 = time.perf_counter()
-        cache_kwargs: Dict[str, Any] = {
-            "max_windows": cache_max_windows,
-            "num_workers_cache": num_workers_cache,
-        }
-
-        # Newer versions support dtype casting at cache time (float16/float32).
-        if cache_dtype is not None:
-            cache_kwargs["dtype"] = cache_dtype
-
-        try:
-            ds = WindowCachedDataset.from_streaming(model_dataset, **cache_kwargs)
-        except TypeError:
-            # Backwards-compat: older WindowCachedDataset.from_streaming
-            # doesn't accept dtype.
-            cache_kwargs.pop("dtype", None)
-            ds = WindowCachedDataset.from_streaming(model_dataset, **cache_kwargs)
-        t1 = time.perf_counter()
-        logger.info("Finished caching in %.3f seconds", t1 - t0)
-    else:
-        ds = WindowStreamedDataset(model_dataset, shuffle_shots=shuffle, seed=seed)
-
-    return ds
 
 
 # -----------------------------------------------------------------------------

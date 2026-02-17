@@ -1,5 +1,6 @@
 
 task_name: _test
+task_type: markovian
 
 sources_and_signals:
   input_name: &input_keys

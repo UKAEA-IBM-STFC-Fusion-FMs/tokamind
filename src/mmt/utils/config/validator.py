@@ -115,7 +115,6 @@ REQUIRED_TRAIN_FIELDS: List[Tuple[str, type]] = [
     ("train.early_stop.delta", float),
     ("train.loss.output_weights", dict),  # normalized if YAML gives null
     ("train.optimizer.use_adamw", bool),
-    ("train.scheduler.warmup_steps_fraction", float),
     ("train.stages", list),
 ]
 
@@ -196,21 +195,10 @@ def _validate_stage_consistency(stage_cfg: Dict[str, Any]) -> None:
 
 def _validate_loader(cfg: Dict[str, Any]) -> None:
     loader_cfg = cfg.get("loader", {}) or {}
-    phase = cfg.get("phase", None)
 
     data_cfg = cfg.get("data", {}) or {}
     cache_cfg = data_cfg.get("cache") or {}
     cache_enable = bool(cache_cfg.get("enable", False))
-
-    bpe = loader_cfg.get("batches_per_epoch", None)
-
-    # If cache is disabled (streaming windows), an epoch length must be defined.
-    if phase in ("pretrain", "finetune"):
-        if not cache_enable and bpe is None:
-            raise ValueError(
-                "When data.cache.enable=false (streaming), "
-                "loader.batches_per_epoch must be set (int >= 1)."
-            )
 
     # Cached windows are already precomputed and collation is typically Python-heavy.
     # In this mode, multi-worker DataLoaders rarely help and can be slower

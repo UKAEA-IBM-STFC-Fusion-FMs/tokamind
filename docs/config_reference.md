@@ -255,8 +255,6 @@ data:
     enable: true
 ```
 
-**Note:** When `enable: false` (streaming mode), you must set [`loader.batches_per_epoch`](#loaderbatches_per_epoch).
-
 **Used in:** pretrain, finetune, eval
 
 ---
@@ -964,25 +962,6 @@ train:
 
 ---
 
-### `train.scheduler.warmup_steps_fraction`
-
-**Type:** `float`  
-**Required:** Yes  
-**Default:** `0.02`
-
-Fraction of total training steps to use for learning rate warmup.
-
-**Example:**
-```yaml
-train:
-  scheduler:
-    warmup_steps_fraction: 0.05  # 5% warmup
-```
-
-**Used in:** pretrain, finetune
-
----
-
 ### `train.stages`
 
 **Type:** `list[dict]`  
@@ -1564,24 +1543,6 @@ loader:
 ```
 
 **Used in:** pretrain, finetune, eval
-
----
-
-### `loader.batches_per_epoch`
-
-**Type:** `int | null`  
-**Required:** If `data.cache.enable: false`  
-**Default:** `null`
-
-Number of batches per epoch for streaming datasets. Required when caching is disabled.
-
-**Example:**
-```yaml
-loader:
-  batches_per_epoch: 1000
-```
-
-**Used in:** pretrain, finetune
 
 ---
 

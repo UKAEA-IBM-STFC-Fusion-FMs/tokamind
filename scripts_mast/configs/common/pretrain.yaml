@@ -62,7 +62,6 @@ loader:
   num_workers: 0
   shuffle_train: true
   drop_last: false
-  batches_per_epoch: null  # Required only when data.cache.enable=false (streaming)
 
 model:
   backbone:
@@ -113,9 +112,6 @@ train:
 
   optimizer:
     use_adamw: true
-
-  scheduler:
-    warmup_steps_fraction: 0.02
 
   stages:
     - name: pretrain_main

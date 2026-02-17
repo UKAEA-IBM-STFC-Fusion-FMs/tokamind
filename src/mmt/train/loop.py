@@ -1,12 +1,12 @@
 """
 loop.py — High-level train loop for the Multi-Modal Transformer (MMT)
 
-This module orchestrates the complete finetuning flow of the MMT model,
+This module orchestrates the complete training/finetuning flow of the MMT model,
 including:
 
     • Multi-stage train (warm, main, transfer, etc.)
     • Freezing/unfreezing backbone and modality-specific components
-    • Per-stage optimizers and LR schedulers (cosine + warmup)
+    • Per-stage optimizers and LR schedulers (epoch-based cosine annealing)
     • AMP train, gradient accumulation
     • Best and latest checkpointing
     • Strict resume of interrupted runs
@@ -22,27 +22,24 @@ IMPORTANT:
     No config validation is performed here.
 
 -------------------------------------------------------------------------------
-DATASET: CACHED AND STREAMED BEHAVIOUR
+DATASET ARCHITECTURE
 -------------------------------------------------------------------------------
 
-MMT supports two dataset regimes:
+The training loop works with DataLoaders that wrap either:
+- WindowCachedDataset (map-style, all windows in RAM)
+- TaskModelTransformWrapperIterable (iterable-style, windows on-the-fly)
 
-1) **Cached mode** (WindowCachedDataset)
-   - Map-style dataset
-   - len(dataloader) == true number of batches
-   - Epoch = full pass over all windows
+Both provide the same interface: iterate until exhausted for one epoch.
 
-2) **Streaming mode** (WindowStreamedDataset)
-   - IterableDataset yielding windows sequentially
-   - __len__ returns number of shots, NOT windows
-   - True number of windows is unknown without a full pre-scan
-   - Therefore len(dataloader) CANNOT be used as epoch length
-   - Epoch length must be defined via:
+-------------------------------------------------------------------------------
+SCHEDULER
+-------------------------------------------------------------------------------
 
-         loader.streaming.batches_per_epoch
-
-   - Train stops after this many batches
-   - Validation ALWAYS exhausts the dataloader
+Uses simple epoch-based cosine annealing (no warmup):
+- LR decays from initial value to 0 over stage epochs
+- Stepped once per epoch (after training pass)
+- Universal: works for both cached and streaming datasets
+- For training from scratch, use lower initial LR if needed
 
 -------------------------------------------------------------------------------
 The `history` object tracks structured per-epoch train statistics and is
@@ -57,6 +54,7 @@ import os
 from typing import Dict, Any, cast
 
 import torch
+from torch.amp.grad_scaler import GradScaler
 
 from mmt.models.mmt import MultiModalTransformer
 from mmt.train.loop_utils import (
@@ -148,35 +146,32 @@ def train_finetune(
 
     use_adamw = train_cfg["optimizer"]["use_adamw"]
 
-    warmup_frac = float(train_cfg["scheduler"]["warmup_steps_fraction"])
-    warmup_frac = float(max(0.0, min(1.0, warmup_frac)))
-
     amp_enabled = train_cfg.get("amp", {}).get("enable", True)
-
-    bpe = loader_cfg.get("batches_per_epoch", None)
-    if bpe is not None:
-        train_batches_per_epoch = int(cast(Any, bpe))
-    else:
-        train_batches_per_epoch = len(train_loader)
 
     # -------------------------------------------------------------------------
     # Device, AMP, scaler
     # -------------------------------------------------------------------------
     device, amp_enabled, amp_dtype = get_amp_config(model, enable=amp_enabled)
     use_scaler = device.type == "cuda" and amp_enabled and amp_dtype == torch.float16
-    scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
+    scaler = GradScaler('cuda', enabled=use_scaler)
 
     logger.info("AMP enabled=%s dtype=%s scaler=%s", amp_enabled, amp_dtype, use_scaler)
 
     # -------------------------------------------------------------------------
     # Initial reporting
     # -------------------------------------------------------------------------
+    # Try to get train loader length for logging (works for map-style datasets)
+    try:
+        train_loader_len = len(train_loader)
+    except TypeError:
+        train_loader_len = -1  # Unknown for IterableDataset
+    
     log_train_setup(
         model,
         device,
         amp_enabled,
         amp_dtype,
-        train_batches_per_epoch,
+        train_loader_len,
         stages,
         train_cfg,
     )
@@ -198,7 +193,7 @@ def train_finetune(
                 optimizer=None,
                 scheduler=None,
                 scaler=None,
-                map_location=device,
+                map_location=str(device),
             )
             best_val = float(best_so_far)
             global_step = int(meta.get("global_step", 0))
@@ -256,11 +251,6 @@ def train_finetune(
         wd_modality_heads = float(wd_cfg["modality_heads"])
         wd_output_adapters = float(wd_cfg["output_adapters"])
 
-        # ---- Stage steps / scheduler steps ----
-        steps_per_epoch = math.ceil(train_batches_per_epoch / max(1, grad_accum_steps))
-        total_steps = steps_per_epoch * epochs
-        warmup_steps = int(round(warmup_frac * total_steps))
-
         # ---- Stage freezing ----
         apply_stage_freeze_policy(
             model,
@@ -281,15 +271,13 @@ def train_finetune(
             wd_backbone=wd_backbone,
             wd_modality_heads=wd_modality_heads,
             wd_output_adapters=wd_output_adapters,
-            total_steps=total_steps,
-            warmup_steps=warmup_steps,
+            total_epochs=epochs,
             use_adamw=use_adamw,
         )
 
         logger.info(
             f"----- Stage '{name}' (index {stage_idx}) "
-            f"epochs={epochs}, grad_accum={grad_accum_steps}, "
-            f"total_steps={total_steps}, warmup={warmup_steps} -----"
+            f"epochs={epochs}, grad_accum={grad_accum_steps} -----"
         )
 
         # Create history list for this stage
@@ -316,9 +304,12 @@ def train_finetune(
                 grad_accum_steps=grad_accum_steps,
                 train=True,
                 global_step=global_step,
-                max_batches=train_batches_per_epoch,
                 epoch_global=epoch_global,
             )
+            
+            # Step the scheduler after each training epoch
+            if scheduler is not None:
+                scheduler.step()
 
             # ---------------------------- VALIDATION -----------------------
             val_loss, _ = run_one_epoch(
@@ -333,7 +324,6 @@ def train_finetune(
                 grad_accum_steps=1,
                 train=False,
                 global_step=global_step,
-                max_batches=None,  # always full validation
                 epoch_global=epoch_global,
             )
 

@@ -205,15 +205,14 @@ but you will likely lose rich trace information.
 
 ---
 
-## Cached vs streaming evaluation
+## Window caching for evaluation
 
-Evaluation can use either window-level dataset:
+Evaluation uses the same window caching mechanism as training:
 
-- **Cached** windows (recommended): faster, deterministic epoch sizing.
-- **Streaming** windows: lower memory, but less direct control over “number of windows”.
+- **Cached mode** (`data.cache.enable: true`, recommended): Windows are materialized to RAM for fast, deterministic evaluation
+- **Streaming mode** (`data.cache.enable: false`): Windows are generated on-the-fly from the MAST integration's IterableDataset
 
-If you evaluate on streaming windows, ensure your configuration/runner defines an appropriate
-number of batches/windows to iterate over (depending on your evaluation loop).
+For consistent metrics and faster evaluation, caching is recommended.
 
 ---
 

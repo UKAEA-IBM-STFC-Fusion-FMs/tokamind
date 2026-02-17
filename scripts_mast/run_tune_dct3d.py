@@ -33,7 +33,7 @@ import yaml
 
 from mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
-    initialize_model_dataset,
+    initialize_model_dataset_iterable,
     get_task_metadata,
     get_train_test_val_shots,
 )
@@ -55,7 +55,6 @@ from mmt.data import (
     TrimChunksTransform,
     TuneRankedDCT3DTransform,
     ComposeTransforms,
-    WindowStreamedDataset,
 )
 
 
@@ -210,25 +209,20 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Shot-level dataset (wrapped) for tuning
+    # Window-level iterable (benchmark wrapper yields windows directly)
     # ------------------------------------------------------------------
-    model_dataset_train = initialize_model_dataset(
+    ds_windows = initialize_model_dataset_iterable(
         mast_dataset_train,
         dict_task_metadata,
         cfg_task,
         model_specific_transform=mmt_transform_map,
+        test_mode=False,
+        shuffle_windows=False,  # we shuffle when loading using get_train_test_val_shots
+        shuffle_buffer_size=512,
         verbose=False,
     )
-
-    # ------------------------------------------------------------------
-    # Window-level dataset (streaming)
-    # ------------------------------------------------------------------
-    assert model_dataset_train is not None, "model_dataset_train should not be None"
-    ds_windows = WindowStreamedDataset(
-        model_dataset_train,  # type: ignore[arg-type]
-        shuffle_shots=False,  # we shuffle when loading using get_train_test_val_shots
-        seed=cfg_mmt.seed,
-    )
+    
+    assert ds_windows is not None, "window iterable should not be None"
 
     # ------------------------------------------------------------------
     # Shot exploration

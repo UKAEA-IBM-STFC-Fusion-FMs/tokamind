@@ -88,7 +88,7 @@ def build_param_groups(
     # ---- Token encoder ----
     if not hasattr(model, "tokens"):
         raise AttributeError("Model must expose .tokens (TokenEncoder).")
-    tok_params = list(model.tokens.parameters())
+    tok_params = list(model.tokens.parameters())  # type: ignore[attr-defined]
     if tok_params:
         groups.append(
             {
@@ -102,7 +102,7 @@ def build_param_groups(
     # ---- Backbone ----
     if not hasattr(model, "backbone"):
         raise AttributeError("Model must expose .backbone.")
-    back_params = list(model.backbone.parameters())
+    back_params = list(model.backbone.parameters())  # type: ignore[attr-defined]
     if not back_params:
         raise RuntimeError("model.backbone has no parameters.")
     groups.append(
@@ -117,7 +117,7 @@ def build_param_groups(
     # ---- Modality heads (single group) ----
     if not hasattr(model, "modality_heads"):
         raise AttributeError("Model must expose .modality_heads (ModuleDict).")
-    mh_params = _flatten_params(model.modality_heads.values())
+    mh_params = _flatten_params(model.modality_heads.values())  # type: ignore[attr-defined]
     if mh_params:
         groups.append(
             {
@@ -131,7 +131,7 @@ def build_param_groups(
     # ---- Output adapters (single group) ----
     if not hasattr(model, "output_adapters"):
         raise AttributeError("Model must expose .output_adapters (ModuleDict).")
-    oa_params = _flatten_params(model.output_adapters.values())
+    oa_params = _flatten_params(model.output_adapters.values())  # type: ignore[attr-defined]
     if oa_params:
         groups.append(
             {
@@ -156,17 +156,25 @@ def build_optimizer_and_scheduler(
     wd_modality_heads: float,
     lr_output_adapters: float,
     wd_output_adapters: float,
-    total_steps: int,
-    warmup_steps: int,
+    total_epochs: int,
     use_adamw: bool,
-) -> tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler.LambdaLR]]:
+) -> tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler.LRScheduler]]:
     """
-    Build optimizer and warmup+cosine scheduler.
+    Build optimizer and simple epoch-based cosine annealing scheduler.
 
     Scheduler definition
     --------------------
-    - linear warmup from ~0 to 1 over warmup_steps
-    - cosine decay from 1 to 0 over remaining steps
+    - Cosine decay from initial LR to 0 over total_epochs
+    - Scheduler is stepped once per epoch (after training pass)
+    - No warmup phase (use lower initial LR if training is unstable)
+    
+    This approach is universal and works for both cached and streaming datasets,
+    as it doesn't require knowing the number of batches per epoch.
+    
+    Notes
+    -----
+    - For training from scratch, consider using a lower initial LR (e.g., 1e-4 instead of 1e-3)
+    - For finetuning, the model is already well-initialized so warmup is less critical
     """
     param_groups = build_param_groups(
         model,
@@ -183,33 +191,18 @@ def build_optimizer_and_scheduler(
     OptimClass = torch.optim.AdamW if use_adamw else torch.optim.Adam
     optimizer = OptimClass(param_groups, betas=(0.9, 0.999), eps=1e-8)
 
-    total_steps = int(total_steps)
-    warmup_steps = int(warmup_steps)
+    total_epochs = int(total_epochs)
 
-    if total_steps <= 0:
+    if total_epochs <= 0:
         return optimizer, None
 
-    def lr_lambda(step: int) -> float:
-        step = max(0, int(step))
-
-        # Warmup
-        if warmup_steps > 0 and step < warmup_steps:
-            # Avoid exact 0 multiplier (can break some schedulers / logs)
-            return max(1e-8, step / float(warmup_steps))
-
-        # constant after warmup
-        # return 1.0
-
-        # Cosine with floor (set min_lr_ratio to 0 to have no floor)
-        min_lr_ratio = 0.
-        denom = max(1, total_steps - warmup_steps)
-        progress = (step - warmup_steps) / float(denom)
-        progress = min(max(progress, 0.0), 1.0)
-
-        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))  # in [0, 1]
-        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
-
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
+    # Simple cosine annealing: LR decays from initial value to 0 over total_epochs
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer,
+        T_max=total_epochs,
+        eta_min=0.0
+    )
+    
     return optimizer, scheduler
 
 
@@ -223,15 +216,15 @@ def apply_stage_freeze_policy(
 ) -> None:
     """Freeze/unfreeze whole blocks at the beginning of a stage."""
     if hasattr(model, "tokens"):
-        _set_trainable(model.tokens, not freeze_token_encoder)
+        _set_trainable(model.tokens, not freeze_token_encoder)  # type: ignore[arg-type]
 
     if hasattr(model, "backbone"):
-        _set_trainable(model.backbone, not freeze_backbone)
+        _set_trainable(model.backbone, not freeze_backbone)  # type: ignore[arg-type]
 
     if hasattr(model, "modality_heads"):
-        for head in model.modality_heads.values():
-            _set_trainable(head, not freeze_modality_heads)
+        for head in model.modality_heads.values():  # type: ignore[attr-defined]
+            _set_trainable(head, not freeze_modality_heads)  # type: ignore[arg-type]
 
     if hasattr(model, "output_adapters"):
-        for adp in model.output_adapters.values():
-            _set_trainable(adp, not freeze_output_adapters)
+        for adp in model.output_adapters.values():  # type: ignore[attr-defined]
+            _set_trainable(adp, not freeze_output_adapters)  # type: ignore[arg-type]

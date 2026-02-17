@@ -25,7 +25,7 @@ from pathlib import Path
 
 from mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
-    initialize_model_dataset,
+    initialize_model_dataset_iterable,
     get_task_metadata,
     get_train_test_val_shots,
 )
@@ -37,7 +37,6 @@ from mast_utils import (
     setup_device_and_mp,
     extract_signal_stats,
     build_default_transform,
-    build_window_dataset,
     make_collate_fn,
 )
 
@@ -55,6 +54,7 @@ from mmt.data import (
     build_signal_specs,
     build_codecs,
     initialize_mmt_dataloader,
+    WindowCachedDataset,
 )
 from mmt.models import MultiModalTransformer
 from mmt.checkpoints import load_best_weights
@@ -196,34 +196,45 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Model-level dataset (shot-based wrapper)
+    # Window-level iterable (benchmark wrapper yields windows directly)
     # ------------------------------------------------------------------
-    model_dataset_test = initialize_model_dataset(
+    window_iterable_test = initialize_model_dataset_iterable(
         mast_dataset_test,
         dict_task_metadata,
         cfg_task,
         model_specific_transform=mmt_transform_map,
-        verbose=True,
         test_mode=True,
+        shuffle_windows=False,
+        shuffle_buffer_size=512,
+        verbose=True,
     )
 
-    # Optional debug: iterate a single shot to exercise wrapper + transforms
-    if debug_mode and model_dataset_test is not None:
-        shot = model_dataset_test[0]
-        for _ in shot:
-            continue
+    # Optional debug: iterate a few windows to exercise wrapper + transforms
+    if debug_mode and window_iterable_test is not None:
+        logger.info("Debug mode: testing window iteration...")
+        for i, window in enumerate(window_iterable_test):
+            if i >= 2:  # Just test first 2 windows
+                break
+        logger.info("Debug iteration successful")
 
     # ------------------------------------------------------------------
     # Window-level dataset for EVAL (test only)
     # ------------------------------------------------------------------
-    window_dataset_test = build_window_dataset(
-        model_dataset=model_dataset_test,
-        enable_cache=cfg_cache.get("enable", False),
-        num_workers_cache=cfg_cache.get("num_workers", 0),
-        seed=cfg_mmt.seed,
-        shuffle=False,
-        cache_dtype=cfg_cache.get("dtype", None),
-    )
+    enable_cache = cfg_cache.get("enable", False)
+
+    if enable_cache:
+        # Cache mode: materialize windows to RAM
+        logger.info("Caching enabled - materializing windows to RAM")
+        window_dataset_test = WindowCachedDataset.from_streaming(
+            window_iterable_test,
+            max_windows=None,  # No limit for eval
+            num_workers_cache=cfg_cache.get("num_workers", 0),
+            dtype=cfg_cache.get("dtype", None),
+        )
+    else:
+        # Streaming mode: use iterable directly
+        logger.info("Streaming mode - using window iterable directly")
+        window_dataset_test = window_iterable_test
 
     # ------------------------------------------------------------------
     # DataLoader

@@ -16,13 +16,21 @@ Instead of importing benchmark symbols directly in run_*.py, do:
 
     from scripts_mast.mast_utils.benchmark_imports import (
         initialize_MAST_dataset,
-        initialize_model_dataset,
+        initialize_model_dataset_iterable,
+        TaskModelTransformWrapperIterable,
         get_train_test_val_shots,
         get_task_metadata,
         benchmark_get_task_config,
         WindowMetricsWriter,
         compute_task_metrics,
     )
+
+Notes
+-----
+- As of the 'wrapper_to_iterable' branch, the benchmark now provides window-level
+  iterables via TaskModelTransformWrapperIterable (IterableDataset).
+- The old shot-level wrapper (initialize_model_dataset) is deprecated.
+- All MMT code now uses initialize_model_dataset_iterable exclusively.
 """
 
 from __future__ import annotations
@@ -41,7 +49,8 @@ except ModuleNotFoundError as e:
 # 2) Import the exact symbols we rely on. If benchmark refactors, this block breaks
 #    and the error points here (single-file fix).
 try:
-    from MAST_benchmark.data import initialize_MAST_dataset, initialize_model_dataset
+    from MAST_benchmark.data import initialize_MAST_dataset, initialize_model_dataset_iterable
+    from MAST_benchmark.tools.Task_Model_Wrapper_Iterable import TaskModelTransformWrapperIterable
     from MAST_benchmark.data_split import get_train_test_val_shots
     from MAST_benchmark.tasks import get_task_metadata
     from MAST_benchmark.tasks import get_task_config as benchmark_get_task_config
@@ -57,7 +66,8 @@ except Exception as e:
 
 __all__ = [
     "initialize_MAST_dataset",
-    "initialize_model_dataset",
+    "initialize_model_dataset_iterable",
+    "TaskModelTransformWrapperIterable",
     "get_train_test_val_shots",
     "get_task_metadata",
     "benchmark_get_task_config",

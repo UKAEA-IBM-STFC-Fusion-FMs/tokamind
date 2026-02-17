@@ -10,6 +10,7 @@
 #subset_of_shots: null
 #local: false
 task_name: pretrain_inputs_actuators_to_outputs
+task_type: markovian
 
 sources_and_signals:
   input_name: &input_keys

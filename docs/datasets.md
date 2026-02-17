@@ -28,37 +28,23 @@ After preprocessing + embedding + token building, a window dict contains token f
 
 ---
 
-## Window-level dataset options
+## Architecture Overview
 
-MMT provides two ways to expose windows to a PyTorch `DataLoader`:
+The MMT data pipeline integrates with the MAST integration's window-level API:
 
-1) **Stream windows** directly from the shot dataset (low memory)  
-2) **Cache windows** in RAM (fastest training, true window-level shuffling)
+1. **MAST Integration**: `initialize_model_dataset_iterable()` returns `TaskModelTransformWrapperIterable`
+   - An IterableDataset that yields windows on-the-fly from shots
+   - Applies model transforms (chunking, embedding, tokenization) per window
+   - Handles shot-level shuffling and window filtering
 
-### Option 1 — `WindowStreamedDataset` (IterableDataset)
+2. **Window Caching**: `WindowCachedDataset.from_streaming()` materializes windows to RAM
+   - Converts the IterableDataset into a map-style Dataset
+   - Enables true window-level shuffling via `DataLoader(shuffle=True)`
+   - Provides fastest training throughput after initial caching
 
-`WindowStreamedDataset` flattens a shot dataset into an **iterator of windows**.
+---
 
-Key properties:
-
-- **Low memory**: windows are produced on the fly.
-- **IterableDataset**: `DataLoader(shuffle=True)` is *not* applied by PyTorch for iterable datasets.
-- Shuffling happens at the **shot index** level (`shuffle_shots=True`) inside the dataset.
-- Multi-worker support: each worker gets a slice of shot indices; shuffling is per-worker and seeded.
-
-Important caveat:
-
-- `__len__` returns **number of shots**, not number of windows.
-  If you need a strict notion of “batches per epoch”, use `loader.batches_per_epoch`
-  (the training loop / validator may require this when streaming).
-
-When to use:
-
-- datasets too large to cache in memory,
-- quick experiments where perfect window-level shuffling is not required,
-- situations where window count is expensive to compute.
-
-### Option 2 — `WindowCachedDataset` (map-style Dataset)
+## Window-level dataset: `WindowCachedDataset`
 
 `WindowCachedDataset` stores a fully materialized **list of tokenized windows in RAM**.
 
@@ -71,9 +57,10 @@ Key properties:
 
 When to use:
 
-- you can afford the RAM footprint,
-- you care about window-level shuffling / deterministic epoch lengths,
-- you want fastest training throughput.
+- Default choice for train/val splits (recommended)
+- When you can afford the RAM footprint
+- When you care about window-level shuffling / deterministic epoch lengths
+- When you want fastest training throughput
 
 ---
 
@@ -81,43 +68,68 @@ When to use:
 
 Caching is performed by:
 
-- `materialize_tokenized_split_to_ram(streaming_dataset, num_workers_cache=..., max_windows=..., dtype=..., shuffle_shots=..., seed=...)`
+```python
+WindowCachedDataset.from_streaming(
+    streaming_dataset,  # IterableDataset (e.g., TaskModelTransformWrapperIterable)
+    num_workers=32,
+    max_windows=None,
+    dtype="float16",
+    seed=42
+)
+```
+
+The caching process:
+
+1. **Parallel materialization**: Uses PyTorch DataLoader with multiple workers to consume the IterableDataset
+2. **Type casting**: If `dtype` is set (e.g. float16), token embeddings and output embeddings are cast before storing
+3. **Memory efficiency**: `prefetch_factor=1` reduces RAM spikes during caching
+4. **Optional limits**: `max_windows` can cap the number of windows cached (useful for debugging)
 
 Requirements for the input `streaming_dataset`:
 
-- It must be sequence-like (`__len__` and `__getitem__`).
-- `__getitem__(i)` may return:
-  - a single window dict,
-  - an iterable of window dicts (list/tuple/generator),
-  - `None` (if the shot yields no valid windows).
-
-Parallel caching:
-
-- `prefetch_factor` is set to 1 when `num_workers_cache > 0` to reduce RAM spikes.
-- If `dtype` is set (e.g. float16), token embeddings and output embeddings are cast before storing windows in RAM.
-
-- PyTorch DataLoader workers cannot pickle generators.
-- To support `num_workers_cache > 0`, caching wraps the shot dataset with
-  `FlattenedStreamingDataset`, which converts each `__getitem__` output into a **plain list**
-  of window dicts.
+- Must be an IterableDataset (e.g., `TaskModelTransformWrapperIterable` from MAST integration)
+- Yields window dicts one at a time
+- Handles shot-level shuffling internally if configured
 
 ---
 
-## Shuffling semantics (important)
+## Shuffling semantics
 
-### Cached path
-- Shuffling is **window-level**, handled by `DataLoader(shuffle=True)`.
+### Cached path (recommended)
+- Shuffling is **window-level**, handled by `DataLoader(shuffle=True)`
+- Windows from different shots are mixed uniformly in each batch
+- Deterministic when using a fixed seed with the DataLoader's generator
 
-### Streaming path
-- Shuffling is **shot-level**, handled by `WindowStreamedDataset(shuffle_shots=True)`.
-- Within each shot, windows are yielded in the order produced by the upstream window generator.
+### Streaming path (MAST integration IterableDataset)
+- Shuffling is **shot-level**, handled by the MAST integration's `TaskModelTransformWrapperIterable`
+- Within each shot, windows are yielded in temporal order
+- Batch composition depends on:
+  - how many windows each shot yields,
+  - how `DataLoader` worker prefetching interleaves the stream
 
 Practical implication:
 
-- If you want “mix windows from different shots in the same batch”, caching gives this by default.
-- Streaming can still mix shots across a batch, but the batch composition depends on:
-  - how many windows each shot yields,
-  - how `DataLoader` worker prefetching interleaves the stream.
+- **Cached mode** gives true window-level shuffling (recommended for training)
+- **Streaming mode** is useful for evaluation or when RAM is limited
+
+---
+
+## Configuration
+
+Caching is controlled via `data.cache` in the config:
+
+```yaml
+data:
+  cache:
+    enable: true          # Enable window caching
+    dtype: float16        # Cast embeddings to float16 to save RAM
+    num_workers: 32       # Parallel workers for caching
+    max_windows:
+      train: null         # null = cache all windows
+      val: null
+```
+
+When `data.cache.enable=false`, the MAST integration's IterableDataset is used directly (streaming mode).
 
 ---
 
@@ -125,20 +137,29 @@ Practical implication:
 
 For most users:
 
-- Start with **cached windows** for train/val because it’s simpler and faster.
-- Use **streaming windows** only when you hit RAM limits.
-
+- **Always use cached windows** for train/val (set `data.cache.enable: true`)
+- Use `dtype: float16` to reduce RAM usage
+- Set `num_workers: 32` for fast caching (adjust based on your system)
+- For evaluation, caching is optional but recommended for consistent metrics
 
 ---
 
 ## Troubleshooting
 
-### “My epochs are weird / too short” in streaming mode
-Remember that streaming datasets don’t know the number of windows up front.
-Use `loader.batches_per_epoch` (and/or cache windows).
-
-### “Caching uses too much RAM”
+### "Caching uses too much RAM"
 Reduce:
-- `data.cache.max_windows.train` / `data.cache.max_windows.val` (for debugging),
-- chunk counts (`preprocess.trim.max_chunks`),
-- embedding sizes (via `embeddings.yaml` / tuned overrides).
+- `data.cache.max_windows.train` / `data.cache.max_windows.val` (for debugging)
+- chunk counts (`preprocess.trim_chunks.max_chunks`)
+- embedding sizes (via `embeddings.yaml` / tuned overrides)
+- Use `dtype: float16` instead of `float32`
+
+### "Caching is slow"
+Increase:
+- `data.cache.num_workers` (more parallel workers)
+- Consider using faster storage (SSD vs HDD) for the MAST dataset
+
+### "I want to use streaming mode"
+Set `data.cache.enable: false` in your config. Note:
+- Training will be slower (per-window preprocessing overhead)
+- Shuffling is shot-level only
+- Epoch length may vary if window counts change

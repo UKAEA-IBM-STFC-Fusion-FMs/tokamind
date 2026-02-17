@@ -46,7 +46,7 @@ default ulimit for open file descriptors can be low.
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset, Dataset
@@ -153,11 +153,10 @@ def initialize_mmt_dataloader(
 
         loader.is_streaming : bool
 
-    which train/evaluation loops can use to apply streaming logic:
+    which train/evaluation loops can use to determine dataset type:
 
-      - Cached mode  → full epoch (len(dataloader) meaningful)
-      - Streaming    → epoch length controlled by
-                       cfg.loader.streaming.batches_per_epoch
+      - Cached mode (is_streaming=False)  → full epoch, len(dataloader) is meaningful
+      - Streaming mode (is_streaming=True) → IterableDataset, len(dataloader) may not be available
 
     """
 
@@ -206,10 +205,9 @@ def initialize_mmt_dataloader(
 
     # Performance / robustness defaults for multiprocessing.
     # NOTE: PyTorch only accepts these arguments when num_workers > 0.
-    dl_kwargs: Dict[str, object] = {}
+    dl_kwargs: Dict[str, Any] = {}
     if int(num_workers) > 0:
         dl_kwargs["prefetch_factor"] = 1
-        dl_kwargs["persistent_workers"] = True
 
     # Actual DataLoader creation
     loader = DataLoader(
@@ -222,7 +220,7 @@ def initialize_mmt_dataloader(
         worker_init_fn=worker_fn,
         generator=generator,
         pin_memory=pin_memory,
-        **dl_kwargs,
+        **dl_kwargs,  # type: ignore[arg-type]
     )
 
     # Tag loader with streaming info (Option A core)

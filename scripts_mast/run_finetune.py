@@ -22,7 +22,7 @@ from pathlib import Path
 
 from mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
-    initialize_model_dataset,
+    initialize_model_dataset_iterable,
     get_task_metadata,
     get_train_test_val_shots,
 )
@@ -33,7 +33,6 @@ from mast_utils import (
     build_signals_by_role_from_task_definition,
     setup_device_and_mp,
     build_default_transform,
-    build_window_dataset,
     make_collate_fn,
 )
 
@@ -49,6 +48,7 @@ from mmt.data import (
     build_signal_specs,
     build_codecs,
     initialize_mmt_dataloader,
+    WindowCachedDataset,
 )
 from mmt.models import MultiModalTransformer
 from mmt.train.loop import train_finetune
@@ -212,52 +212,71 @@ def main() -> None:
     )
 
     # ------------------------------------------------------------------
-    # Model-level datasets (shot-based wrappers)
+    # Window-level iterables (benchmark wrapper yields windows directly)
     # ------------------------------------------------------------------
-    model_dataset_train = initialize_model_dataset(
+    # Note: For cached mode, we disable shuffle_windows since we'll shuffle after caching.
+    # For streaming mode, we enable shuffle_windows to get buffer-based shuffling.
+    enable_cache = cfg_cache.get("enable", False)
+    shuffle_at_iterable_level = cfg_loader["shuffle_train"] and not enable_cache
+    
+    window_iterable_train = initialize_model_dataset_iterable(
         mast_dataset_train,
         dict_task_metadata,
         cfg_task,
         model_specific_transform=mmt_transform_map,
+        test_mode=False,
+        shuffle_windows=shuffle_at_iterable_level,
+        shuffle_buffer_size=512,
         verbose=True,
     )
-    model_dataset_val = initialize_model_dataset(
+    
+    window_iterable_val = initialize_model_dataset_iterable(
         mast_dataset_val,
         dict_task_metadata,
         cfg_task,
         model_specific_transform=mmt_transform_map,
+        test_mode=False,
+        shuffle_windows=False,
+        shuffle_buffer_size=512,
         verbose=False,
     )
 
-    # Optional debug: iterate a single shot to exercise wrapper + transforms
-    if debug_mode and model_dataset_train is not None:
-        shot = model_dataset_train[0]
-        for _ in shot:
-            continue
+    # Optional debug: iterate a few windows to exercise wrapper + transforms
+    if debug_mode and window_iterable_train is not None:
+        logger.info("Debug mode: testing window iteration...")
+        for i, window in enumerate(window_iterable_train):
+            if i >= 2:  # Just test first 2 windows
+                break
+        logger.info("Debug iteration successful")
 
     # ------------------------------------------------------------------
     # Window-level datasets (cached or streaming)
     # ------------------------------------------------------------------
-    mw = cfg_cache.get("max_windows") or {}
-    window_dataset_train = build_window_dataset(
-        model_dataset=model_dataset_train,
-        enable_cache=cfg_cache.get("enable", False),
-        num_workers_cache=cfg_cache.get("num_workers", 0),
-        seed=cfg_mmt.seed,
-        shuffle=cfg_loader["shuffle_train"],
-        cache_max_windows=mw.get("train", None),
-        cache_dtype=cfg_cache.get("dtype", None),
-    )
-
-    window_dataset_val = build_window_dataset(
-        model_dataset=model_dataset_val,
-        enable_cache=cfg_cache.get("enable", False),
-        num_workers_cache=cfg_cache.get("num_workers", 0),
-        seed=cfg_mmt.seed,
-        shuffle=False,
-        cache_max_windows=mw.get("val", None),
-        cache_dtype=cfg_cache.get("dtype", None),
-    )
+    enable_cache = cfg_cache.get("enable", False)
+    
+    if enable_cache:
+        # Cache mode: materialize windows to RAM
+        logger.info("Caching enabled - materializing windows to RAM")
+        mw = cfg_cache.get("max_windows") or {}
+        
+        window_dataset_train = WindowCachedDataset.from_streaming(
+            window_iterable_train,
+            max_windows=mw.get("train", None),
+            num_workers_cache=cfg_cache.get("num_workers", 0),
+            dtype=cfg_cache.get("dtype", None),
+        )
+        
+        window_dataset_val = WindowCachedDataset.from_streaming(
+            window_iterable_val,
+            max_windows=mw.get("val", None),
+            num_workers_cache=cfg_cache.get("num_workers", 0),
+            dtype=cfg_cache.get("dtype", None),
+        )
+    else:
+        # Streaming mode: use iterables directly
+        logger.info("Streaming mode - using window iterables directly")
+        window_dataset_train = window_iterable_train
+        window_dataset_val = window_iterable_val
 
     # ------------------------------------------------------------------
     # Dataloaders (always window-level batches)

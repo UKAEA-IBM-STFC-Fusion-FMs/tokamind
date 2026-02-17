@@ -8,8 +8,7 @@ from `mmt.data` without knowing the internal submodule layout.
 # -----------------------------
 # Datasets
 # -----------------------------
-from .datasets.window_cached_dataset import WindowCachedDataset
-from .datasets.window_streamed_dataset import WindowStreamedDataset
+from .datasets import WindowCachedDataset
 
 # -----------------------------
 # Transforms
@@ -42,7 +41,6 @@ from .embeddings.codec_utils import build_codecs
 
 __all__ = [
     "WindowCachedDataset",
-    "WindowStreamedDataset",
     "ChunkWindowsTransform",
     "TrimChunksTransform",
     "SelectValidWindowsTransform",

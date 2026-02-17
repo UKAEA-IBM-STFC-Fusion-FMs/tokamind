@@ -429,11 +429,7 @@ If checkpoints live outside `runs/`, you can pass the full path:
 If `runs/<source_run_id>/<source_run_id>.yaml` is missing, evaluation/finetune will fail.
 The system intentionally avoids copying model knobs into eval config to prevent drift.
 
-5) **Streaming windows without `loader.batches_per_epoch`**
-
-If `data.cache.enable: false` (streaming), training must define `loader.batches_per_epoch`.
-
-6) **Don't set model_source or run_id in YAML configs**
+5) **Don't set model_source or run_id in YAML configs**
 
 These are now specified via CLI arguments. Remove them from your task override files:
 

@@ -23,7 +23,7 @@ Key features:
 - **Dataset-agnostic core (`mmt/`)**: the model and token pipeline are reusable across domains.
 - **Convention-based configuration**: common defaults + per-task overrides, with phases for `pretrain`, `finetune`, `eval`, and `tune_dct3d`.
 - **Per-task embedding tuning**: `run_tune_dct3d.py` writes `embeddings_overrides/<profile>.yaml` inside the task folder (default profile: `dct3d`).
-- **Flexible training/evaluation**: warm-start vs resume, forced-drop ablations at eval time, cached vs streamed datasets.
+- **Flexible training/evaluation**: warm-start vs resume, forced-drop ablations at eval time, efficient window caching.
 
 For deeper details, see:
 - `docs/model_architecture.md`
@@ -276,11 +276,11 @@ Recommended reading order:
 - `docs/config_guide.md` — config structure, merge order, phases, and run directories
 - `docs/model_architecture.md` — model blocks and data flow
 - `docs/model_flexibility.md` — warm-start/resume, finetune/eval flexibility
-- `docs/datasets.md` — cached vs streamed datasets, epoch semantics
+- `docs/datasets.md` — dataset architecture and window caching
 - `docs/transforms.md` — transforms pipeline and window dict contract
 - `docs/checkpointing_and_warmstart.md` — checkpoints, overlap loading, model parts
 - `docs/evaluation.md` — metrics/traces, forced-drop ablations, eval outputs
-- `docs/tuning_embeddings.md` — DCT3D tuning and `embeddings_overrides/<profile>.yaml`
+- `docs/tuning_dct3d.md` — DCT3D tuning and `embeddings_overrides/<profile>.yaml`
 
 [//]: # (## Support)
 
