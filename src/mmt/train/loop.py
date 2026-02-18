@@ -49,9 +49,8 @@ returned to the caller for logging, visualization, or experiment tracking.
 
 from __future__ import annotations
 import logging
-import math
 import os
-from typing import Dict, Any, cast
+from typing import Dict, Any
 
 import torch
 from torch.amp.grad_scaler import GradScaler
@@ -132,7 +131,9 @@ def train_finetune(
     _ow_cfg = output_weights
     output_weights = {}
     if isinstance(_ow_cfg, dict) and _ow_cfg:
-        name_to_sid = {spec.name: spec.signal_id for spec in getattr(model, 'output_specs', [])}
+        name_to_sid = {
+            spec.name: spec.signal_id for spec in getattr(model, "output_specs", [])
+        }
         unknown = [k for k in _ow_cfg.keys() if str(k) not in name_to_sid]
         if unknown:
             raise KeyError(
@@ -142,7 +143,7 @@ def train_finetune(
         for name, w in _ow_cfg.items():
             output_weights[int(name_to_sid[str(name)])] = float(w)
         # Overwrite train_cfg for consistent logging downstream
-        train_cfg['loss']['output_weights'] = output_weights
+        train_cfg["loss"]["output_weights"] = output_weights
 
     use_adamw = train_cfg["optimizer"]["use_adamw"]
 
@@ -153,7 +154,7 @@ def train_finetune(
     # -------------------------------------------------------------------------
     device, amp_enabled, amp_dtype = get_amp_config(model, enable=amp_enabled)
     use_scaler = device.type == "cuda" and amp_enabled and amp_dtype == torch.float16
-    scaler = GradScaler('cuda', enabled=use_scaler)
+    scaler = GradScaler("cuda", enabled=use_scaler)
 
     logger.info("AMP enabled=%s dtype=%s scaler=%s", amp_enabled, amp_dtype, use_scaler)
 
@@ -165,7 +166,7 @@ def train_finetune(
         train_loader_len = len(train_loader)
     except TypeError:
         train_loader_len = -1  # Unknown for IterableDataset
-    
+
     log_train_setup(
         model,
         device,
@@ -306,7 +307,7 @@ def train_finetune(
                 global_step=global_step,
                 epoch_global=epoch_global,
             )
-            
+
             # Step the scheduler after each training epoch
             if scheduler is not None:
                 scheduler.step()

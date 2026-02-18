@@ -318,7 +318,7 @@ class MMTCollate:
                     roles = role_batch[i, idxs]
 
                     # Drop input tokens in this chunk-position group
-                    if (roles == ROLE_CONTEXT).any() and (
+                    if np.any(roles == ROLE_CONTEXT) and (
                         random.random() < p_drop_inputs_chunks
                     ):
                         for t in idxs:
@@ -326,7 +326,7 @@ class MMTCollate:
                                 _drop_token(i, int(t), kind="input")
 
                     # Drop actuator tokens in this chunk-position group
-                    if (roles == ROLE_ACTUATOR).any() and (
+                    if np.any(roles == ROLE_ACTUATOR) and (
                         random.random() < p_drop_actuators_chunks
                     ):
                         for t in idxs:

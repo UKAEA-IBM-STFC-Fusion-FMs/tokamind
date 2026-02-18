@@ -46,7 +46,7 @@ private functions) that can be executed directly:
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 
@@ -169,8 +169,8 @@ class DCT3DCodec:
     keep_t: int
     dtype: type = np.float32
     selection_mode: str = "spatial"
-    coeff_indices: np.ndarray | None = None
-    coeff_shape: Tuple[int, int, int] | None = None
+    coeff_indices: Optional[np.ndarray] = None
+    coeff_shape: Optional[Tuple[int, int, int]] = None
 
     def __post_init__(self):
         """Validate codec parameters."""

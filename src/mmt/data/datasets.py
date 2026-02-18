@@ -51,7 +51,6 @@ import random
 
 import numpy as np
 import psutil
-import torch
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
 logger = logging.getLogger("mmt.Cache")
@@ -172,7 +171,7 @@ class WindowCachedDataset(Dataset):
         dtype: Optional[str] = None,
     ) -> "WindowCachedDataset":
         """Create a WindowCachedDataset from an IterableDataset.
-        
+
         Parameters
         ----------
         streaming_dataset:
@@ -187,7 +186,7 @@ class WindowCachedDataset(Dataset):
             Random seed for shuffling (only used if shuffle_shots=True).
         dtype:
             Optional dtype for cached embeddings ("float16" or "float32").
-            
+
         Returns
         -------
         WindowCachedDataset
@@ -210,32 +209,32 @@ class WindowCachedDataset(Dataset):
 
 class _ShotBatchedIterableDataset(IterableDataset):
     """Wrapper that batches windows by shot to reduce IPC overhead.
-    
+
     Instead of yielding individual windows (causing many small pickle operations),
     this collects all windows from each shot and yields them as a list.
     This matches the old map-style dataset behavior where each worker returned
     List[window_dict] per shot, dramatically reducing serialization overhead.
     """
-    
+
     def __init__(self, base_iterable: IterableDataset):
         super().__init__()
         self.base_iterable = base_iterable
-    
+
     def __iter__(self):
         current_shot_id = None
         current_batch = []
-        
+
         for window in self.base_iterable:
             shot_id = window.get("shot_id")
-            
+
             # If shot changed and we have accumulated windows, yield the batch
             if shot_id != current_shot_id and current_batch:
                 yield current_batch
                 current_batch = []
-            
+
             current_shot_id = shot_id
             current_batch.append(window)
-        
+
         # Yield final batch if any
         if current_batch:
             yield current_batch
@@ -266,11 +265,11 @@ def materialize_tokenized_split_to_ram(
     dtype: Optional[str] = None,
 ) -> WindowCachedDataset:
     """Materialise windows from an IterableDataset into a RAM-backed window dataset.
-    
+
     This function uses DataLoader with multiple workers to parallelize window
     processing from an IterableDataset. Each worker processes a subset of shots,
     and windows are collected into RAM. Shuffling happens after caching.
-    
+
     Parameters
     ----------
     streaming_dataset:
@@ -289,12 +288,12 @@ def materialize_tokenized_split_to_ram(
         Random seed for post-caching shuffle (only used if shuffle_shots=True).
     dtype:
         Optional dtype for cached embeddings ("float16" or "float32").
-        
+
     Returns
     -------
     WindowCachedDataset
         In-RAM dataset of windows.
-        
+
     Notes
     -----
     - Parallelization: Workers process different shots simultaneously via IterableDataset
@@ -303,7 +302,7 @@ def materialize_tokenized_split_to_ram(
     """
 
     dtype_np = _normalize_cache_dtype(dtype)
-    
+
     # Note on shuffling: IterableDataset doesn't support DataLoader shuffling.
     # Shuffling must be configured in the IterableDataset itself (e.g., shuffle_windows=True).
     # The shuffle_shots parameter here will shuffle the final cached list instead.

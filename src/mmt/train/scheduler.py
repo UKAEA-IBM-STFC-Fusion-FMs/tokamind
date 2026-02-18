@@ -36,7 +36,6 @@ Design choices
 
 from __future__ import annotations
 
-import math
 from typing import Dict, Optional, Iterable
 
 import torch
@@ -167,10 +166,10 @@ def build_optimizer_and_scheduler(
     - Cosine decay from initial LR to 0 over total_epochs
     - Scheduler is stepped once per epoch (after training pass)
     - No warmup phase (use lower initial LR if training is unstable)
-    
+
     This approach is universal and works for both cached and streaming datasets,
     as it doesn't require knowing the number of batches per epoch.
-    
+
     Notes
     -----
     - For training from scratch, consider using a lower initial LR (e.g., 1e-4 instead of 1e-3)
@@ -198,11 +197,9 @@ def build_optimizer_and_scheduler(
 
     # Simple cosine annealing: LR decays from initial value to 0 over total_epochs
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=total_epochs,
-        eta_min=0.0
+        optimizer, T_max=total_epochs, eta_min=0.0
     )
-    
+
     return optimizer, scheduler
 
 
