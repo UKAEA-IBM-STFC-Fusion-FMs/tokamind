@@ -36,25 +36,29 @@ Design choices
 
 from __future__ import annotations
 
-from typing import Dict, Optional, Iterable
-
 import math
+from typing import Dict, Optional, Iterable
 
 import torch
 import torch.nn as nn
 
 
-def _set_trainable(module: nn.Module, flag: bool) -> None:
+def _set_trainable(module: nn.Module | torch.Tensor, flag: bool) -> None:
     """Set requires_grad=flag for all parameters of a module."""
+    if isinstance(module, torch.Tensor):
+        return
     for p in module.parameters():
         p.requires_grad = flag
 
 
-def _flatten_params(modules: Iterable[nn.Module]) -> list[nn.Parameter]:
+def _flatten_params(
+    modules: Iterable[nn.Module] | Iterable[torch.Tensor],
+) -> list[nn.Parameter]:
     """Return a flat list of parameters from a list/iterable of modules."""
     params: list[nn.Parameter] = []
     for m in modules:
-        params.extend(list(m.parameters()))
+        if isinstance(m, nn.Module):
+            params.extend(list(m.parameters()))
     return params
 
 
@@ -89,7 +93,11 @@ def build_param_groups(
     # ---- Token encoder ----
     if not hasattr(model, "tokens"):
         raise AttributeError("Model must expose .tokens (TokenEncoder).")
-    tok_params = list(model.tokens.parameters())  # type: ignore[attr-defined]
+    tokens_module = getattr(model, "tokens")
+    if isinstance(tokens_module, nn.Module):
+        tok_params = list(tokens_module.parameters())
+    else:
+        tok_params = []
     if tok_params:
         groups.append(
             {
@@ -103,22 +111,28 @@ def build_param_groups(
     # ---- Backbone ----
     if not hasattr(model, "backbone"):
         raise AttributeError("Model must expose .backbone.")
-    back_params = list(model.backbone.parameters())  # type: ignore[attr-defined]
-    if not back_params:
-        raise RuntimeError("model.backbone has no parameters.")
-    groups.append(
-        {
-            "params": back_params,
-            "lr": float(lr_backbone),
-            "weight_decay": float(wd_backbone),
-            "group_type": "backbone",
-        }
-    )
+    backbone_module = getattr(model, "backbone")
+    if isinstance(backbone_module, nn.Module):
+        back_params = list(backbone_module.parameters())
+        if not back_params:
+            raise RuntimeError("model.backbone has no parameters.")
+        groups.append(
+            {
+                "params": back_params,
+                "lr": float(lr_backbone),
+                "weight_decay": float(wd_backbone),
+                "group_type": "backbone",
+            }
+        )
 
     # ---- Modality heads (single group) ----
     if not hasattr(model, "modality_heads"):
         raise AttributeError("Model must expose .modality_heads (ModuleDict).")
-    mh_params = _flatten_params(model.modality_heads.values())  # type: ignore[attr-defined]
+    modality_heads = getattr(model, "modality_heads")
+    if isinstance(modality_heads, nn.ModuleDict):
+        mh_params = _flatten_params(modality_heads.values())
+    else:
+        mh_params = []
     if mh_params:
         groups.append(
             {
@@ -132,7 +146,11 @@ def build_param_groups(
     # ---- Output adapters (single group) ----
     if not hasattr(model, "output_adapters"):
         raise AttributeError("Model must expose .output_adapters (ModuleDict).")
-    oa_params = _flatten_params(model.output_adapters.values())  # type: ignore[attr-defined]
+    output_adapters = getattr(model, "output_adapters")
+    if isinstance(output_adapters, nn.ModuleDict):
+        oa_params = _flatten_params(output_adapters.values())
+    else:
+        oa_params = []
     if oa_params:
         groups.append(
             {
@@ -157,38 +175,17 @@ def build_optimizer_and_scheduler(
     wd_modality_heads: float,
     lr_output_adapters: float,
     wd_output_adapters: float,
-    total_epochs: int,
+    total_steps: int,
+    warmup_steps: int,
     use_adamw: bool,
-    warmup_epochs: int = 1,
-    min_lr_ratio: float = 0.10,
-) -> tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler.LRScheduler]]:
+) -> tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler.LambdaLR]]:
     """
-    Build optimizer and epoch-based warmup + cosine annealing scheduler.
+    Build optimizer and warmup+cosine scheduler.
 
     Scheduler definition
     --------------------
-    - Linear warmup from start_factor (0.01) to 1.0 over warmup_epochs
-    - Cosine decay from 1.0 to min_lr_ratio over remaining epochs
-    - Scheduler is stepped once per epoch (after training pass)
-
-    This approach is universal and works for both cached and streaming datasets,
-    as it doesn't require knowing the number of batches per epoch.
-
-    Parameters
-    ----------
-    warmup_epochs : int, default=1
-        Number of epochs for linear warmup. Automatically clamped to not exceed
-        total_epochs - 1 to ensure at least one decay epoch.
-    min_lr_ratio : float, default=0.10
-        Minimum LR as fraction of initial LR. Prevents LR from collapsing to zero,
-        allowing continued learning throughout training.
-
-    Notes
-    -----
-    - For short stages (5 epochs), warmup_epochs=1 is recommended
-    - For longer stages (15+ epochs), warmup_epochs=2-3 may be beneficial
-    - min_lr_ratio=0.10 keeps 10% of initial LR as a floor, preventing dead epochs
-    - Warmup starts at 1% of initial LR (start_factor=0.01) for stability
+    - linear warmup from ~0 to 1 over warmup_steps
+    - cosine decay from 1 to 0 over remaining steps
     """
     param_groups = build_param_groups(
         model,
@@ -205,43 +202,33 @@ def build_optimizer_and_scheduler(
     OptimClass = torch.optim.AdamW if use_adamw else torch.optim.Adam
     optimizer = OptimClass(param_groups, betas=(0.9, 0.999), eps=1e-8)
 
-    total_epochs = int(total_epochs)
-    if total_epochs <= 0:
+    total_steps = int(total_steps)
+    warmup_steps = int(warmup_steps)
+
+    if total_steps <= 0:
         return optimizer, None
 
-    warmup_epochs = max(0, int(warmup_epochs))
-    # Keep at least 1 decay epoch whenever possible
-    if total_epochs > 1:
-        warmup_epochs = min(warmup_epochs, total_epochs - 1)
-    else:
-        warmup_epochs = 0
+    def lr_lambda(step: int) -> float:
+        step = max(0, int(step))
 
-    start_factor = 0.01
-    min_lr_ratio = float(min_lr_ratio)
+        # Warmup
+        if warmup_steps > 0 and step < warmup_steps:
+            # Avoid exact 0 multiplier (can break some schedulers / logs)
+            return max(1e-8, step / float(warmup_steps))
 
-    def lr_lambda(epoch: int) -> float:
-        """
-        LR multiplier as a function of epoch number.
+        # constant after warmup
+        # return 1.0
 
-        Note: PyTorch's LambdaLR calls this with epoch=0 at initialization,
-        then epoch increments after each scheduler.step() call.
-        Since we call scheduler.step() AFTER each epoch completes,
-        epoch=0 corresponds to the LR used during epoch 1 training.
-        """
-        # Linear warmup
-        if warmup_epochs > 0 and epoch < warmup_epochs:
-            # epoch=0 -> start_factor (0.01), epoch=warmup_epochs-1 -> 1.0
-            progress = epoch / float(warmup_epochs - 1) if warmup_epochs > 1 else 0.0
-            return start_factor + (1.0 - start_factor) * progress
+        # Cosine with floor (set min_lr_ratio to 0 to have no floor)
+        min_lr_ratio = 0.0
+        denom = max(1, total_steps - warmup_steps)
+        progress = (step - warmup_steps) / float(denom)
+        progress = min(max(progress, 0.0), 1.0)
 
-        # Cosine decay with floor
-        decay_epochs = max(1, total_epochs - warmup_epochs)
-        t = epoch - warmup_epochs
-        progress = min(max(t / float(decay_epochs), 0.0), 1.0)
-        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))  # in [0, 1]
         return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
 
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda)
     return optimizer, scheduler
 
 

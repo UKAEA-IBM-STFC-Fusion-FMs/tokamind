@@ -212,6 +212,14 @@ def _validate_loader(cfg: Dict[str, Any]) -> None:
                 stacklevel=2,
             )
 
+    # Validate batches_per_epoch (optional, used only for streaming datasets)
+    bpe = loader_cfg.get("batches_per_epoch")
+    if bpe is not None:
+        if not isinstance(bpe, int) or bpe < 1:
+            raise ValueError(
+                f"loader.batches_per_epoch must be an integer >= 1 (got {bpe})."
+            )
+
 
 # ---------------------------------------------------------------------------
 # model_source.load_parts normalization
@@ -406,19 +414,18 @@ def validate_train_config(cfg: Dict[str, Any]) -> None:
                 f"(got {gas}) in train.stages[{i}]."
             )
 
-        # Validate warmup_epochs (optional, defaults to 1 in scheduler.py)
-        warmup = stage["scheduler"].get("warmup_epochs")
-        if warmup is not None:
-            if not isinstance(warmup, int) or warmup < 0:
+        # Validate warmup_steps_fraction (optional, defaults to 0.1 in loop.py)
+        warmup_frac = stage["scheduler"].get("warmup_steps_fraction")
+        if warmup_frac is not None:
+            if not isinstance(warmup_frac, (int, float)):
                 raise ValueError(
-                    "scheduler.warmup_epochs must be an integer >= 0 "
-                    f"(got {warmup}) in train.stages[{i}]."
+                    "scheduler.warmup_steps_fraction must be a number "
+                    f"(got {warmup_frac}) in train.stages[{i}]."
                 )
-            epochs = stage["epochs"]
-            if warmup >= epochs:
+            if not (0.0 <= warmup_frac < 1.0):
                 raise ValueError(
-                    f"scheduler.warmup_epochs ({warmup}) must be < epochs ({epochs}) "
-                    f"in train.stages[{i}]."
+                    "scheduler.warmup_steps_fraction must be in [0.0, 1.0) "
+                    f"(got {warmup_frac}) in train.stages[{i}]."
                 )
 
         _apply_lr_wd_inheritance(stage)

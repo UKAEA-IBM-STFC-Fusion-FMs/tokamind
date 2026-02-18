@@ -979,7 +979,7 @@ train:
       
       scheduler:
         grad_accum_steps: 1
-        warmup_epochs: 3
+        warmup_steps_fraction: 0.1
       
       optimizer:
         lr:
@@ -1004,15 +1004,18 @@ train:
 - `name` (str): Stage identifier
 - `epochs` (int): Number of epochs for this stage
 - `scheduler.grad_accum_steps` (int): Gradient accumulation steps
-- `scheduler.warmup_epochs` (int, optional): Number of warmup epochs (default: 1)
-  - Linear warmup from 1% to 100% of initial LR
-  - Recommended: 1 epoch for 5-epoch stages, 2-3 for 15+ epoch stages
+- `scheduler.warmup_steps_fraction` (float, optional): Fraction of total steps for warmup (default: 0.1)
+  - Linear warmup from ~0 to 1.0× initial LR
+  - Must be in range [0.0, 1.0)
+  - Example: 0.1 means 10% of steps are warmup, 90% are cosine decay
 - `optimizer.lr` (dict): Learning rates per model component
 - `optimizer.wd` (dict): Weight decay per model component
 - `freeze` (dict): Freeze flags per model component
 
-**Scheduler behavior:**
-- **Warmup phase:** Linear ramp from 0.01× to 1.0× initial LR over `warmup_epochs`
+**Scheduler behavior (step-based):**
+- **Total steps** = ceil(batches_per_epoch / grad_accum_steps) × epochs
+- **Warmup phase:** Linear ramp from ~0 to 1.0× initial LR over warmup_steps
+- **Warmup steps** = round(warmup_steps_fraction × total_steps)
 - **Decay phase:** Cosine annealing from 1.0× to 0.10× initial LR over remaining epochs
 - **LR floor:** Minimum LR is 10% of initial LR (prevents collapse to zero)
 
@@ -1537,10 +1540,34 @@ loader:
 
 ---
 
+### `loader.batches_per_epoch`
+
+**Type:** `int`
+**Required:** Only for streaming datasets during training
+**Default:** `null` (inferred from len(dataloader) for cached datasets)
+
+Number of batches to process per training epoch for streaming datasets.
+
+**Example:**
+```yaml
+loader:
+  batches_per_epoch: 2000
+```
+
+**Notes:**
+- **Cached datasets**: This parameter is optional and ignored. Epoch length is automatically determined from `len(dataloader)`.
+- **Streaming datasets**: This parameter is **required** for training. The training loop will raise an error if missing.
+- **Validation**: Always exhausts the full validation dataloader regardless of this setting.
+- Used to compute scheduler steps: `steps_per_epoch = ceil(batches_per_epoch / grad_accum_steps)`
+
+**Used in:** pretrain, finetune (training only)
+
+---
+
 ### `loader.drop_last`
 
-**Type:** `bool`  
-**Required:** Yes  
+**Type:** `bool`
+**Required:** Yes
 **Default:** `false`
 
 Drop the last incomplete batch if the dataset size is not divisible by batch size.

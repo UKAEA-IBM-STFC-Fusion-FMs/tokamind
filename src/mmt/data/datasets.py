@@ -56,7 +56,7 @@ from torch.utils.data import DataLoader, Dataset, IterableDataset
 logger = logging.getLogger("mmt.Cache")
 
 # We print the number of total preprocessed windows every _LOG_INTERVAL windows.
-_LOG_INTERVAL = 10000
+_LOG_INTERVAL = 50000
 
 # -----------------------------------------------------------------------------
 # Small RAM helper

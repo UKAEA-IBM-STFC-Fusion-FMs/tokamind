@@ -21,11 +21,12 @@ from __future__ import annotations
 import logging
 import math
 import time
-from typing import Any, Dict, Mapping, Tuple, Hashable, Optional, cast
+from typing import Any, Dict, Mapping, Tuple, Hashable, Optional
 
 import torch
 from torch import Tensor
 from torch.optim.lr_scheduler import LRScheduler
+from torch.amp.grad_scaler import GradScaler
 
 from mmt.utils.amp_utils import amp_ctx_for_model
 from .losses import compute_loss_pred_space
@@ -212,10 +213,7 @@ def log_train_setup(
     logger.info("Device       : %s", device)
     logger.info("AMP enabled  : %s (%s)", amp_enabled, amp_dtype)
     logger.info("Params       : total=%d, trainable=%d", n_params, n_trainable)
-    if train_loader_len > 0:
-        logger.info("Train loader : %d batches/epoch", train_loader_len)
-    else:
-        logger.info("Train loader : unknown length (IterableDataset)")
+    logger.info("Train loader : %d batches/epoch", train_loader_len)
 
     # Loss weights (do not change across stages)
     loss_cfg = train_cfg.get("loss", {})
@@ -252,7 +250,7 @@ def run_one_epoch(
     loader,
     optimizer: Optional[torch.optim.Optimizer],
     scheduler: Optional[LRScheduler],
-    scaler: Optional[torch.amp.grad_scaler.GradScaler],
+    scaler: Optional[GradScaler],
     *,
     device: torch.device,
     amp_enabled: bool,
@@ -260,6 +258,7 @@ def run_one_epoch(
     grad_accum_steps: int,
     train: bool,
     global_step: int,
+    max_batches: Optional[int] = None,
     epoch_global: Optional[int] = None,
 ) -> Tuple[float, int]:
     """
@@ -267,22 +266,17 @@ def run_one_epoch(
 
     Notes
     -----
-    • Iterates until the dataloader is exhausted (one full epoch).
+    • In streaming mode, pass `max_batches` to define the epoch length.
     • We do **not** do per-batch LR toggling. Missing outputs are already masked
       inside the loss via `output_mask`.
-    • The scheduler is stepped per epoch in the training loop (not here).
     """
     if train and optimizer is None:
         raise ValueError("optimizer must be provided when train=True.")
 
     model.train(train)
-    
-    # Type narrowing: In train mode, optimizer is guaranteed non-None after the check above
-    if train:
-        optimizer = cast(torch.optim.Optimizer, optimizer)
 
-    if train:
-        optimizer.zero_grad(set_to_none=True)  # type: ignore[union-attr]
+    if train and optimizer is not None:
+        optimizer.zero_grad(set_to_none=True)
 
     running_loss = 0.0
     n_batches = 0
@@ -293,6 +287,10 @@ def run_one_epoch(
     with torch.set_grad_enabled(train):
         for batch_idx, batch in enumerate(loader):
             t_after_next = time.perf_counter()
+
+            # Early stop for streaming mode
+            if max_batches is not None and batch_idx >= max_batches:
+                break
 
             t0 = time.perf_counter()
             batch = move_batch_to_device(batch, device)
@@ -371,14 +369,18 @@ def run_one_epoch(
                 if (batch_idx + 1) % grad_accum_steps == 0:
                     did_step = True
 
-                    if scaler is not None and scaler.is_enabled():
-                        scaler.unscale_(optimizer)  # type: ignore[arg-type]
+                    if (
+                        scaler is not None
+                        and scaler.is_enabled()
+                        and optimizer is not None
+                    ):
+                        scaler.unscale_(optimizer)
                         torch.nn.utils.clip_grad_norm_(
                             model.parameters(), _MAX_GRAD_NORM
                         )
 
                         prev_scale = scaler.get_scale()
-                        scaler.step(optimizer)  # type: ignore[arg-type]
+                        scaler.step(optimizer)
                         scaler.update()
 
                         # If scale decreased, step was skipped due to inf/nan grads
@@ -387,16 +389,20 @@ def run_one_epoch(
                         torch.nn.utils.clip_grad_norm_(
                             model.parameters(), _MAX_GRAD_NORM
                         )
-                        optimizer.step()  # type: ignore[union-attr]
+                        if optimizer is not None:
+                            optimizer.step()
 
-                    optimizer.zero_grad(set_to_none=True)  # type: ignore[union-attr]
+                    if optimizer is not None:
+                        optimizer.zero_grad(set_to_none=True)
 
                     if did_step:
+                        if scheduler is not None:
+                            scheduler.step()
                         global_step += 1
                     else:
                         # Optional: log once in a while
                         logger.warning(
-                            "AMP overflow detected: skipped optimizer step."
+                            "AMP overflow detected: skipped optimizer/scheduler step."
                         )
 
                 t4 = time.perf_counter()

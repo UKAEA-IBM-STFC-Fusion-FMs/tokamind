@@ -57,6 +57,7 @@ loader:
   num_workers: 0
   shuffle_train: true
   drop_last: false
+  batches_per_epoch: null  # Required only when data.cache.enable=false
 
 # Model source is now specified via CLI: --model <run_id_or_path>
 # The loader will automatically set model_source and inherit the model config.
@@ -114,7 +115,7 @@ train:
 
       scheduler:
         grad_accum_steps: 1
-        warmup_epochs: 1
+        warmup_steps_fraction: 0.02
 
       optimizer:
         lr:
@@ -140,7 +141,7 @@ train:
 
       scheduler:
         grad_accum_steps: 1
-        warmup_epochs: 2
+        warmup_steps_fraction: 0.02
 
       optimizer:
         lr:
