@@ -153,11 +153,21 @@ def train_finetune(
 
     amp_enabled = train_cfg.get("amp", {}).get("enable", True)
 
+    # Determine batches per epoch (streaming vs cached)
     bpe = loader_cfg.get("batches_per_epoch", None)
     if bpe is not None:
         train_batches_per_epoch = int(cast(Any, bpe))
     else:
-        train_batches_per_epoch = len(train_loader)
+        # For cached datasets, infer from dataloader length
+        try:
+            train_batches_per_epoch = len(train_loader)
+        except TypeError:
+            # Streaming dataset without batches_per_epoch specified
+            raise ValueError(
+                "Streaming dataset detected (no len(train_loader)), but "
+                "loader.batches_per_epoch is not set. Please specify "
+                "loader.batches_per_epoch in your config for streaming datasets."
+            )
 
     # -------------------------------------------------------------------------
     # Device, AMP, scaler
@@ -182,7 +192,7 @@ def train_finetune(
     )
 
     # -------------------------------------------------------------------------
-    # Resume (optional)
+    # Resume metadata (if resuming)
     # -------------------------------------------------------------------------
     global_step = 0
     best_val = float("inf")
@@ -192,6 +202,7 @@ def train_finetune(
 
     if resume_flag:
         try:
+            # Load model weights and resume metadata (optimizer/scheduler/scaler restored later per stage)
             start_epoch_global, best_so_far, meta = resume_from_latest(
                 run_dir,
                 model,
@@ -210,16 +221,17 @@ def train_finetune(
                 start_epoch_in_stage = 1
 
             logger.info(
-                f"[resume] Resumed train: stage_idx={start_stage_idx}, "
+                f"[resume] Loaded model weights and metadata: stage_idx={start_stage_idx}, "
                 f"last_epoch_in_stage={last_epoch_in_stage}, "
                 f"next_epoch_in_stage={start_epoch_in_stage}, "
-                f"best_val={best_val:.6f}"
+                f"best_val={best_val:.6f}, global_step={global_step}"
             )
         except Exception as e:
             logger.warning(
                 f"[resume] Failed to resume from latest checkpoint: {e!s}. "
                 f"Starting from scratch."
             )
+            resume_flag = False
 
     # -------------------------------------------------------------------------
     # History structure
@@ -288,10 +300,36 @@ def train_finetune(
             use_adamw=use_adamw,
         )
 
+        # ---- Resume optimizer/scheduler/scaler state if resuming in this stage ----
+        if resume_flag and stage_idx == start_stage_idx:
+            try:
+                # Restore optimizer/scheduler/scaler state (model already loaded above)
+                _, _, _ = resume_from_latest(
+                    run_dir,
+                    model,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    scaler=scaler,
+                    map_location=str(device),
+                    load_model=False,  # Skip model loading (already done)
+                )
+                logger.info(
+                    f"[resume] Restored optimizer, scheduler, and scaler state for stage '{name}'"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[resume] Failed to restore optimizer/scheduler/scaler state: {e!s}. "
+                    f"Continuing with fresh optimizer/scheduler."
+                )
+
         logger.info(
-            f"----- Stage '{name}' (index {stage_idx}) "
-            f"epochs={epochs}, grad_accum={grad_accum_steps}, "
-            f"total_steps={total_steps}, warmup={warmup_steps} -----"
+            f"----- Stage '{name}' (index {stage_idx}) -----"
+        )
+        logger.info(
+            f"  epochs={epochs}, grad_accum={grad_accum_steps}"
+        )
+        logger.info(
+            f"  total_steps={total_steps}, warmup_steps={warmup_steps}"
         )
 
         # Create history list for this stage

@@ -148,6 +148,7 @@ def resume_from_latest(
     scheduler=None,
     scaler=None,
     map_location="cpu",
+    load_model=True,
 ):
     """
     Strict resume of the *same* run.
@@ -156,10 +157,16 @@ def resume_from_latest(
     (train.resume = true).
 
     Restores:
-      - model quadruplet (token encoder, backbone, heads, adapters)
+      - model quadruplet (token encoder, backbone, heads, adapters) [if load_model=True]
       - optimizer / scheduler / scaler states
       - RNG state
       - meta.json (epoch, best_val_so_far, etc.)
+
+    Parameters
+    ----------
+    load_model : bool, default=True
+        If False, skip loading model weights (useful when model was already loaded
+        and only optimizer/scheduler/scaler state needs to be restored).
 
     Notes
     -----
@@ -189,15 +196,16 @@ def resume_from_latest(
         raise ValueError(f"Invalid resume metadata (expected a dict): {meta_path}")
 
     # Now restore the model + training state.
-    load_model_quadruplet(
-        model,
-        lat,
-        map_location=map_location,
-        strict_token=True,
-        strict_backbone=True,
-        strict_heads=True,
-        strict_adapters=True,
-    )
+    if load_model:
+        load_model_quadruplet(
+            model,
+            lat,
+            map_location=map_location,
+            strict_token=True,
+            strict_backbone=True,
+            strict_heads=True,
+            strict_adapters=True,
+        )
 
     def _maybe_load(obj, filename):
         if obj is None:

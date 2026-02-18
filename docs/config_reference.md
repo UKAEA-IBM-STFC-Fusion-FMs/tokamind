@@ -1016,8 +1016,8 @@ train:
 - **Total steps** = ceil(batches_per_epoch / grad_accum_steps) × epochs
 - **Warmup phase:** Linear ramp from ~0 to 1.0× initial LR over warmup_steps
 - **Warmup steps** = round(warmup_steps_fraction × total_steps)
-- **Decay phase:** Cosine annealing from 1.0× to 0.10× initial LR over remaining epochs
-- **LR floor:** Minimum LR is 10% of initial LR (prevents collapse to zero)
+- **Decay phase:** Cosine annealing from 1.0× to 0× initial LR over remaining steps
+- **Stepping:** `scheduler.step()` is called after each optimizer step (not per epoch)
 
 **Note:** Use `lr: 0.0` or `freeze: true` to disable training for a component.
 

@@ -270,13 +270,14 @@ def run_one_epoch(
     • We do **not** do per-batch LR toggling. Missing outputs are already masked
       inside the loss via `output_mask`.
     """
-    if train and optimizer is None:
-        raise ValueError("optimizer must be provided when train=True.")
+    if train:
+        if optimizer is None:
+            raise ValueError("optimizer must be provided when train=True.")
+        # Type narrowing: optimizer is guaranteed non-None in train branch
+        assert optimizer is not None
+        optimizer.zero_grad(set_to_none=True)
 
     model.train(train)
-
-    if train and optimizer is not None:
-        optimizer.zero_grad(set_to_none=True)
 
     running_loss = 0.0
     n_batches = 0
@@ -359,6 +360,8 @@ def run_one_epoch(
             # ----------------------- BACKWARD ----------------------
             t3, t4 = 0.0, 0.0
             if train:
+                # optimizer is guaranteed non-None here (validated above)
+                assert optimizer is not None
                 if scaler is not None and scaler.is_enabled():
                     scaler.scale(loss_for_backprop).backward()
                 else:
@@ -369,11 +372,7 @@ def run_one_epoch(
                 if (batch_idx + 1) % grad_accum_steps == 0:
                     did_step = True
 
-                    if (
-                        scaler is not None
-                        and scaler.is_enabled()
-                        and optimizer is not None
-                    ):
+                    if scaler is not None and scaler.is_enabled():
                         scaler.unscale_(optimizer)
                         torch.nn.utils.clip_grad_norm_(
                             model.parameters(), _MAX_GRAD_NORM
@@ -389,11 +388,9 @@ def run_one_epoch(
                         torch.nn.utils.clip_grad_norm_(
                             model.parameters(), _MAX_GRAD_NORM
                         )
-                        if optimizer is not None:
-                            optimizer.step()
+                        optimizer.step()
 
-                    if optimizer is not None:
-                        optimizer.zero_grad(set_to_none=True)
+                    optimizer.zero_grad(set_to_none=True)
 
                     if did_step:
                         if scheduler is not None:
