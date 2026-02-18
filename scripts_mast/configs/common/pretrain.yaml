@@ -119,6 +119,7 @@ train:
 
       scheduler:
         grad_accum_steps: 1
+        warmup_epochs: 5
 
       optimizer:
         lr:

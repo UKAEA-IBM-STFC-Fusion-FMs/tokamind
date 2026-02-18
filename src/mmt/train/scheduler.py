@@ -38,6 +38,8 @@ from __future__ import annotations
 
 from typing import Dict, Optional, Iterable
 
+import math
+
 import torch
 import torch.nn as nn
 
@@ -157,23 +159,36 @@ def build_optimizer_and_scheduler(
     wd_output_adapters: float,
     total_epochs: int,
     use_adamw: bool,
+    warmup_epochs: int = 1,
+    min_lr_ratio: float = 0.10,
 ) -> tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler.LRScheduler]]:
     """
-    Build optimizer and simple epoch-based cosine annealing scheduler.
+    Build optimizer and epoch-based warmup + cosine annealing scheduler.
 
     Scheduler definition
     --------------------
-    - Cosine decay from initial LR to 0 over total_epochs
+    - Linear warmup from start_factor (0.01) to 1.0 over warmup_epochs
+    - Cosine decay from 1.0 to min_lr_ratio over remaining epochs
     - Scheduler is stepped once per epoch (after training pass)
-    - No warmup phase (use lower initial LR if training is unstable)
 
     This approach is universal and works for both cached and streaming datasets,
     as it doesn't require knowing the number of batches per epoch.
 
+    Parameters
+    ----------
+    warmup_epochs : int, default=1
+        Number of epochs for linear warmup. Automatically clamped to not exceed
+        total_epochs - 1 to ensure at least one decay epoch.
+    min_lr_ratio : float, default=0.10
+        Minimum LR as fraction of initial LR. Prevents LR from collapsing to zero,
+        allowing continued learning throughout training.
+
     Notes
     -----
-    - For training from scratch, consider using a lower initial LR (e.g., 1e-4 instead of 1e-3)
-    - For finetuning, the model is already well-initialized so warmup is less critical
+    - For short stages (5 epochs), warmup_epochs=1 is recommended
+    - For longer stages (15+ epochs), warmup_epochs=2-3 may be beneficial
+    - min_lr_ratio=0.10 keeps 10% of initial LR as a floor, preventing dead epochs
+    - Warmup starts at 1% of initial LR (start_factor=0.01) for stability
     """
     param_groups = build_param_groups(
         model,
@@ -191,15 +206,42 @@ def build_optimizer_and_scheduler(
     optimizer = OptimClass(param_groups, betas=(0.9, 0.999), eps=1e-8)
 
     total_epochs = int(total_epochs)
-
     if total_epochs <= 0:
         return optimizer, None
 
-    # Simple cosine annealing: LR decays from initial value to 0 over total_epochs
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=total_epochs, eta_min=0.0
-    )
+    warmup_epochs = max(0, int(warmup_epochs))
+    # Keep at least 1 decay epoch whenever possible
+    if total_epochs > 1:
+        warmup_epochs = min(warmup_epochs, total_epochs - 1)
+    else:
+        warmup_epochs = 0
 
+    start_factor = 0.01
+    min_lr_ratio = float(min_lr_ratio)
+
+    def lr_lambda(epoch: int) -> float:
+        """
+        LR multiplier as a function of epoch number.
+
+        Note: PyTorch's LambdaLR calls this with epoch=0 at initialization,
+        then epoch increments after each scheduler.step() call.
+        Since we call scheduler.step() AFTER each epoch completes,
+        epoch=0 corresponds to the LR used during epoch 1 training.
+        """
+        # Linear warmup
+        if warmup_epochs > 0 and epoch < warmup_epochs:
+            # epoch=0 -> start_factor (0.01), epoch=warmup_epochs-1 -> 1.0
+            progress = epoch / float(warmup_epochs - 1) if warmup_epochs > 1 else 0.0
+            return start_factor + (1.0 - start_factor) * progress
+
+        # Cosine decay with floor
+        decay_epochs = max(1, total_epochs - warmup_epochs)
+        t = epoch - warmup_epochs
+        progress = min(max(t / float(decay_epochs), 0.0), 1.0)
+        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        return min_lr_ratio + (1.0 - min_lr_ratio) * cosine
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_lambda)
     return optimizer, scheduler
 
 

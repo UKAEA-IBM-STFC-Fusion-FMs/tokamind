@@ -964,11 +964,11 @@ train:
 
 ### `train.stages`
 
-**Type:** `list[dict]`  
-**Required:** Yes  
+**Type:** `list[dict]`
+**Required:** Yes
 **Default:** See examples in phase configs
 
-List of training stages. Each stage defines epochs, learning rates, weight decay, gradient accumulation, and freeze settings.
+List of training stages. Each stage defines epochs, learning rates, weight decay, gradient accumulation, warmup, and freeze settings.
 
 **Example:**
 ```yaml
@@ -979,6 +979,7 @@ train:
       
       scheduler:
         grad_accum_steps: 1
+        warmup_epochs: 3
       
       optimizer:
         lr:
@@ -1003,9 +1004,17 @@ train:
 - `name` (str): Stage identifier
 - `epochs` (int): Number of epochs for this stage
 - `scheduler.grad_accum_steps` (int): Gradient accumulation steps
+- `scheduler.warmup_epochs` (int, optional): Number of warmup epochs (default: 1)
+  - Linear warmup from 1% to 100% of initial LR
+  - Recommended: 1 epoch for 5-epoch stages, 2-3 for 15+ epoch stages
 - `optimizer.lr` (dict): Learning rates per model component
 - `optimizer.wd` (dict): Weight decay per model component
 - `freeze` (dict): Freeze flags per model component
+
+**Scheduler behavior:**
+- **Warmup phase:** Linear ramp from 0.01× to 1.0× initial LR over `warmup_epochs`
+- **Decay phase:** Cosine annealing from 1.0× to 0.10× initial LR over remaining epochs
+- **LR floor:** Minimum LR is 10% of initial LR (prevents collapse to zero)
 
 **Note:** Use `lr: 0.0` or `freeze: true` to disable training for a component.
 

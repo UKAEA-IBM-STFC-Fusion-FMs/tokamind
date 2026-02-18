@@ -406,6 +406,21 @@ def validate_train_config(cfg: Dict[str, Any]) -> None:
                 f"(got {gas}) in train.stages[{i}]."
             )
 
+        # Validate warmup_epochs (optional, defaults to 1 in scheduler.py)
+        warmup = stage["scheduler"].get("warmup_epochs")
+        if warmup is not None:
+            if not isinstance(warmup, int) or warmup < 0:
+                raise ValueError(
+                    "scheduler.warmup_epochs must be an integer >= 0 "
+                    f"(got {warmup}) in train.stages[{i}]."
+                )
+            epochs = stage["epochs"]
+            if warmup >= epochs:
+                raise ValueError(
+                    f"scheduler.warmup_epochs ({warmup}) must be < epochs ({epochs}) "
+                    f"in train.stages[{i}]."
+                )
+
         _apply_lr_wd_inheritance(stage)
         _apply_freeze_rules(stage)
         _validate_stage_consistency(stage)

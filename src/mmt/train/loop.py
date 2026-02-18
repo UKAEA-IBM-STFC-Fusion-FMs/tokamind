@@ -240,7 +240,9 @@ def train_finetune(
         lr_cfg = stage["optimizer"]["lr"]
         wd_cfg = stage["optimizer"]["wd"]
 
-        grad_accum_steps = int(stage["scheduler"]["grad_accum_steps"])
+        scheduler_cfg = stage["scheduler"]
+        grad_accum_steps = int(scheduler_cfg["grad_accum_steps"])
+        warmup_epochs = int(scheduler_cfg.get("warmup_epochs", 1))  # Default to 1
 
         lr_token_encoder = float(lr_cfg["token_encoder"])
         lr_backbone = float(lr_cfg["backbone"])
@@ -274,6 +276,7 @@ def train_finetune(
             wd_output_adapters=wd_output_adapters,
             total_epochs=epochs,
             use_adamw=use_adamw,
+            warmup_epochs=warmup_epochs,
         )
 
         logger.info(
