@@ -1937,7 +1937,7 @@ tune_dct3d:
 
 ---
 
-### `tune_dct3d.guardrails.profile.min_unique_c`
+### `tune_dct3d.guardrails.profile.min_unique_h`
 
 **Type:** `int`
 **Required:** No
@@ -1950,7 +1950,7 @@ Minimum unique channel indices required for profile signals (shape: C, T).
 tune_dct3d:
   guardrails:
     profile:
-      min_unique_c: 15
+      min_unique_h: 15
 ```
 
 **Used in:** tune_dct3d (when guardrails.enabled=true)
