@@ -1897,7 +1897,7 @@ tune_dct3d:
 
 ---
 
-### `tune_dct3d.guardrails.enabled`
+### `tune_dct3d.guardrails.enable`
 
 **Type:** `bool`
 **Required:** No
@@ -1909,7 +1909,7 @@ Enable guardrails to ensure minimum dimension coverage in coefficient selection.
 ```yaml
 tune_dct3d:
   guardrails:
-    enabled: true
+    enable: true
 ```
 
 **Used in:** tune_dct3d
@@ -1933,7 +1933,7 @@ tune_dct3d:
       min_unique_t: 10
 ```
 
-**Used in:** tune_dct3d (when guardrails.enabled=true)
+**Used in:** tune_dct3d (when guardrails.enable=true)
 
 ---
 
@@ -1953,7 +1953,7 @@ tune_dct3d:
       min_unique_h: 15
 ```
 
-**Used in:** tune_dct3d (when guardrails.enabled=true)
+**Used in:** tune_dct3d (when guardrails.enable=true)
 
 ---
 
@@ -1973,7 +1973,7 @@ tune_dct3d:
       min_unique_t: 8
 ```
 
-**Used in:** tune_dct3d (when guardrails.enabled=true)
+**Used in:** tune_dct3d (when guardrails.enable=true)
 
 ---
 
@@ -1993,7 +1993,7 @@ tune_dct3d:
       min_unique_h: 15
 ```
 
-**Used in:** tune_dct3d (when guardrails.enabled=true)
+**Used in:** tune_dct3d (when guardrails.enable=true)
 
 ---
 
@@ -2013,7 +2013,7 @@ tune_dct3d:
       min_unique_w: 15
 ```
 
-**Used in:** tune_dct3d (when guardrails.enabled=true)
+**Used in:** tune_dct3d (when guardrails.enable=true)
 
 ---
 
@@ -2033,7 +2033,7 @@ tune_dct3d:
       min_unique_t: 8
 ```
 
-**Used in:** tune_dct3d (when guardrails.enabled=true)
+**Used in:** tune_dct3d (when guardrails.enable=true)
 
 ---
 

@@ -56,7 +56,7 @@ tune_dct3d:
   # Enable in task-specific overrides for finetuning if needed
 
   guardrails:
-    enabled: false
+    enable: true
     timeseries:      # For signals with shape (T,) → (1, 1, T)
       min_unique_t: 5
     profile:         # For signals with shape (C, T) → (C, 1, T)

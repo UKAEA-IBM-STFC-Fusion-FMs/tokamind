@@ -120,7 +120,7 @@ class TuneRankedDCT3DTransform:
             Log progress every N shots (based on window["shot_id"] changes).
         guardrails:
             Optional guardrails configuration to ensure minimum dimension coverage.
-            Expected structure: {"enabled": bool, "timeseries": {...}, "profile": {...}, "video": {...}}
+            Expected structure: {"enable": bool, "timeseries": {...}, "profile": {...}, "video": {...}}
         """
         self.signal_specs = signal_specs
 
@@ -187,14 +187,14 @@ class TuneRankedDCT3DTransform:
         self.rep_shape: Dict[Tuple[str, str], Tuple[int, ...]] = {}
 
         # Guardrails configuration
-        self.guardrails_enabled = False
+        self.guardrails_enable = False
         self.guardrails_config: Dict[str, Dict[str, int]] = {
             "timeseries": {},
             "profile": {},
             "video": {},
         }
-        if guardrails is not None and guardrails.get("enabled"):
-            self.guardrails_enabled = True
+        if guardrails is not None and guardrails.get("enable"):
+            self.guardrails_enable = True
             for signal_type in ["timeseries", "profile", "video"]:
                 type_config = guardrails.get(signal_type, {})
                 if isinstance(type_config, dict):
@@ -204,7 +204,7 @@ class TuneRankedDCT3DTransform:
             "TuneRankedDCT3D initialized | roles=%s | budgets=%s | guardrails=%s",
             ",".join(self.roles),
             {r: self.max_budget.get(r) for r in self.roles},
-            "enabled" if self.guardrails_enabled else "disabled",
+            "enable" if self.guardrails_enable else "disabled",
         )
 
     def _full_codec(self, H: int, W: int, T: int) -> DCT3DCodec:
@@ -332,12 +332,12 @@ class TuneRankedDCT3DTransform:
 
     def _determine_signal_type(self, shape: Tuple[int, ...]) -> str:
         """Determine signal type from shape.
-        
+
         Parameters
         ----------
         shape : Tuple[int, ...]
             Native signal shape (T,), (C, T), or (H, W, T)
-            
+
         Returns
         -------
         str
@@ -362,11 +362,11 @@ class TuneRankedDCT3DTransform:
         name: str,
     ) -> int:
         """Find minimum K to satisfy dimension coverage requirements.
-        
+
         This method ensures that the selected coefficients have at least
         min_unique_h/w/t distinct indices per dimension, while still
         prioritizing high-energy coefficients.
-        
+
         Parameters
         ----------
         sorted_indices : np.ndarray
@@ -379,7 +379,7 @@ class TuneRankedDCT3DTransform:
             Signal role (for logging)
         name : str
             Signal name (for logging)
-            
+
         Returns
         -------
         int
@@ -387,7 +387,7 @@ class TuneRankedDCT3DTransform:
             Returns 0 if no guardrails apply.
         """
         config = self.guardrails_config.get(signal_type, {})
-        
+
         # Map signal type to dimension requirements
         # Format: {signal_type: (h_key, w_key, t_key)}
         # Note: All signals use canonical (H, W, T) representation internally
@@ -396,27 +396,27 @@ class TuneRankedDCT3DTransform:
             "profile": ("min_unique_h", None, "min_unique_t"),  # C maps to H
             "video": ("min_unique_h", "min_unique_w", "min_unique_t"),
         }
-        
+
         h_key, w_key, t_key = dim_keys.get(signal_type, (None, None, None))
-        
+
         # Extract and clamp minimums to actual dimensions
         min_h = config.get(h_key, 0) if h_key else 0
         min_w = config.get(w_key, 0) if w_key else 0
         min_t = config.get(t_key, 0) if t_key else 0
-        
+
         eff_min_h = min(min_h, H) if min_h > 0 else 0
         eff_min_w = min(min_w, W) if min_w > 0 else 0
         eff_min_t = min(min_t, T) if min_t > 0 else 0
-        
+
         # If no guardrails needed, return 0
         if eff_min_h == 0 and eff_min_w == 0 and eff_min_t == 0:
             return 0
-        
+
         # Track unique indices per dimension
         unique_h = set()
         unique_w = set()
         unique_t = set()
-        
+
         # Iterate through sorted indices
         for k in range(len(sorted_indices)):
             idx = int(sorted_indices[k])
@@ -424,34 +424,48 @@ class TuneRankedDCT3DTransform:
             h = idx // (W * T)
             w = (idx % (W * T)) // T
             t = idx % T
-            
+
             unique_h.add(h)
             unique_w.add(w)
             unique_t.add(t)
-            
+
             # Check if requirements met
-            if (len(unique_h) >= eff_min_h and
-                len(unique_w) >= eff_min_w and
-                len(unique_t) >= eff_min_t):
+            if (
+                len(unique_h) >= eff_min_h
+                and len(unique_w) >= eff_min_w
+                and len(unique_t) >= eff_min_t
+            ):
                 min_k = k + 1  # +1 because k is 0-indexed
                 logger.info(
                     "Guardrails for %s:%s (%s) require min K=%d "
                     "(unique: H=%d/%d, W=%d/%d, T=%d/%d)",
-                    role, name, signal_type, min_k,
-                    len(unique_h), eff_min_h,
-                    len(unique_w), eff_min_w,
-                    len(unique_t), eff_min_t,
+                    role,
+                    name,
+                    signal_type,
+                    min_k,
+                    len(unique_h),
+                    eff_min_h,
+                    len(unique_w),
+                    eff_min_w,
+                    len(unique_t),
+                    eff_min_t,
                 )
                 return min_k
-        
+
         # If we get here, use all coefficients
         logger.warning(
             "Guardrails for %s:%s (%s) cannot be satisfied with all %d coefficients "
             "(unique: H=%d/%d, W=%d/%d, T=%d/%d)",
-            role, name, signal_type, len(sorted_indices),
-            len(unique_h), eff_min_h,
-            len(unique_w), eff_min_w,
-            len(unique_t), eff_min_t,
+            role,
+            name,
+            signal_type,
+            len(sorted_indices),
+            len(unique_h),
+            eff_min_h,
+            len(unique_w),
+            eff_min_w,
+            len(unique_t),
+            eff_min_t,
         )
         return len(sorted_indices)
 
@@ -517,7 +531,7 @@ class TuneRankedDCT3DTransform:
                 # Apply guardrails if enabled
                 H, W, T = key
                 guardrail_min_K = 0
-                if self.guardrails_enabled:
+                if self.guardrails_enable:
                     signal_type = self._determine_signal_type(shape)
                     guardrail_min_K = self._apply_dimension_guardrails(
                         sorted_indices, H, W, T, signal_type, role, name
@@ -545,10 +559,10 @@ class TuneRankedDCT3DTransform:
 
                 # Apply guardrails if enabled
                 budget_violated = False
-                if self.guardrails_enabled and guardrail_min_K > 0:
+                if self.guardrails_enable and guardrail_min_K > 0:
                     # Guardrails enabled: compute K_req = max(K_target, K_guardrail_min)
                     K_req = max(K, guardrail_min_K)
-                    
+
                     if K < guardrail_min_K:
                         logger.info(
                             "Signal %s:%s: increasing K from %d to %d to meet guardrails",
@@ -557,7 +571,7 @@ class TuneRankedDCT3DTransform:
                             K,
                             K_req,
                         )
-                    
+
                     # Strict guardrails: check if they exceed budget
                     if budget is not None and K_req > budget:
                         budget_violated = True
@@ -570,7 +584,7 @@ class TuneRankedDCT3DTransform:
                             budget,
                             K_req,
                         )
-                    
+
                     K = K_req
                 else:
                     # Guardrails disabled: apply budget cap normally (hard cap)

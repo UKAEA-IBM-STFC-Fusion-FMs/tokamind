@@ -173,7 +173,7 @@ This canonical representation ensures consistent DCT processing across all signa
 ```yaml
 tune_dct3d:
   guardrails:
-    enabled: false  # Disabled by default
+    enable: false  # Disabled by default
     timeseries:     # For (T,) signals → (1, 1, T)
       min_unique_t: 5
     profile:        # For (C, T) signals → (C, 1, T)
