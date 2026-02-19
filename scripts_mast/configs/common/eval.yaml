@@ -40,12 +40,12 @@ loader:
 
 
 eval:
-  # list of inputs/actuators/outputs you want to drop for evaluation
-  # null: evaluate the full model
 
   amp:
     enable: true
 
+  # list of inputs/actuators/outputs you want to drop for evaluation
+  # null: evaluate the full model
   drop:
     inputs: null # ["pf_active-coil_current"]
     actuators: null
