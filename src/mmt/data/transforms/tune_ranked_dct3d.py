@@ -390,9 +390,10 @@ class TuneRankedDCT3DTransform:
         
         # Map signal type to dimension requirements
         # Format: {signal_type: (h_key, w_key, t_key)}
+        # Note: All signals use canonical (H, W, T) representation internally
         dim_keys = {
             "timeseries": (None, None, "min_unique_t"),
-            "profile": ("min_unique_c", None, "min_unique_t"),
+            "profile": ("min_unique_h", None, "min_unique_t"),  # C maps to H
             "video": ("min_unique_h", "min_unique_w", "min_unique_t"),
         }
         

@@ -54,12 +54,18 @@ tune_dct3d:
   # Guardrails: ensure minimum dimension coverage in coefficient selection
   # Disabled by default (no guardrails for pretraining)
   # Enable in task-specific overrides for finetuning if needed
+
+  # DIMENSION MAPPING (all signals internally use H,W,T representation):
+  #   Timeseries (T,)    → (H=1, W=1, T=T)
+  #   Profile    (C, T)  → (H=C, W=1, T=T)  [C channels map to H dimension]
+  #   Video      (H,W,T) → (H,   W,   T)
+
   guardrails:
     enabled: false
-    timeseries:      # For signals with shape (T,)
+    timeseries:      # For signals with shape (T,) → (1, 1, T)
       min_unique_t: 5
-    profile:         # For signals with shape (C, T)
-      min_unique_c: 10
+    profile:         # For signals with shape (C, T) → (C, 1, T)
+      min_unique_h: 10  # Minimum unique channel indices (C maps to H)
       min_unique_t: 5
     video:           # For signals with shape (H, W, T)
       min_unique_h: 10

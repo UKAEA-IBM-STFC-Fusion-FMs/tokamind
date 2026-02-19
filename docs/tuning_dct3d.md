@@ -157,15 +157,27 @@ tune_dct3d:
 
 Guardrails ensure minimum unique indices per dimension (H, W, T) are represented in the selected coefficients, preventing over-compression.
 
+#### Dimension Mapping
+
+**All signals are internally represented as (H, W, T) for DCT processing:**
+
+| Signal Type | Native Shape | Internal (H, W, T) | Notes |
+|-------------|--------------|-------------------|-------|
+| Timeseries  | `(T,)`       | `(1, 1, T)`       | Single time series |
+| Profile     | `(C, T)`     | `(C, 1, T)`       | **C channels map to H dimension** |
+| Video/Map   | `(H, W, T)`  | `(H, W, T)`       | Direct mapping |
+
+This canonical representation ensures consistent DCT processing across all signal types.
+
 **Configuration:**
 ```yaml
 tune_dct3d:
   guardrails:
     enabled: false  # Disabled by default
-    timeseries:     # For (T,) signals
+    timeseries:     # For (T,) signals → (1, 1, T)
       min_unique_t: 5
-    profile:        # For (C, T) signals
-      min_unique_c: 10
+    profile:        # For (C, T) signals → (C, 1, T)
+      min_unique_h: 10  # Minimum unique channel indices (C maps to H)
       min_unique_t: 5
     video:          # For (H, W, T) signals
       min_unique_h: 10
