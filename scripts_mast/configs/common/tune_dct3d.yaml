@@ -50,3 +50,18 @@ tune_dct3d:
       input: 4096
       actuator: 4096
       output: 4096
+
+  # Guardrails: ensure minimum dimension coverage in coefficient selection
+  # Disabled by default (no guardrails for pretraining)
+  # Enable in task-specific overrides for finetuning if needed
+  guardrails:
+    enabled: false
+    timeseries:      # For signals with shape (T,)
+      min_unique_t: 5
+    profile:         # For signals with shape (C, T)
+      min_unique_c: 10
+      min_unique_t: 5
+    video:           # For signals with shape (H, W, T)
+      min_unique_h: 10
+      min_unique_w: 10
+      min_unique_t: 5

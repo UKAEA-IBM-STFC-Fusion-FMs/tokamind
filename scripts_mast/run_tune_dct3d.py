@@ -183,11 +183,15 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model-specific transform chain (shot -> windows)
     # ------------------------------------------------------------------
+    # Extract guardrails config (may be None if not present)
+    guardrails_cfg = cfg_tune.get("guardrails")
+    
     tune_transform = TuneRankedDCT3DTransform(
         signal_specs=signal_specs,
         thresholds=cfg_tune["objective"]["thresholds"],
         max_budget=cfg_tune["objective"]["max_budget"],
         roles=roles,
+        guardrails=guardrails_cfg,
     )
 
     mmt_transform_map = ComposeTransforms(

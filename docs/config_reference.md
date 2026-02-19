@@ -1879,8 +1879,8 @@ tune_dct3d:
 
 ### `tune_dct3d.objective.max_budget.output`
 
-**Type:** `int`  
-**Required:** Yes  
+**Type:** `int`
+**Required:** Yes
 **Default:** `4096`
 
 Maximum embedding dimension budget for output signals.
@@ -1894,6 +1894,146 @@ tune_dct3d:
 ```
 
 **Used in:** tune_dct3d
+
+---
+
+### `tune_dct3d.guardrails.enabled`
+
+**Type:** `bool`
+**Required:** No
+**Default:** `false`
+
+Enable guardrails to ensure minimum dimension coverage in coefficient selection.
+
+**Example:**
+```yaml
+tune_dct3d:
+  guardrails:
+    enabled: true
+```
+
+**Used in:** tune_dct3d
+**See also:** [Tuning DCT3D - Guardrails](tuning_dct3d.md#guardrails-optional-dimension-coverage)
+
+---
+
+### `tune_dct3d.guardrails.timeseries.min_unique_t`
+
+**Type:** `int`
+**Required:** No
+**Default:** `5`
+
+Minimum unique time indices required for timeseries signals (shape: T).
+
+**Example:**
+```yaml
+tune_dct3d:
+  guardrails:
+    timeseries:
+      min_unique_t: 10
+```
+
+**Used in:** tune_dct3d (when guardrails.enabled=true)
+
+---
+
+### `tune_dct3d.guardrails.profile.min_unique_c`
+
+**Type:** `int`
+**Required:** No
+**Default:** `10`
+
+Minimum unique channel indices required for profile signals (shape: C, T).
+
+**Example:**
+```yaml
+tune_dct3d:
+  guardrails:
+    profile:
+      min_unique_c: 15
+```
+
+**Used in:** tune_dct3d (when guardrails.enabled=true)
+
+---
+
+### `tune_dct3d.guardrails.profile.min_unique_t`
+
+**Type:** `int`
+**Required:** No
+**Default:** `5`
+
+Minimum unique time indices required for profile signals (shape: C, T).
+
+**Example:**
+```yaml
+tune_dct3d:
+  guardrails:
+    profile:
+      min_unique_t: 8
+```
+
+**Used in:** tune_dct3d (when guardrails.enabled=true)
+
+---
+
+### `tune_dct3d.guardrails.video.min_unique_h`
+
+**Type:** `int`
+**Required:** No
+**Default:** `10`
+
+Minimum unique height indices required for video signals (shape: H, W, T).
+
+**Example:**
+```yaml
+tune_dct3d:
+  guardrails:
+    video:
+      min_unique_h: 15
+```
+
+**Used in:** tune_dct3d (when guardrails.enabled=true)
+
+---
+
+### `tune_dct3d.guardrails.video.min_unique_w`
+
+**Type:** `int`
+**Required:** No
+**Default:** `10`
+
+Minimum unique width indices required for video signals (shape: H, W, T).
+
+**Example:**
+```yaml
+tune_dct3d:
+  guardrails:
+    video:
+      min_unique_w: 15
+```
+
+**Used in:** tune_dct3d (when guardrails.enabled=true)
+
+---
+
+### `tune_dct3d.guardrails.video.min_unique_t`
+
+**Type:** `int`
+**Required:** No
+**Default:** `5`
+
+Minimum unique time indices required for video signals (shape: H, W, T).
+
+**Example:**
+```yaml
+tune_dct3d:
+  guardrails:
+    video:
+      min_unique_t: 8
+```
+
+**Used in:** tune_dct3d (when guardrails.enabled=true)
 
 ---
 

@@ -153,6 +153,43 @@ tune_dct3d:
 - If no candidates fit budget, smallest candidate is used
 - Typical range: 2048-8192
 
+### Guardrails (Optional Dimension Coverage)
+
+Guardrails ensure minimum unique indices per dimension (H, W, T) are represented in the selected coefficients, preventing over-compression.
+
+**Configuration:**
+```yaml
+tune_dct3d:
+  guardrails:
+    enabled: false  # Disabled by default
+    timeseries:     # For (T,) signals
+      min_unique_t: 5
+    profile:        # For (C, T) signals
+      min_unique_c: 10
+      min_unique_t: 5
+    video:          # For (H, W, T) signals
+      min_unique_h: 10
+      min_unique_w: 10
+      min_unique_t: 5
+```
+
+**How it works:**
+1. Sort coefficients by energy (descending)
+2. Compute K_target from explained energy threshold
+3. Compute K_guardrail_min from dimension coverage constraints
+4. Set K = max(K_target, K_guardrail_min)
+5. **Guardrails are strict**: If K exceeds budget, guardrails take precedence (budget is violated with warning)
+
+**When to use:**
+- ✅ Enable for finetuning (prevent over-compression on task-specific outputs)
+- ❌ Disable for pretraining (maximize compression)
+
+**Typical impact:** 5-15% more coefficients, better generalization.
+
+**Important:** Guardrails take precedence over budget caps. If guardrails require more coefficients than the budget allows, the budget will be exceeded and a warning will be logged. Adjust budget or guardrail settings if this occurs frequently.
+
+Values are clamped to actual dimensions: `eff_min = min(configured_min, actual_dim)`
+
 ---
 
 ## Output Files
