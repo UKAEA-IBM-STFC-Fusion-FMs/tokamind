@@ -55,11 +55,6 @@ tune_dct3d:
   # Disabled by default (no guardrails for pretraining)
   # Enable in task-specific overrides for finetuning if needed
 
-  # DIMENSION MAPPING (all signals internally use H,W,T representation):
-  #   Timeseries (T,)    → (H=1, W=1, T=T)
-  #   Profile    (C, T)  → (H=C, W=1, T=T)  [C channels map to H dimension]
-  #   Video      (H,W,T) → (H,   W,   T)
-
   guardrails:
     enabled: false
     timeseries:      # For signals with shape (T,) → (1, 1, T)
