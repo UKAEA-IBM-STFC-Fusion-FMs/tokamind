@@ -10,6 +10,3 @@
 #   - preprocess.valid_windows thresholds
 #   - eval-specific data selection
 
-preprocess:
-  valid_windows:
-    window_stride_sec: null

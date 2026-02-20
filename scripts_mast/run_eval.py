@@ -81,7 +81,6 @@ def main() -> None:
     device, _ = init_run_context(cfg_mmt, phase="eval")
 
     cfg_data = cfg_mmt.data
-    cfg_loader = cfg_mmt.loader
     cfg_eval = cfg_mmt.eval
 
     amp_enabled = cfg_eval.get("amp", {}).get("enable", True)
@@ -145,7 +144,7 @@ def main() -> None:
     # Load best weights from training run
     # ------------------------------------------------------------------
     epoch_best, best_val, _metadata = load_best_weights(
-        run_dir=train_run_dir, model=model, map_location=str(device)
+        run_dir=str(train_run_dir), model=model, map_location=str(device)
     )
 
     cfg_drop = cfg_eval.get("drop", {}) or {}

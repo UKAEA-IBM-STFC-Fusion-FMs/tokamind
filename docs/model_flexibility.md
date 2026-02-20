@@ -48,7 +48,8 @@ A common pattern is staged optimization:
 Use `train.stages[*].freeze.*`, `optimizer.lr.*`, and `optimizer.wd.*` for each stage.
 
 ## Practical Limits
-- Finetune and eval require a valid source run selected by `--model`.
+- Finetune warmstart and eval require a valid source run selected by `--model`.
+- Finetune scratch does not require a source run.
 - Eval expects source run artifacts and config snapshot to be present.
 - Rank-mode codecs require corresponding `embeddings/dct3d_indices/*.npy` files in run directory.
 

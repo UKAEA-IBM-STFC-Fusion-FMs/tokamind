@@ -10,7 +10,8 @@ This project uses convention-based configuration for three phases:
 ## Design Rules
 - Keep base defaults in `scripts_mast/configs/common/`.
 - Keep task-specific changes in `scripts_mast/configs/tasks_overrides/<task>/`.
-- Select source model from CLI (`--model`) for finetune and eval.
+- Select finetune init mode from CLI (`--init warmstart|scratch`).
+- Select source model from CLI (`--model`) for eval and for finetune warmstart.
 - Store run-local tuned embedding artifacts in `runs/<run_id>/embeddings/`.
 - Keep task profile files minimal: only task/profile-specific differences.
 
@@ -33,6 +34,14 @@ scripts_mast/configs/
         vae.yaml                              # optional alternative profile
 ```
 
+Loader modules:
+- `scripts_mast/mast_utils/config/loader.py` (orchestration)
+- `scripts_mast/mast_utils/config/merge.py` (YAML load + deep merge)
+- `scripts_mast/mast_utils/config/cli_overrides.py` (CLI injection)
+- `scripts_mast/mast_utils/config/inheritance.py` (source inheritance + finetune model semantics)
+- `scripts_mast/mast_utils/config/finalize.py` (path resolution + snapshot write)
+- `scripts_mast/mast_utils/config/ids.py` (run-id/model-id naming)
+
 ## Entry Scripts
 ```bash
 # Pretrain
@@ -44,8 +53,9 @@ python scripts_mast/run_pretrain.py \
 # Finetune
 python scripts_mast/run_finetune.py \
   --task <task> \
-  --model <run_id_or_path> \
+  --init <warmstart|scratch> \
   --emb_profile dct3d \
+  [--model <run_id_or_path>] \
   [--tag <tag>]
 
 # Eval
@@ -66,14 +76,18 @@ For `eval`, merge order is:
 2. `common/eval.yaml` (eval runtime defaults)
 3. `tasks_overrides/<task>/eval_overrides.yaml` (task eval edits, optional)
 
-Then the loader imports model identity from source run config selected by `--model`.
+Then the loader applies phase-specific source/model rules based on `phase` and finetune `--init`.
 
 ## Source Model Resolution
-For `finetune` and `eval`, `--model` can be:
+For `eval`, `--model` can be:
 - a run id under `runs/`
 - an absolute/relative path to an external run directory
 
-The loader resolves and stores:
+For `finetune`:
+- `--init warmstart` requires `--model` (run id or path)
+- `--init scratch` does not use a source model
+
+When a source model is used, the loader resolves and stores:
 - `model_source.run_id` (when applicable)
 - `model_source.model_path` (when applicable)
 - `model_source.run_dir` (resolved path)
@@ -84,8 +98,16 @@ The loader resolves and stores:
 - Builds embeddings according to profile + runtime tuning settings.
 
 ### Finetune
-- Inherits `model` from source run config.
-- Inherits `preprocess.chunk` and `preprocess.trim_chunks` from source run config.
+- Uses explicit model semantics from `common/finetune.yaml`:
+  - `model_scratch`
+  - `finetune_model_overrides`
+  - `warmstart.model_overrides`
+- If `--init scratch`:
+  - `model = deep_merge(model_scratch, finetune_model_overrides)`
+  - `preprocess.chunk` and `preprocess.trim_chunks` are used from merged finetune config.
+- If `--init warmstart`:
+  - `model = deep_merge(source_model, finetune_model_overrides, warmstart.model_overrides)`
+  - `preprocess.chunk` and `preprocess.trim_chunks` are inherited from source run config.
 - Embeddings are resolved by `embeddings.mode`:
   - `source`: copy `source_run/embeddings/` into current run, inherit and/or retune by role
   - `config`: ignore source embedding artifacts and use merged config directly
@@ -116,8 +138,8 @@ See [DCT3D Tuning](tuning_dct3d.md) for role-based tuning behavior.
   - else `<task>_<tag>` if `--tag` provided
   - else `<task>`
 - Finetune:
-  - `ft-<task>-<tag>-<model_id>` if tag provided
-  - else `ft-<task>-<model_id>`
+  - warmstart: `ft-<task>-ws-<model_id>-<tag>` if tag provided, else `ft-<task>-ws-<model_id>`
+  - scratch: `ft-<task>-scratch-<tag>` if tag provided, else `ft-<task>-scratch`
 
 ### Eval
 - Output root: `runs/<model_id>/eval/`
@@ -135,7 +157,9 @@ Optional task files:
 2. Add task folder under `tasks_overrides/`.
 3. Add `embeddings_overrides/<profile>.yaml`.
 4. Run pretrain.
-5. Run finetune with `--model <pretrain_run_id>`.
+5. Run finetune:
+   - warmstart: `--init warmstart --model <pretrain_run_id>`
+   - scratch: `--init scratch`
 6. Run eval with `--model <finetune_run_id>`.
 
 For parameter-level details, use [Configuration Reference](config_reference.md).

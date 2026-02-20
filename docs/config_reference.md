@@ -209,8 +209,30 @@ Top-level location: `loader:`
 - Type: `int | null`
 - Description: optional cap for streaming-epoch batch count.
 
-## Model
-Top-level location: `model:`
+## Finetune Model Configuration
+Top-level locations in `common/finetune.yaml`:
+- `model_scratch`
+- `finetune_model_overrides`
+- `warmstart.model_overrides`
+
+### `model_scratch`
+- Type: mapping
+- Description: scratch-only base model architecture.
+
+### `finetune_model_overrides`
+- Type: mapping
+- Description: model overrides applied in both finetune modes.
+
+### `warmstart.model_overrides`
+- Type: mapping
+- Description: warmstart-only model overrides applied on top of source model.
+
+Finetune model materialization:
+- `--init scratch`: `model = deep_merge(model_scratch, finetune_model_overrides)`
+- `--init warmstart`: `model = deep_merge(source_model, finetune_model_overrides, warmstart.model_overrides)`
+
+## Runtime Model
+Top-level location in runtime config snapshot: `model:`
 
 ### `model.backbone.d_model`
 - Type: `int`
@@ -310,10 +332,16 @@ Top-level location: `model_source:`
 - Type: `str`
 - Description: resolved absolute source run directory.
 
+Mode notes:
+- finetune warmstart: `model_source` is set from CLI `--model`.
+- finetune scratch: `model_source` is `null`.
+- eval: `model_source` is required.
+
 ### `model_source.load_parts.*`
 - Type: `bool`
 - Keys: `token_encoder`, `backbone`, `modality_heads`, `output_adapters`
 - Description: block-level warmstart load filter.
+- Used in: finetune warmstart.
 
 ## Evaluation
 Top-level location: `eval:`

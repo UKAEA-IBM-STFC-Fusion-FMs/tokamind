@@ -39,10 +39,3 @@
 # Tuned indices are generated at training time and saved to
 # runs/<run_id>/embeddings/ alongside model weights.
 
-embeddings:
-  tune_embeddings:
-    objective:
-      thresholds:
-        output: 0.999
-      max_budget:
-        output: 9216

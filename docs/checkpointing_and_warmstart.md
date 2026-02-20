@@ -53,11 +53,17 @@ Use warmstart to initialize weights from another run while starting a separate r
 Finetune and eval source selection is CLI-based:
 
 ```bash
-python scripts_mast/run_finetune.py --task <task> --model <run_id_or_path>
+python scripts_mast/run_finetune.py --task <task> --init warmstart --model <run_id_or_path>
 python scripts_mast/run_eval.py --task <task> --model <run_id_or_path>
 ```
 
 The loader resolves source path into `model_source.run_dir`.
+
+Finetune scratch mode does not use a source model:
+
+```bash
+python scripts_mast/run_finetune.py --task <task> --init scratch
+```
 
 ### Warmstart matching rule
 Warmstart loads tensors by:
@@ -84,11 +90,14 @@ model_source:
 - Resume: continue same run, includes optimizer/scheduler/scaler/rng.
 - Warmstart: initialize model blocks from another run, excludes optimizer/scheduler/scaler/rng.
 - Resume keeps training history continuity; warmstart starts a fresh optimization history.
+- Scratch finetune: initialize model blocks from finetune config without source weights.
 
 ## Typical Sequences
 ### Pretrain -> Finetune
 1. Run pretrain.
-2. Run finetune with `--model <pretrain_run_id>`.
+2. Run finetune:
+   - warmstart: `--init warmstart --model <pretrain_run_id>`
+   - scratch: `--init scratch`
 
 ### Finetune -> Eval
 1. Run eval with `--model <finetune_run_id>`.

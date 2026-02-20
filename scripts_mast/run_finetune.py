@@ -47,10 +47,17 @@ def parse_args_finetune() -> argparse.Namespace:
         help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
     )
     parser.add_argument(
+        "--init",
+        type=str,
+        default="warmstart",
+        choices=("warmstart", "scratch"),
+        help="Finetune initialization mode. "
+        "'warmstart' requires --model, 'scratch' ignores --model.",
+    )
+    parser.add_argument(
         "--model",
         type=str,
-        # required=True,
-        default="_test",
+        default=None,
         help="Source model for warm-start (run_id or path). Example: tokamind_base_v1",
     )
     parser.add_argument(
@@ -58,7 +65,7 @@ def parse_args_finetune() -> argparse.Namespace:
         type=str,
         default=None,
         help="Optional experiment tag for versioning (e.g., 'lr1e-4', 'exp1'). "
-        "Used in run_id generation: ft_{task}_{tag}_from_{model}",
+        "Run ID format is ft-{task}-ws-{model}[-{tag}] or ft-{task}-scratch[-{tag}].",
     )
     parser.add_argument(
         "--emb_profile",
@@ -82,6 +89,7 @@ def main() -> None:
         embeddings_profile=args.emb_profile,
         model=args.model,
         tag=args.tag,
+        finetune_init=args.init,
     )
     validate_config(cfg_mmt)
 

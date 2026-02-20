@@ -37,6 +37,8 @@ TokaMind implements a schema-flexible tokenization pipeline and a modular multi-
 │   ├── run_finetune.py
 │   ├── run_eval.py
 │   ├── mast_utils/
+│   │   ├── config/                  # config loading modules
+│   │   └── ...
 │   └── configs/
 ├── docs/                              # project documentation
 └── runs/                              # output runs and checkpoints
@@ -101,10 +103,21 @@ python scripts_mast/run_pretrain.py \
 ```
 
 ### 2) Finetune
+Warmstart:
 ```bash
 python scripts_mast/run_finetune.py \
   --task task_2-1 \
+  --init warmstart \
   --model tokamind_base \
+  --emb_profile dct3d \
+  --tag exp1
+```
+
+Scratch:
+```bash
+python scripts_mast/run_finetune.py \
+  --task task_2-1 \
+  --init scratch \
   --emb_profile dct3d \
   --tag exp1
 ```
@@ -113,7 +126,7 @@ python scripts_mast/run_finetune.py \
 ```bash
 python scripts_mast/run_eval.py \
   --task task_2-1 \
-  --model ft-task_2-1-exp1-tokamind_base
+  --model ft-task_2-1-ws-tokamind_base-exp1
 ```
 
 ## Configuration Model
@@ -128,6 +141,11 @@ Base files:
 Task files:
 - `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` (optional)
 - `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
+
+Finetune model keys in `scripts_mast/configs/common/finetune.yaml`:
+- `model_scratch`: scratch-only base architecture
+- `finetune_model_overrides`: model overrides applied in both scratch and warmstart
+- `warmstart.model_overrides`: warmstart-only model overrides
 
 Details are in:
 - [Configuration Guide](docs/config_guide.md)

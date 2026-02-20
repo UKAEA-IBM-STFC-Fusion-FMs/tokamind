@@ -132,7 +132,7 @@ def build_mast_datasets(
         For pretrain/finetune: (metadata, mast_train, mast_val, None)
     """
     # Task metadata
-    dict_task_metadata = get_task_metadata(cfg_task, verbose=False)
+    dict_task_metadata = dict(get_task_metadata(cfg_task, verbose=False))
 
     # Shot splits
     train_shots, test_shots, val_shots = get_train_test_val_shots(

@@ -310,7 +310,8 @@ def resolve_finetune_embeddings(
         If mode is invalid, or if mode=config with roles_to_tune, or if
         strict validation fails for inherited embeddings.
     FileNotFoundError
-        If mode=source but source embeddings don't exist and roles need inheriting.
+        If mode=source, a source run is configured, source embeddings don't
+        exist, and roles need inheriting.
     """
     cfg_emb = cfg_mmt.embeddings
     cfg_tune_emb = cfg_emb.get("tune_embeddings", {})
@@ -345,49 +346,62 @@ def resolve_finetune_embeddings(
             roles_to_inherit or "none",
         )
 
-        # Step 1: Copy source embeddings (required when any roles need inheriting)
-        source_run_dir = Path(cfg_mmt.model_source["run_dir"])
-        src_emb = source_run_dir / "embeddings"
-        dst_emb = run_dir / "embeddings"
+        # Step 1: Optional source inheritance path
+        model_source_cfg = cfg_mmt.raw.get("model_source")
+        source_run_dir = None
+        if isinstance(model_source_cfg, dict):
+            run_dir_src = model_source_cfg.get("run_dir")
+            if run_dir_src:
+                source_run_dir = Path(run_dir_src)
 
-        if src_emb.exists():
-            shutil.copytree(src_emb, dst_emb, dirs_exist_ok=True)
-            logger.info("Copied embeddings from %s → %s", src_emb, dst_emb)
+        if source_run_dir is not None:
+            src_emb = source_run_dir / "embeddings"
+            dst_emb = run_dir / "embeddings"
+
+            if src_emb.exists():
+                shutil.copytree(src_emb, dst_emb, dirs_exist_ok=True)
+                logger.info("Copied embeddings from %s → %s", src_emb, dst_emb)
+            elif roles_to_inherit:
+                raise FileNotFoundError(
+                    f"embeddings.mode=source requires source embeddings at {src_emb} "
+                    f"for inherited roles {roles_to_inherit}. "
+                    "Ensure the source model was trained with DCT3D rank-mode tuning, "
+                    "or set all tune_embeddings.roles to true to re-tune from scratch, "
+                    "or switch to embeddings.mode=config."
+                )
+
+            # Step 2: Load inherited overrides and perform strict validation
+            per_signal_overrides = load_embeddings_overrides(run_dir)
+
+            if roles_to_inherit:
+                # Build initial signal_specs for validation (with default config)
+                signal_specs_for_validation = build_signal_specs(
+                    embeddings_cfg=cfg_mmt.embeddings,
+                    signals_by_role=signals_by_role,
+                    dict_metadata=dict_task_metadata,
+                    chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
+                )
+
+                # Strict validation: check signal-level parameters
+                _validate_inherited_embeddings_strict(
+                    per_signal_overrides,
+                    signals_by_role,
+                    roles_to_inherit,
+                    signal_specs_for_validation,
+                )
+
+            # Step 3: Merge inherited overrides into config
+            if per_signal_overrides:
+                cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
+                for role, sigs in per_signal_overrides.items():
+                    cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
+                    cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
         elif roles_to_inherit:
-            raise FileNotFoundError(
-                f"embeddings.mode=source requires source embeddings at {src_emb} "
-                f"for inherited roles {roles_to_inherit}. "
-                "Ensure the source model was trained with DCT3D rank-mode tuning, "
-                "or set all tune_embeddings.roles to true to re-tune from scratch, "
-                "or switch to embeddings.mode=config."
-            )
-
-        # Step 2: Load inherited overrides and perform strict validation
-        per_signal_overrides = load_embeddings_overrides(run_dir)
-
-        if roles_to_inherit:
-            # Build initial signal_specs for validation (with default config)
-            signal_specs_for_validation = build_signal_specs(
-                embeddings_cfg=cfg_mmt.embeddings,
-                signals_by_role=signals_by_role,
-                dict_metadata=dict_task_metadata,
-                chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
-            )
-
-            # Strict validation: check signal-level parameters
-            _validate_inherited_embeddings_strict(
-                per_signal_overrides,
-                signals_by_role,
+            logger.info(
+                "Embeddings mode=source without source model: inherited roles %s "
+                "will use current config defaults.",
                 roles_to_inherit,
-                signal_specs_for_validation,
             )
-
-        # Step 3: Merge inherited overrides into config
-        if per_signal_overrides:
-            cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
-            for role, sigs in per_signal_overrides.items():
-                cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
-                cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
 
         # Step 4: Re-tune selected roles (overwrites their files in run_dir/embeddings/)
         if roles_to_tune:

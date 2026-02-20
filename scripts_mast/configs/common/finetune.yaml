@@ -1,30 +1,36 @@
-# Default configuration for FINETUNE phase. (shared across tasks_overrides)
+# Default FINETUNE configuration (shared across tasks).
 #
-# Task-specific changes belong in:
+# Most task-specific changes belong in:
 #   scripts_mast/configs/tasks_overrides/<task>/finetune_overrides.yaml
-#   (e.g., run_id, model_source.run_dir for warm-start, per-signal collate drops, etc.)
 #
-# Notes on resume vs warm-start:
-# - train.resume=true resumes the SAME run_dir (optimizer/scheduler/scaler/RNG/epochs).
-# - model_source.run_dir is a warm-start from a DIFFERENT run (weights only, overlap loading).
+# Quick edit guide:
+# - CLI init mode: --init warmstart|scratch (and --model for warmstart)
+# - embeddings.mode and embeddings.tune_embeddings.roles
+# - train.stages (epochs, lr, wd, freeze)
+# - collate drop probabilities
+#
+# Resume vs warmstart:
+# - train.resume=true resumes the same run_dir state (weights, optimizer,
+#   scheduler, scaler, RNG, epoch counters).
+# - warmstart (--init warmstart --model ...) initializes from another run.
 
 seed: 54
 
 runtime:
   debug_logging: false
 
-# Optional: name the training run folder under runs/. If omitted, loader generates one.
+# Optional run folder name under runs/. If null, loader generates one.
 run_id: null
 
 
 data:
-  local: true         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: null   # None / null → uses all shots
+  local: true
+  subset_of_shots: null  # null -> use all shots
 
   keep_output_native: false
   cache:
     enable: true
-    dtype: float16          # or float32; default behavior if omitted is “no cast”
+    dtype: float16
     num_workers: 64
     max_windows:
       train: null
@@ -32,29 +38,41 @@ data:
 
 
 preprocess:
+  # Scratch uses this block directly.
+  # Warmstart inherits chunk/trim_chunks from source run config.
+  chunk:
+    chunk_length: 0.005
+    stride: null
+
+  trim_chunks:
+    max_chunks: 50
+
   valid_windows:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: 0.01  # we override the stride based on different tasks
+    window_stride_sec: 0.01
 
 
 embeddings:
-  mode: source      # source | config
-                    #   source: inherit source run embeddings (copy artifacts + load overrides);
-                    #           tune_embeddings.roles selects which roles to re-tune on top.
-                    #           If a required source role is missing, fail immediately.
-                    #   config: ignore source embeddings entirely; use current emb_profile
-                    #           config as-is (e.g. vae.yaml, spatial dct3d defaults).
-                    #           tune_embeddings.roles must all be false.
+  mode: source  # source | config
+  # source: copy source run embeddings; roles=true re-tunes that role.
+  # config: ignore source embeddings and use the selected emb_profile as-is.
+
   tune_embeddings:
-    roles:          # all false -> inherit all roles from source (mode=source default)
-      input: false  # set true to re-tune that role on top of inherited source artifacts
+    roles:
+      input: false
       actuator: false
       output: true
 
   guardrails:
-      enable: true
+    enable: true
+
+  objective:
+    thresholds:
+      output: 0.999
+    max_budget:
+      output: 9216
 
 
 collate:
@@ -69,53 +87,17 @@ collate:
   p_drop_actuators_chunks: 0.0
 
 
-# "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
-#  Multi-workers rarely help when each item is already precomputed and Python-heavy."
-
+# For cached mode, loader.num_workers=0 (or at most 1) is usually best.
 loader:
   batch_size: 512
   num_workers: 0
   shuffle_train: true
   drop_last: false
-  batches_per_epoch: null  # Required only when data.cache.enable=false
-
-
-# Model source is now specified via CLI: --model <run_id_or_path>
-# The loader will automatically set model_source and inherit the model config.
-#
-# Which model parts to warm-start (optional override):
-model_source:
-  load_parts:
-    token_encoder: true
-    backbone: true
-    modality_heads: true
-    output_adapters: false
-
-
-# for finetuning we choose specific output-adapters:
-model:
-  output_adapters:
-    hidden_dim:
-      default: 0
-
-      bucketed:
-        enable: true
-        rules:
-          - {max_out_dim: 64,   hidden: 0}
-          - {max_out_dim: 512,  hidden: 32}
-          - {max_out_dim: 4096, hidden: 64}
-          - {max_out_dim: 8192, hidden: 128}
-          - {max_out_dim: null, hidden: d_model}   # fallback / otherwise
-
-      manual: {}   # {output_name: hidden_int, ...} (always wins)
+  batches_per_epoch: null  # required only when data.cache.enable=false
 
 
 train:
-  # This is run-level behaviour, not per-stage.
-  # If true and checkpoints/latest exists in *this* run_dir, we strictly
-  # resume that run: model weights + optimizer + scheduler + scaler + RNG +
-  # epoch counters. This is different from model_source.run_dir, which is a
-  # warm-start from some *other* run.
+  # Run-level behavior (not per-stage).
   resume: false
 
   early_stop:
@@ -159,7 +141,6 @@ train:
         output_adapters: false
 
     - name: ft_full
-      # Stage 2: unfreeze backbone with a smaller LR (full finetune)
       epochs: 15
 
       scheduler:
@@ -168,7 +149,7 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 0.0     # keep frozen (optional)
+          token_encoder: 0.0
           backbone: 5e-4
           modality_heads: 1e-3
           output_adapters: 5e-3
@@ -183,3 +164,59 @@ train:
         backbone: false
         modality_heads: false
         output_adapters: false
+
+
+# -----------------------------
+# Advanced model initialization
+# -----------------------------
+
+# Warmstart source is provided by CLI: --init warmstart --model <run_id_or_path>.
+# Scratch mode ignores model_source and does not load source parts.
+model_source:
+  load_parts:
+    token_encoder: true
+    backbone: true
+    modality_heads: true
+    output_adapters: false
+
+# Scratch: model = deep_merge(model_scratch, finetune_model_overrides)
+model_scratch:
+  backbone:
+    d_model: 192
+    n_layers: 4
+    n_heads: 6
+    dim_ff: 768
+    dropout: 0.05
+    activation: relu
+
+  modality_heads:
+    timeseries:
+      hidden: 192
+      out_dim: 192
+    profile:
+      hidden: 192
+      out_dim: 192
+    video:
+      hidden: 192
+      out_dim: 192
+
+# Applied in both scratch and warmstart.
+finetune_model_overrides:
+  output_adapters:
+    hidden_dim:
+      default: 0
+
+      bucketed:
+        enable: true
+        rules:
+          - {max_out_dim: 64, hidden: 0}
+          - {max_out_dim: 512, hidden: 32}
+          - {max_out_dim: 4096, hidden: 64}
+          - {max_out_dim: 8192, hidden: 128}
+          - {max_out_dim: null, hidden: d_model}
+
+      manual: {}  # {output_name: hidden_int, ...} (always wins)
+
+# Warmstart: model = deep_merge(source_model, finetune_model_overrides, warmstart.model_overrides)
+warmstart:
+  model_overrides: {}

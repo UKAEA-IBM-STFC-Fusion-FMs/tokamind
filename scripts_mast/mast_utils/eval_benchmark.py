@@ -74,8 +74,9 @@ def _reduce_mask(mask: np.ndarray) -> np.ndarray:
     """Reduce a possibly high-rank mask to shape (B,) via OR over extra dims."""
 
     if mask.ndim == 1:
-        return mask.astype(bool)
-    return mask.reshape(mask.shape[0], -1).any(axis=1)
+        return np.asarray(mask, dtype=bool)
+    reduced = mask.reshape(mask.shape[0], -1).any(axis=1)
+    return np.asarray(reduced, dtype=bool)
 
 
 def evaluate_benchmark_and_diagnostics(
