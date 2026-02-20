@@ -10,6 +10,7 @@ seed: 54
 runtime:
   debug_logging: false
 
+
 data:
   local: true         # True = uses local dataset, False = HPC / remote
   subset_of_shots: null   # None / null → uses all shots

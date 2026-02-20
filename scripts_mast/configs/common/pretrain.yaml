@@ -16,6 +16,7 @@ runtime:
 # run_id is now specified via CLI: --run-id (explicit) or --tag (generates {task}_{tag}) or defaults to task name
 # See: python run_pretrain.py --help
 
+
 data:
   local: true         # True = uses local dataset, False = HPC / remote
   subset_of_shots: null   # None / null → uses all shots;
@@ -29,6 +30,7 @@ data:
       train: null
       val: null
 
+
 preprocess:
   chunk:
     chunk_length: 0.005          # 5 ms per chunk (placeholder)
@@ -37,11 +39,13 @@ preprocess:
   trim_chunks:
      max_chunks: 50     # maximum number of chunks in the history
 
+
   valid_windows:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
     window_stride_sec: 0.01
+
 
 embeddings:
   tune_embeddings:
@@ -49,6 +53,10 @@ embeddings:
       input: true
       actuator: true
       output: true
+    
+    guardrails:
+      enable: false
+
 
 collate:
   p_drop_inputs: 0.1
@@ -61,15 +69,16 @@ collate:
   p_drop_inputs_chunks: 0.1
   p_drop_actuators_chunks: 0.0
 
+
 # "Recommendation: for cached mode, use loader.num_workers=0 (or at most 1).
 #  Multi-workers rarely help when each item is already precomputed and Python-heavy."
-
 loader:
   batch_size: 512
   num_workers: 0
   shuffle_train: true
   drop_last: false
   batches_per_epoch: null  # Required only when data.cache.enable=false
+
 
 model:
   backbone:
@@ -98,6 +107,7 @@ model:
         enable: false
       manual: {}   # manual always wins
 #        equilibrium-pis: 128
+
 
 train:
   # This is run-level behaviour, not per-stage.
