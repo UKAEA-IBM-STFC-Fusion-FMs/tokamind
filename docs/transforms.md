@@ -74,8 +74,4 @@ preprocess:
 ```
 
 ## Extension Points
-- Add a custom window filter transform before embedding.
-- Add a codec implementing `encode`/`decode` and register it in codec factory logic.
-- Add extra metadata fields in token-building stage if downstream code uses them.
-
-When extending the chain, keep input/output field contracts explicit to avoid silent sample drops.
+- When extending the chain, keep input/output field contracts explicit to avoid silent sample drops.

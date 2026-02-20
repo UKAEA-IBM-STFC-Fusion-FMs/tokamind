@@ -67,7 +67,7 @@ loader:
 ```
 
 Practical note:
-- with cached mode, `loader.num_workers` can often stay low
+- with cached mode, we suggest to use `loader.num_workers=0` 
 - with streaming mode, higher `loader.num_workers` may improve throughput
 
 ## Practical Guidance
