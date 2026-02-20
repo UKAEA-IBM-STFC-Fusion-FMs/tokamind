@@ -8,8 +8,7 @@ We deliberately keep validation focused and simple:
   • common required fields (phase/task),
   • training stages validation (lr/wd inheritance, freeze rules),
   • loader rules for streaming vs cached datasets,
-  • eval-specific requirements (model_source.run_dir, keep_output_native),
-  • tune_dct3d minimal requirements.
+  • eval-specific requirements (model_source.run_dir, keep_output_native).
 
 """
 
@@ -83,7 +82,7 @@ def _normalize_null_to_empty_dict(cfg: Dict[str, Any], path: str) -> None:
 # Common required fields
 # ---------------------------------------------------------------------------
 
-ALLOWED_PHASES = {"pretrain", "finetune", "eval", "tune_dct3d"}
+ALLOWED_PHASES = {"pretrain", "finetune", "eval"}
 
 REQUIRED_COMMON_FIELDS: List[Tuple[str, type]] = [
     ("phase", str),
@@ -357,8 +356,6 @@ def validate_config(cfg: Union[Dict[str, Any], Any]) -> None:
         validate_train_config(cfgd)
     elif phase == "eval":
         validate_eval_config(cfgd)
-    elif phase == "tune_dct3d":
-        validate_tune_dct3d_config(cfgd)
     else:
         raise ValueError(f"Unsupported phase: {phase}")
 
@@ -456,24 +453,3 @@ def validate_eval_config(cfg: Dict[str, Any]) -> None:
         raise ValueError(
             "For phase='eval', model_source.run_dir must be set (path to a training run)."
         )
-
-
-def validate_tune_dct3d_config(cfg: Dict[str, Any]) -> None:
-    """
-    Minimal validation for tune_dct3d phase (rank mode).
-    
-    Note: search_space is no longer required (removed grid search).
-    Tuning now uses variance-based coefficient selection.
-    """
-    td = cfg.get("tune_dct3d", None)
-    if not isinstance(td, dict):
-        raise KeyError("For phase='tune_dct3d', missing required block: tune_dct3d")
-
-    # Required: objective.thresholds
-    obj = td.get("objective", None)
-    if not isinstance(obj, dict):
-        raise KeyError("Missing required block: tune_dct3d.objective")
-    
-    thresholds = obj.get("thresholds", None)
-    if not isinstance(thresholds, dict):
-        raise KeyError("Missing required block: tune_dct3d.objective.thresholds")

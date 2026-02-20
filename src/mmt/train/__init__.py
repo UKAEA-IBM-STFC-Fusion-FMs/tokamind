@@ -11,3 +11,9 @@ Key modules
 - losses.py     : loss function implementations
 - scheduler.py  : learning rate scheduling utilities
 """
+
+from .loop import train_finetune
+
+__all__ = [
+    "train_finetune",
+]

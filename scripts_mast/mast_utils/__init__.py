@@ -10,7 +10,11 @@ Key modules
 - config_loader.py     : convention-based YAML merge into ExperimentConfig
 - task_definition.py   : resolve benchmark/local task definition by task name
 - task_signals.py      : convert task definition -> signals_by_role for MMT core
-- pipeline_helpers.py  : shared helpers for run_*.py entrypoints
+- pipeline_helpers.py  : low-level transforms/collate helpers for run_*.py
+- entry_script_helpers.py : high-level run_*.py orchestration helpers
+- embedding_resolution.py : pretrain/finetune/eval embedding resolution
+- eval_benchmark.py       : benchmark-aligned evaluation runner
+- tune_dct3d.py        : DCT3D tuning step (run + load overrides)
 """
 
 from .config_loader import load_experiment_config
@@ -23,6 +27,20 @@ from .pipeline_helpers import (
     build_default_transform,
     make_collate_fn,
 )
+from .entry_script_helpers import (
+    init_run_context,
+    build_mast_datasets,
+    build_window_data,
+    build_model_and_optional_warmstart,
+)
+from .embedding_resolution import (
+    resolve_pretrain_embeddings,
+    resolve_finetune_embeddings,
+    resolve_eval_embeddings,
+)
+from .eval_benchmark import evaluate_benchmark_and_diagnostics
+
+from .tune_dct3d import run_dct3d_tuning, load_embeddings_overrides
 
 __all__ = [
     # Config
@@ -35,4 +53,18 @@ __all__ = [
     "extract_signal_stats",
     "build_default_transform",
     "make_collate_fn",
+    # Entry script helpers
+    "init_run_context",
+    "build_mast_datasets",
+    "build_window_data",
+    "build_model_and_optional_warmstart",
+    # Embedding resolution
+    "resolve_pretrain_embeddings",
+    "resolve_finetune_embeddings",
+    "resolve_eval_embeddings",
+    # Evaluation
+    "evaluate_benchmark_and_diagnostics",
+    # Embedding tuning
+    "run_dct3d_tuning",
+    "load_embeddings_overrides",
 ]

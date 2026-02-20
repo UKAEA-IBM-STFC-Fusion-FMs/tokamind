@@ -54,46 +54,30 @@ def _prod(shape: Tuple[int, ...]) -> int:
 
 def load_coeff_indices(config_dir: Path, rel_path: str) -> np.ndarray:
     """
-    Load coefficient indices from .npy file for rank mode DCT3D.
-    
-    Supports two path formats:
-    - Regular relative path: resolved relative to config_dir
-      Example: "dct3d_indices/output_signal.npy"
-    - @common/ prefix: resolved relative to scripts_mast/configs/common/
-      Example: "@common/dct3d_indices/input_signal.npy"
-    
-    The @common/ prefix is used for shared input/actuator indices that are
-    reused across multiple tasks.
-    
+    Load coefficient indices from a .npy file for rank mode DCT3D.
+
+    The path is resolved relative to ``config_dir``, which for trained models
+    is ``runs/<run_id>/embeddings/``.
+
     Parameters
     ----------
     config_dir : Path
-        Base directory containing the config (e.g., tasks_overrides/<task>/embeddings_overrides/)
+        Base directory containing the indices (e.g., runs/<run_id>/embeddings/).
     rel_path : str
-        Relative path to .npy file, optionally prefixed with @common/
-    
+        Relative path to the .npy file.
+        Example: "dct3d_indices/output_signal.npy"
+
     Returns
     -------
     np.ndarray
-        1D array of coefficient indices (dtype: int32)
+        1D array of coefficient indices (dtype: int32).
     """
-    # Handle @common/ prefix for shared indices
-    if rel_path.startswith("@common/"):
-        # Remove @common/ prefix and resolve relative to configs/common/
-        path_without_prefix = rel_path[8:]  # len("@common/") = 8
-        # Navigate from config_dir up to scripts_mast/configs/common/
-        # config_dir is typically: scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/
-        # We need to go up to scripts_mast/configs/ then into common/
-        common_dir = config_dir.parent.parent.parent / "common"
-        full_path = common_dir / path_without_prefix
-    else:
-        # Regular relative path
-        full_path = config_dir / rel_path
-    
+    full_path = config_dir / rel_path
+
     if not full_path.exists():
         raise FileNotFoundError(
             f"Coefficient indices file not found: {full_path}\n"
-            f"Make sure to run tune_dct3d.py first to generate indices.\n"
+            f"Each training run saves its own indices to runs/<run_id>/embeddings/.\n"
             f"Original path: {rel_path}"
         )
     indices = np.load(full_path)
@@ -193,8 +177,8 @@ def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]
     config_dir : Path | None, optional
         Base directory for loading coefficient indices (DCT3D rank mode only).
         Only required if any signal uses selection_mode="rank".
-        Typically: tasks_overrides/<task>/embeddings_overrides/
-        
+        Typically: runs/<run_id>/embeddings/
+
         For spatial mode or other encoders, this parameter is not needed.
 
     Returns
@@ -218,8 +202,7 @@ def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]
                 if config_dir is None:
                     raise ValueError(
                         f"config_dir required for DCT3D rank mode (signal {spec.role}:{spec.name}). "
-                        f"Pass config_dir=Path(cfg.paths['config_dir']) / 'embeddings_overrides' "
-                        f"to build_codecs()."
+                        f"Pass config_dir=Path(run_dir) / 'embeddings' to build_codecs()."
                     )
                 coeff_indices_path = kw.get("coeff_indices_path")
                 if coeff_indices_path is None:

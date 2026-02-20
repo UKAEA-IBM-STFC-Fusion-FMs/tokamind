@@ -9,14 +9,12 @@ scripts_mast/configs/
     pretrain.yaml
     finetune.yaml
     eval.yaml
-    tune_dct3d.yaml
 
   tasks_overrides/
     <task>/                                   (one folder per task)
       pretrain_overrides.yaml                 (optional)
       finetune_overrides.yaml                 (optional)
       eval_overrides.yaml                     (optional)
-      tune_dct3d_overrides.yaml               (optional)
       embeddings_overrides/
         <profile>.yaml                        (task-level embedding overrides; required for
                                               pretrain/finetune; may be empty)
@@ -34,7 +32,7 @@ Merge order (later wins)
   2) common/<phase>.yaml
   3) tasks_overrides/<task>/<phase>_overrides.yaml                  (optional)
   4) tasks_overrides/<task>/embeddings_overrides/<profile>.yaml     (merged for
-     pretrain/finetune; NOT merged for eval/tune_dct3d)
+     pretrain/finetune; NOT merged for eval)
 
 Required keys (explicit per phase)
 ----------------------------------
@@ -66,14 +64,11 @@ Notes
 -----
 - Benchmark task *definitions* are resolved separately (scripts_mast layer),
   not here.
-- ``tune_dct3d`` intentionally does not merge the task-level embedding overrides so
-  the tuner always writes deltas relative to common/embeddings.yaml.
 """
 
 from __future__ import annotations
 
 import copy
-import datetime
 from pathlib import Path
 from typing import Any, Dict
 
@@ -130,10 +125,6 @@ def _resolve_model_source_dir(model_source: Dict[str, Any], *, phase: str) -> tu
         run_id: pretrain_12345
         model_path: null   # if set, overrides run_id
 
-    Backward-compatible:
-      model_source:
-        run_dir: pretrain_12345   # legacy name for run_id
-
     Returns
     -------
     (src_run_dir, src_run_id_for_yaml)
@@ -145,10 +136,6 @@ def _resolve_model_source_dir(model_source: Dict[str, Any], *, phase: str) -> tu
 
     model_path = model_source.get("model_path", None)
     run_id = model_source.get("run_id", None)
-
-    # Legacy support: run_dir used to store the run id string.
-    if run_id is None and model_source.get("run_dir", None) is not None:
-        run_id = model_source.get("run_dir")
 
     # External directory override.
     if model_path is not None:
@@ -463,17 +450,6 @@ def _compute_paths(
         raise ValueError("Missing required argument: phase.")
 
     task = merged.get("task", "unknown_task")
-    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # tune_dct3d writes into the task folder
-    if phase == "tune_dct3d":
-        return {
-            "repo_root": str(repo_root),
-            "configs_root": str(configs_root),
-            "run_dir": str(task_dir),
-            "task_config_dir": str(task_dir),
-            "tune_dir": str(task_dir / "embeddings_overrides"),
-        }
 
     # pretrain and finetune write into runs/<run_id>
     if phase in ("pretrain", "finetune"):
@@ -550,7 +526,7 @@ def _load_and_merge_base_configs(
     task : str
         Task identifier (folder name under tasks_overrides/)
     phase : str
-        Training phase: pretrain, finetune, eval, or tune_dct3d
+        Training phase: pretrain, finetune, or eval
     embeddings_profile : str
         Embedding profile name (e.g., 'dct3d', 'vae')
     configs_root_path : Path
@@ -565,9 +541,8 @@ def _load_and_merge_base_configs(
     
     Notes
     -----
-    - For tune_dct3d phase, creates output directories if they don't exist
-    - Embedding overrides are NOT merged for eval and tune_dct3d phases
-    - Warns if embedding overrides are missing for pretrain/finetune
+    - Embedding overrides are NOT merged for eval
+    - Embedding overrides are required for pretrain/finetune
     """
     common_dir = configs_root_path / "common"
     
@@ -586,11 +561,6 @@ def _load_and_merge_base_configs(
     embeddings_overrides_dir = tasks_overrides_dir / "embeddings_overrides"
     embeddings_overrides_path = embeddings_overrides_dir / f"{embeddings_profile}.yaml"
     
-    # For tune_dct3d we write outputs into tasks_overrides/<task>/, so ensure it exists.
-    if phase == "tune_dct3d":
-        tasks_overrides_dir.mkdir(parents=True, exist_ok=True)
-        embeddings_overrides_dir.mkdir(parents=True, exist_ok=True)
-    
     # Start merging
     merged: Dict[str, Any] = {}
     merged = _deep_merge(merged, _load_yaml(embeddings_path))
@@ -601,17 +571,15 @@ def _load_and_merge_base_configs(
         merged = _deep_merge(merged, _load_yaml(phase_overrides_path))
     
     # Merge embedding overrides (pretrain/finetune only)
-    if phase not in ("tune_dct3d", "eval"):
+    if phase in ("pretrain", "finetune"):
         if not embeddings_overrides_path.is_file():
-            logger.warning(
-                "[WARNING] Missing task-level embedding overrides for profile=%s (task=%s). "
-                "Proceeding without per-signal overrides. Expected: %s",
-                embeddings_profile,
-                task,
-                embeddings_overrides_path,
+            raise FileNotFoundError(
+                "Missing required task-level embedding overrides for "
+                f"profile={embeddings_profile!r}, task={task!r}.\n"
+                "Expected file:\n"
+                f"  {embeddings_overrides_path}"
             )
-        else:
-            merged = _deep_merge(merged, _load_yaml(embeddings_overrides_path))
+        merged = _deep_merge(merged, _load_yaml(embeddings_overrides_path))
     
     return merged
 
@@ -644,7 +612,7 @@ def _inject_cli_model_overrides(
     merged : Dict[str, Any]
         Configuration dictionary to modify in-place
     phase : str
-        Training phase (pretrain, finetune, eval, or tune_dct3d)
+        Training phase (pretrain, finetune, eval)
     task : str
         Task name
     model : str | None
@@ -657,7 +625,6 @@ def _inject_cli_model_overrides(
     Notes
     -----
     - Modifies merged dict in-place
-    - Does nothing for tune_dct3d phase
     - Model argument is required for finetune and eval phases
     - For pretrain, uses run_id > tag > task name priority
     """
@@ -667,6 +634,8 @@ def _inject_cli_model_overrides(
         _inject_cli_overrides_finetune(merged, model=model, tag=tag)
     elif phase == "eval":
         _inject_cli_overrides_eval(merged, model=model)
+    else:
+        raise ValueError(f"Unsupported phase for CLI override injection: {phase}")
 
 
 def _inherit_from_source_model(merged: Dict[str, Any], *, phase: str) -> None:
@@ -773,14 +742,13 @@ def _finalize_and_save_config(
     Config naming conventions:
         - pretrain/finetune: saves as {run_id}.yaml in run_dir
         - eval: saves as {eval_id}.yaml in model's eval/ subdirectory
-        - tune_dct3d: saves as tune_dct3d_{timestamp}.yaml in history/
     
     Parameters
     ----------
     merged : Dict[str, Any]
         Configuration dictionary to finalize and save
     phase : str
-        Training phase (pretrain, finetune, eval, or tune_dct3d)
+        Training phase (pretrain, finetune, or eval)
     configs_root_path : Path
         Absolute path to configs root directory
     tasks_overrides_dir : Path
@@ -804,11 +772,7 @@ def _finalize_and_save_config(
         merged["eval_id"] = merged["paths"]["eval_id"]
     
     # Save merged config snapshot
-    if phase == "tune_dct3d":
-        out_dir = Path(merged["paths"]["tune_dir"]) / "history"
-        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-        config_name = f"tune_dct3d_{timestamp}.yaml"
-    elif phase == "eval":
+    if phase == "eval":
         out_dir = Path(merged["paths"]["run_dir"])
         config_name = f"{merged['eval_id']}.yaml"
     else:
@@ -841,7 +805,7 @@ def load_experiment_config(
     task:
         Task folder name under ``scripts_mast/configs/tasks_overrides/<task>/``.
     phase:
-        One of: ``pretrain``, ``finetune``, ``eval``, ``tune_dct3d``.
+        One of: ``pretrain``, ``finetune``, ``eval``.
     configs_root:
         Root folder containing the convention-based config tree.
     embeddings_profile:
@@ -867,7 +831,7 @@ def load_experiment_config(
         A dynamic wrapper around the merged raw dict (``cfg.raw``).
     """
     # Validate inputs
-    if phase not in ("pretrain", "finetune", "eval", "tune_dct3d"):
+    if phase not in ("pretrain", "finetune", "eval"):
         raise ValueError(f"Unsupported phase: {phase}")
     
     emb_profile = str(embeddings_profile).strip()

@@ -1,12 +1,12 @@
 # Default configuration for PRETRAIN phase. (shared across tasks_overrides)
 #
 # Task-specific changes belong in:
-#   scripts_mast/configs/tasks_overrides/<task>/finetune_overrides.yaml
-#   (e.g., run_id, model_source.run_dir for warm-start, per-signal collate drops, etc.)
+#   scripts_mast/configs/tasks_overrides/<task>/pretrain_overrides.yaml
+#   (e.g., per-task preprocess/collate/training knobs)
 #
-# Notes on resume vs warm-start:
-# - train.resume=true resumes the SAME run_dir (optimizer/scheduler/scaler/RNG/epochs).
-# - model_source.run_dir is a warm-start from a DIFFERENT run (weights only, overlap loading).
+# Notes on resume:
+# - train.resume=true resumes the SAME run_dir
+#   (optimizer/scheduler/scaler/RNG/epochs).
 
 seed: 54
 
@@ -42,6 +42,13 @@ preprocess:
     min_valid_outputs: 1
     min_valid_chunks: 1
     window_stride_sec: 0.01
+
+embeddings:
+  tune_embeddings:
+    roles:
+      input: false
+      actuator: false
+      output: false
 
 collate:
   p_drop_inputs: 0.1

@@ -12,4 +12,4 @@ Key modules
 - identity_codec.py : pass-through identity codec
 """
 
-# Made with Bob
+# Keep this package init lightweight: codec modules have optional heavy deps.

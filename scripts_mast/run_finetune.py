@@ -4,13 +4,14 @@ Finetuning entrypoint for MMT using the convention-based config system.
 This script:
 - parses `--task`,
 - loads and validates the merged config for phase="finetune",
-- resolves the benchmark task_config and builds datasets/metadata,
-- builds signal specs/codecs and the standard shot→windows transform pipeline,
-- optionally warm-starts from `model_init.model_dir`,
+- resolves task metadata and datasets,
+- resolves embeddings/codecs using `embeddings.mode` (`source` or `config`),
+- builds window data and model via shared helpers,
 - runs the finetuning loop and writes outputs under cfg_mmt.paths["run_dir"].
 
-Shared boilerplate (device/MP setup, default transforms, window datasets,
-collate construction) lives in `scripts_mast.mast_utils.pipeline_helpers`.
+Shared boilerplate lives in:
+- `mast_utils.entry_script_helpers`
+- `mast_utils.embedding_resolution`
 """
 
 from __future__ import annotations
@@ -20,38 +21,19 @@ import logging
 
 from pathlib import Path
 
-from mast_utils.benchmark_imports import (
-    initialize_MAST_dataset,
-    initialize_model_dataset_iterable,
-    get_task_metadata,
-    get_train_test_val_shots,
-)
-
 from mast_utils import (
     load_experiment_config,
     load_task_definition,
     build_signals_by_role_from_task_definition,
-    setup_device_and_mp,
-    build_default_transform,
-    make_collate_fn,
+    init_run_context,
+    build_mast_datasets,
+    build_window_data,
+    build_model_and_optional_warmstart,
+    resolve_finetune_embeddings,
 )
 
-from mmt.utils.config.validator import validate_config
-
-from mmt.utils import (
-    set_seed,
-    setup_logging,
-    sdpa_math_only_ctx,
-)
-
-from mmt.data import (
-    build_signal_specs,
-    build_codecs,
-    initialize_mmt_dataloader,
-    WindowCachedDataset,
-)
-from mmt.models import MultiModalTransformer
-from mmt.train.loop import train_finetune
+from mmt.utils import validate_config, sdpa_math_only_ctx
+from mmt.train import train_finetune
 
 
 def parse_args_finetune() -> argparse.Namespace:
@@ -91,11 +73,6 @@ def parse_args_finetune() -> argparse.Namespace:
 
 def main() -> None:
     # ------------------------------------------------------------------
-    # Device / multiprocessing
-    # ------------------------------------------------------------------
-    device = setup_device_and_mp()
-
-    # ------------------------------------------------------------------
     # Load merged config (common + task + overrides)
     # ------------------------------------------------------------------
     args = parse_args_finetune()
@@ -108,250 +85,68 @@ def main() -> None:
     )
     validate_config(cfg_mmt)
 
+    # ------------------------------------------------------------------
+    # Runtime context (device, seed, logging)
+    # ------------------------------------------------------------------
+    device, _ = init_run_context(cfg_mmt, phase="finetune")
+
     cfg_data = cfg_mmt.data
-    cfg_cache = cfg_data["cache"]
-    cfg_model = cfg_mmt.model
     cfg_loader = cfg_mmt.loader
-    cfg_collate = cfg_mmt.collate
     cfg_train = cfg_mmt.train
 
-    keep_output_native = cfg_data.get("keep_output_native", False)
-    local_flag = cfg_data.get("local", True)
-    debug_mode = cfg_mmt.runtime["debug_logging"]
-
-    cfg_backbone = cfg_model["backbone"]
-    cfg_modality_heads = cfg_model["modality_heads"]
-    cfg_output_adapters = cfg_model["output_adapters"]
-    max_positions = cfg_mmt.preprocess["trim_chunks"]["max_chunks"]
-
-    # benchmark task config (with overrides such as subset_of_shots/local)
+    # Benchmark task config (with overrides such as subset_of_shots/local)
     cfg_task = load_task_definition(args.task)
 
     # ------------------------------------------------------------------
-    # Seed + logging
+    # Task metadata + MAST datasets
     # ------------------------------------------------------------------
-    set_seed(cfg_mmt.seed, deterministic=True, warn_only=True)
-
-    logger = setup_logging(
-        cfg_mmt.paths["run_dir"],
-        logger_name="mmt",
-        filename=f"{cfg_mmt.run_id}.log",
-        console=True,
-    )
-    logger.setLevel("DEBUG" if debug_mode else "INFO")
-
-    logging.getLogger("mmt.Task").info(
-        "task=%s | phase=%s | device=%s", cfg_mmt.task, cfg_mmt.phase, device
-    )
-
-    # -------------------------------------------------------------------
-    # Initialize task-specific metadata
-    # -------------------------------------------------------------------
-
-    dict_task_metadata = get_task_metadata(
+    dict_task_metadata, mast_dataset_train, mast_dataset_val, _mast_test = build_mast_datasets(
         cfg_task,
-        verbose=False,
+        cfg_data=cfg_data,
+        phase="finetune",
     )
 
     # ------------------------------------------------------------------
-    # Initialize MAST datasets
+    # Signal specs + embeddings
     # ------------------------------------------------------------------
-
-    train_shots_, _, val_shots_ = get_train_test_val_shots(
-        max_index=cfg_data["subset_of_shots"],
-    )
-
-    mast_dataset_train = initialize_MAST_dataset(
-        cfg_task,
-        train_shots_,
-        local_flag=local_flag,
-        use_std_scaling=True,
-        return_incomplete_shots=True,
-        verbose=False,
-    )
-
-    mast_dataset_val = initialize_MAST_dataset(
-        cfg_task,
-        val_shots_,
-        local_flag=cfg_data["local"],
-        use_std_scaling=True,
-        return_incomplete_shots=True,
-        verbose=False,
-    )
-
-    # ------------------------------------------------------------------
-    # Signal specs
-    # ------------------------------------------------------------------
-
-    # Build signals_by_role from benchmark config + metadata and signal specs/codecs
     signals_by_role = build_signals_by_role_from_task_definition(
         cfg_task,
         dict_task_metadata,
     )
 
-    signal_specs = build_signal_specs(
-        embeddings_cfg=cfg_mmt.embeddings,
+    run_dir = Path(cfg_mmt.paths["run_dir"])
+    signal_specs, codecs = resolve_finetune_embeddings(
+        cfg_mmt=cfg_mmt,
         signals_by_role=signals_by_role,
-        dict_metadata=dict_task_metadata,
-        chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
+        dict_task_metadata=dict_task_metadata,
+        run_dir=run_dir,
+        cfg_task=cfg_task,
     )
 
-    # For rank mode DCT3D: pass embeddings_overrides dir to load .npy coefficient indices
-    embeddings_dir = Path(cfg_mmt.paths["task_config_dir"]) / "embeddings_overrides"
-    codecs = build_codecs(signal_specs, config_dir=embeddings_dir)
-
     # ------------------------------------------------------------------
-    # Model-specific transform chain (shot -> windows)
+    # Window data
     # ------------------------------------------------------------------
-    mmt_transform_map = build_default_transform(
-        cfg_mmt,
-        dict_metadata=dict_task_metadata,
+    window_data = build_window_data(
+        cfg_mmt=cfg_mmt,
+        mast_datasets={"train": mast_dataset_train, "val": mast_dataset_val},
+        dict_task_metadata=dict_task_metadata,
+        cfg_task=cfg_task,
         signal_specs=signal_specs,
         codecs=codecs,
-        keep_output_native=keep_output_native,
+        phase="finetune",
     )
 
-    # ------------------------------------------------------------------
-    # Window-level iterables (benchmark wrapper yields windows directly)
-    # ------------------------------------------------------------------
-    # Note: For cached mode, we disable shuffle_windows since we'll shuffle after caching.
-    # For streaming mode, we enable shuffle_windows to get buffer-based shuffling.
-    enable_cache = cfg_cache.get("enable", False)
-    shuffle_at_iterable_level = cfg_loader["shuffle_train"] and not enable_cache
-    
-    window_iterable_train = initialize_model_dataset_iterable(
-        mast_dataset_train,
-        dict_task_metadata,
-        cfg_task,
-        model_specific_transform=mmt_transform_map,
-        test_mode=False,
-        shuffle_windows=shuffle_at_iterable_level,
-        shuffle_buffer_size=512,
-        verbose=True,
-    )
-    
-    window_iterable_val = initialize_model_dataset_iterable(
-        mast_dataset_val,
-        dict_task_metadata,
-        cfg_task,
-        model_specific_transform=mmt_transform_map,
-        test_mode=False,
-        shuffle_windows=False,
-        shuffle_buffer_size=512,
-        verbose=False,
-    )
-
-    # Optional debug: iterate a few windows to exercise wrapper + transforms
-    if debug_mode and window_iterable_train is not None:
-        logger.info("Debug mode: testing window iteration...")
-        for i, window in enumerate(window_iterable_train):
-            if i >= 2:  # Just test first 2 windows
-                break
-        logger.info("Debug iteration successful")
-
-    # ------------------------------------------------------------------
-    # Window-level datasets (cached or streaming)
-    # ------------------------------------------------------------------
-    enable_cache = cfg_cache.get("enable", False)
-    
-    if enable_cache:
-        # Cache mode: materialize windows to RAM
-        logger.info("Caching enabled - materializing windows to RAM")
-        mw = cfg_cache.get("max_windows") or {}
-        
-        window_dataset_train = WindowCachedDataset.from_streaming(
-            window_iterable_train,
-            max_windows=mw.get("train", None),
-            num_workers_cache=cfg_cache.get("num_workers", 0),
-            shuffle_shots=cfg_loader["shuffle_train"],  # Shuffle during caching if enabled
-            seed=cfg_mmt.seed,
-            dtype=cfg_cache.get("dtype", None),
-        )
-        
-        window_dataset_val = WindowCachedDataset.from_streaming(
-            window_iterable_val,
-            max_windows=mw.get("val", None),
-            num_workers_cache=cfg_cache.get("num_workers", 0),
-            shuffle_shots=False,  # Never shuffle validation
-            seed=cfg_mmt.seed,
-            dtype=cfg_cache.get("dtype", None),
-        )
-    else:
-        # Streaming mode: use iterables directly
-        logger.info("Streaming mode - using window iterables directly")
-        window_dataset_train = window_iterable_train
-        window_dataset_val = window_iterable_val
-
-    # ------------------------------------------------------------------
-    # Dataloaders (always window-level batches)
-    # ------------------------------------------------------------------
-    collate_fn_train = make_collate_fn(
-        signal_specs=signal_specs,
-        base_cfg=cfg_collate,
-        keep_output_native=keep_output_native,
-    )
-
-    # we do not pass cfg_collate: for validation, we keep all inputs/outputs
-    collate_fn_val = make_collate_fn(
-        signal_specs=signal_specs,
-        keep_output_native=keep_output_native,
-    )
-
-    dataloader_mmt_train = initialize_mmt_dataloader(
-        window_dataset_train,
-        collate_fn_train,
-        batch_size=cfg_loader["batch_size"],
-        num_workers=cfg_loader["num_workers"],
-        shuffle=cfg_loader["shuffle_train"],
-        drop_last=cfg_loader["drop_last"],
-        seed=cfg_mmt.seed,
-    )
-
-    dataloader_mmt_val = initialize_mmt_dataloader(
-        window_dataset_val,
-        collate_fn_val,
-        batch_size=cfg_loader["batch_size"],
-        num_workers=cfg_loader["num_workers"],
-        shuffle=False,
-        drop_last=cfg_loader["drop_last"],
-        seed=cfg_mmt.seed,
-    )
+    dataloader_mmt_train = window_data["train"]["loader"]
+    dataloader_mmt_val = window_data["val"]["loader"]
 
     # ------------------------------------------------------------------
     # Model
     # ------------------------------------------------------------------
-    model = MultiModalTransformer(
+    model = build_model_and_optional_warmstart(
+        cfg_mmt=cfg_mmt,
         signal_specs=signal_specs,
-        d_model=cfg_backbone["d_model"],
-        n_layers=cfg_backbone["n_layers"],
-        n_heads=cfg_backbone["n_heads"],
-        dim_ff=cfg_backbone["dim_ff"],
-        dropout=cfg_backbone["dropout"],
-        backbone_activation=cfg_backbone["activation"],
-        max_positions=max_positions,
-        modality_heads_cfg=cfg_modality_heads,
-        output_adapters_cfg=cfg_output_adapters,
-        debug_tokens=False,
+        device=device,
     )
-    model.to(device)
-
-    # ------------------------------------------------------------------
-    # Optional warm-start from previous run
-    # ------------------------------------------------------------------
-    model_source_cfg = cfg_mmt.raw.get("model_source") or None
-    if model_source_cfg is not None:
-        run_init = model_source_cfg.get("run_dir", None)
-        load_parts = model_source_cfg.get("load_parts", None)
-
-        if run_init is not None:
-            from mmt.checkpoints import load_parts_from_run_dir
-
-            load_parts_from_run_dir(
-                model,
-                run_init,
-                load_parts=load_parts,
-                map_location=str(device),
-            )
 
     # ------------------------------------------------------------------
     # Finetune

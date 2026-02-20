@@ -36,6 +36,20 @@ preprocess:
     min_valid_chunks: 1
     window_stride_sec: 0.01  # we override the stride based on different tasks
 
+embeddings:
+  mode: source      # source | config
+                    #   source: inherit source run embeddings (copy artifacts + load overrides);
+                    #           tune_embeddings.roles selects which roles to re-tune on top.
+                    #           If a required source role is missing, fail immediately.
+                    #   config: ignore source embeddings entirely; use current emb_profile
+                    #           config as-is (e.g. vae.yaml, spatial dct3d defaults).
+                    #           tune_embeddings.roles must all be false.
+  tune_embeddings:
+    roles:          # all false -> inherit all roles from source (mode=source default)
+      input: false  # set true to re-tune that role on top of inherited source artifacts
+      actuator: false
+      output: true
+
 
 collate:
   p_drop_inputs: 0.05

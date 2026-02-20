@@ -1,10 +1,10 @@
-# Default encoder settings per (role, modality).
-# Used for all signals of that role+modality unless overridden per-signal below.
-
-# Input and actuators overrides have been computed from tuning embeddings on the pretraining task.
-# Output task-specific overrides should live in tasks_overrides/<task>/embedding_overrides/<profile>.yaml.
-
-# encoder_name: "dct3d" or "identity"
+# Shared embeddings configuration.
+#
+# - defaults: baseline encoder settings by (role, modality)
+# - tune_embeddings: DCT3D tuning controls used by pretrain/finetune flows
+#
+# Task-specific overrides belong in:
+#   scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml
 
 embeddings:
   defaults:
@@ -47,323 +47,32 @@ embeddings:
         encoder_name: "dct3d"
         encoder_kwargs: { keep_h: 8, keep_w: 8, keep_t: 10 }
 
-  # Input and actuators overrides computed from the pretraining task.
-  # Output task-specific overrides should live in tasks_overrides/<task>/embedding_overrides/<profile>.yaml.
-  per_signal_overrides:
-    input:
-      magnetics-b_field_pol_probe_ccbv_field:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_magnetics-b_field_pol_probe_ccbv_field.npy"
-          coeff_shape:
-          - 40
-          - 1
-          - 25
-          num_coeffs: 45
-          explained_energy: 0.9990831857276457
-          dim_distribution:
-            unique_h: 40
-            unique_w: 1
-            unique_t: 3
-      magnetics-b_field_pol_probe_obr_field:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_magnetics-b_field_pol_probe_obr_field.npy"
-          coeff_shape:
-          - 18
-          - 1
-          - 25
-          num_coeffs: 17
-          explained_energy: 0.99939132960525
-          dim_distribution:
-            unique_h: 17
-            unique_w: 1
-            unique_t: 1
-      magnetics-b_field_pol_probe_obv_field:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_magnetics-b_field_pol_probe_obv_field.npy"
-          coeff_shape:
-          - 18
-          - 1
-          - 25
-          num_coeffs: 19
-          explained_energy: 0.9993260782523087
-          dim_distribution:
-            unique_h: 18
-            unique_w: 1
-            unique_t: 2
-      magnetics-b_field_pol_probe_omv_voltage:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_magnetics-b_field_pol_probe_omv_voltage.npy"
-          coeff_shape:
-          - 3
-          - 1
-          - 2500
-          num_coeffs: 4096
-          explained_energy: 0.9533728178558804
-          dim_distribution:
-            unique_h: 3
-            unique_w: 1
-            unique_t: 1580
-      magnetics-b_field_tor_probe_cc_field:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_magnetics-b_field_tor_probe_cc_field.npy"
-          coeff_shape:
-          - 3
-          - 1
-          - 2500
-          num_coeffs: 4096
-          explained_energy: 0.9909340165287036
-          dim_distribution:
-            unique_h: 3
-            unique_w: 1
-            unique_t: 1677
-      magnetics-b_field_tor_probe_saddle_voltage:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_magnetics-b_field_tor_probe_saddle_voltage.npy"
-          coeff_shape:
-          - 12
-          - 1
-          - 250
-          num_coeffs: 12
-          explained_energy: 0.9996749747650129
-          dim_distribution:
-            unique_h: 12
-            unique_w: 1
-            unique_t: 1
-      magnetics-flux_loop_flux:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_magnetics-flux_loop_flux.npy"
-          coeff_shape:
-          - 15
-          - 1
-          - 25
-          num_coeffs: 15
-          explained_energy: 0.9994386621560011
-          dim_distribution:
-            unique_h: 15
-            unique_w: 1
-            unique_t: 1
-      pf_active-coil_current:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_pf_active-coil_current.npy"
-          coeff_shape:
-          - 10
-          - 1
-          - 20
-          num_coeffs: 14
-          explained_energy: 0.9991556436206792
-          dim_distribution:
-            unique_h: 10
-            unique_w: 1
-            unique_t: 2
-      pf_active-solenoid_current:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_pf_active-solenoid_current.npy"
-          coeff_shape:
-          - 1
-          - 1
-          - 20
-          num_coeffs: 1
-          explained_energy: 0.9997066761274077
-          dim_distribution:
-            unique_h: 1
-            unique_w: 1
-            unique_t: 1
-      summary-ip:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_summary-ip.npy"
-          coeff_shape:
-          - 1
-          - 1
-          - 20
-          num_coeffs: 2
-          explained_energy: 0.9992523512163373
-          dim_distribution:
-            unique_h: 1
-            unique_w: 1
-            unique_t: 2
-      interferometer-n_e_line:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_interferometer-n_e_line.npy"
-          coeff_shape:
-          - 1
-          - 1
-          - 20
-          num_coeffs: 4
-          explained_energy: 0.9991241607967448
-          dim_distribution:
-            unique_h: 1
-            unique_w: 1
-            unique_t: 4
-      soft_x_rays-horizontal_cam_lower:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_soft_x_rays-horizontal_cam_lower.npy"
-          coeff_shape:
-          - 18
-          - 1
-          - 250
-          num_coeffs: 1230
-          explained_energy: 0.9990005071966157
-          dim_distribution:
-            unique_h: 18
-            unique_w: 1
-            unique_t: 248
-      soft_x_rays-horizontal_cam_upper:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_soft_x_rays-horizontal_cam_upper.npy"
-          coeff_shape:
-          - 18
-          - 1
-          - 250
-          num_coeffs: 2473
-          explained_energy: 0.9990003538429456
-          dim_distribution:
-            unique_h: 18
-            unique_w: 1
-            unique_t: 250
-      spectrometer_visible-filter_spectrometer_dalpha_voltage:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_spectrometer_visible-filter_spectrometer_dalpha_voltage.npy"
-          coeff_shape:
-          - 3
-          - 1
-          - 250
-          num_coeffs: 247
-          explained_energy: 0.9990019946718612
-          dim_distribution:
-            unique_h: 3
-            unique_w: 1
-            unique_t: 95
-      thomson_scattering-n_e:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_thomson_scattering-n_e.npy"
-          coeff_shape:
-          - 120
-          - 1
-          - 1
-          num_coeffs: 108
-          explained_energy: 0.9990331767524201
-          dim_distribution:
-            unique_h: 108
-            unique_w: 1
-            unique_t: 1
-      thomson_scattering-t_e:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_thomson_scattering-t_e.npy"
-          coeff_shape:
-          - 120
-          - 1
-          - 1
-          num_coeffs: 112
-          explained_energy: 0.9990299306801257
-          dim_distribution:
-            unique_h: 112
-            unique_w: 1
-            unique_t: 1
-    actuator:
-      gas_injection-total_injected:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/actuator_gas_injection-total_injected.npy"
-          coeff_shape:
-          - 1
-          - 1
-          - 20
-          num_coeffs: 1
-          explained_energy: 0.9999373220621318
-          dim_distribution:
-            unique_h: 1
-            unique_w: 1
-            unique_t: 1
-      pf_active-coil_voltage:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/actuator_pf_active-coil_voltage.npy"
-          coeff_shape:
-          - 4
-          - 1
-          - 20
-          num_coeffs: 20
-          explained_energy: 0.9990257205004004
-          dim_distribution:
-            unique_h: 4
-            unique_w: 1
-            unique_t: 7
-      pulse_schedule-i_plasma:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/actuator_pulse_schedule-i_plasma.npy"
-          coeff_shape:
-          - 1
-          - 1
-          - 20
-          num_coeffs: 1
-          explained_energy: 0.999455475760711
-          dim_distribution:
-            unique_h: 1
-            unique_w: 1
-            unique_t: 1
-      pulse_schedule-n_e_line:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/actuator_pulse_schedule-n_e_line.npy"
-          coeff_shape:
-          - 1
-          - 1
-          - 20
-          num_coeffs: 1
-          explained_energy: 0.9998568270868857
-          dim_distribution:
-            unique_h: 1
-            unique_w: 1
-            unique_t: 1
-      summary-power_nbi:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/actuator_summary-power_nbi.npy"
-          coeff_shape:
-          - 1
-          - 1
-          - 20
-          num_coeffs: 5
-          explained_energy: 0.9990961542383465
-          dim_distribution:
-            unique_h: 1
-            unique_w: 1
-            unique_t: 5
+  # Runtime-only run-local values. Do not commit tuned run artifacts here.
+  per_signal_overrides: {}
+
+  tune_embeddings:
+    n_shots: 100
+    max_windows: 15000
+
+    objective:
+      thresholds:
+        input: 0.999
+        actuator: 0.999
+        output: 0.995
+      max_budget:
+        input: 4096
+        actuator: 4096
+        output: 4096
+
+    # Guardrails: ensure minimum dimension coverage in coefficient selection.
+    guardrails:
+      enable: true
+      timeseries:
+        min_unique_t: 5
+      profile:
+        min_unique_h: 10
+        min_unique_t: 5
+      video:
+        min_unique_h: 10
+        min_unique_w: 10
+        min_unique_t: 5
