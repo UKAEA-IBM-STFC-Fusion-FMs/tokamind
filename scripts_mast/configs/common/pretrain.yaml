@@ -46,9 +46,9 @@ preprocess:
 embeddings:
   tune_embeddings:
     roles:
-      input: false
-      actuator: false
-      output: false
+      input: true
+      actuator: true
+      output: true
 
 collate:
   p_drop_inputs: 0.1
