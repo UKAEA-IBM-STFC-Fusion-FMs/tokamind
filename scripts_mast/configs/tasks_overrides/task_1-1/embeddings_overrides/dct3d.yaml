@@ -43,10 +43,6 @@ embeddings:
   tune_embeddings:
     objective:
       thresholds:
-        input: 0.999
-        actuator: 0.999
         output: 0.999
       max_budget:
-        input: 4096
-        actuator: 4096
-        output: 4096
+        output: 9216
