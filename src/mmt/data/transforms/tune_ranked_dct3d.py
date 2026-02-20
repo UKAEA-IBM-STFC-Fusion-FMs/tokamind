@@ -436,7 +436,7 @@ class TuneRankedDCT3DTransform:
                 and len(unique_t) >= eff_min_t
             ):
                 min_k = k + 1  # +1 because k is 0-indexed
-                logger.info(
+                logger.debug(
                     "Guardrails for %s:%s (%s) require min K=%d "
                     "(unique: H=%d/%d, W=%d/%d, T=%d/%d)",
                     role,
