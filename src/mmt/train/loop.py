@@ -57,7 +57,6 @@ import os
 from typing import Dict, Any, cast
 
 import torch
-import torch.cuda.amp
 
 from mmt.models.mmt import MultiModalTransformer
 from mmt.train.loop_utils import (
@@ -174,7 +173,7 @@ def train_finetune(
     # -------------------------------------------------------------------------
     device, amp_enabled, amp_dtype = get_amp_config(model, enable=amp_enabled)
     use_scaler = device.type == "cuda" and amp_enabled and amp_dtype == torch.float16
-    scaler = torch.cuda.amp.GradScaler(enabled=use_scaler)
+    scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
 
     logger.info("AMP enabled=%s dtype=%s scaler=%s", amp_enabled, amp_dtype, use_scaler)
 
