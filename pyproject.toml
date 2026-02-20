@@ -15,7 +15,6 @@ authors = [
 
 #[project.urls]
 #"Homepage" = "https://github.com/youruser/multi-modal-transformer"
-#"Bug Tracker" = "https://github.com/youruser/multi-modal-transformer/issues"
 
 classifiers = [
   "Programming Language :: Python :: 3",
@@ -24,9 +23,6 @@ classifiers = [
 #  "Operating System :: OS Independent",
 ]
 
-# We deliberately do NOT list torch/numpy/etc here, because we assume
-# they come from the benchmark repo environment.
-# Otherwise, you can populate the dependencies field
 dependencies = [
     "torch>=2.10",
     "numpy>=2.4",
@@ -37,7 +33,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = [
-#  "ruff>=0.6",
+  "ruff>=0.6",
 ]
 
 [tool.setuptools]
