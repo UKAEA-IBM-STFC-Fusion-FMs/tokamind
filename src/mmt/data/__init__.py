@@ -1,8 +1,17 @@
 """
-Public API for mmt.data.
+Data pipeline utilities for MMT.
 
-Re-exports key classes and functions so users can import them directly
-from `mmt.data` without knowing the internal submodule layout.
+This package provides datasets, transforms, embeddings, and data loading
+utilities for multi-modal time-series data.
+
+Key modules
+-----------
+- datasets.py       : window-cached dataset implementation
+- signal_spec.py    : signal specification and modality inference
+- collate.py        : batch collation for multi-modal data
+- data_loaders.py   : dataloader initialization utilities
+- transforms/       : data transformation pipeline components
+- embeddings/       : codec utilities for signal compression/embedding
 """
 
 # -----------------------------
