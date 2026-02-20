@@ -17,6 +17,7 @@ Assumed layout (relative to this file):
 
 from pathlib import Path
 
+
 def get_repo_root() -> Path:
     # .../multi-modal-transformer/src/mmt/utils/paths.py → repo root
     return Path(__file__).resolve().parents[3]

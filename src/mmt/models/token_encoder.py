@@ -157,8 +157,6 @@ class TokenEncoder(nn.Module):
         self.mod_embed = nn.Embedding(self.num_modalities, self.d_model)
         self.role_embed = nn.Embedding(3, self.d_model)
 
-        # ------------------------------------------------------------------
-
     def _get_proj(
         self,
         canonical_key: str,
@@ -189,7 +187,6 @@ class TokenEncoder(nn.Module):
 
         return cast(nn.Linear, self.proj_layers[canonical_key])
 
-    # ------------------------------------------------------------------
     def forward(self, batch: Dict[str, Any]) -> tuple[torch.Tensor, torch.Tensor]:
         emb = batch["emb"]
         emb_index = batch["emb_index"]
@@ -207,9 +204,9 @@ class TokenEncoder(nn.Module):
         B, L = pos.shape
         device = pos.device
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # Project token content (scatter by sid → dense (B, L, d_model))
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         tokens_flat = torch.zeros(
             B * L, self.d_model, dtype=torch.float32, device=device
         )
@@ -262,22 +259,22 @@ class TokenEncoder(nn.Module):
 
         tokens = tokens_flat.view(B, L, self.d_model)
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # CLS token
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         cls_tok = self.cls_content.view(1, 1, -1).expand(B, 1, -1)
         tokens = torch.cat([cls_tok, tokens], dim=1)  # (B, L+1, d_model)
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # Attention keep mask (exclude PAD/dropped tokens)
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         keep = padding_mask.to(dtype=torch.bool) & (sid >= 0)
         cls_keep = torch.ones(B, 1, dtype=torch.bool, device=device)
         attn_keep = torch.cat([cls_keep, keep], dim=1)  # (B, L+1)
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # Metadata embeddings (clamped indices, then masked by `keep`)
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         pos_cls = torch.zeros(B, 1, dtype=torch.long, device=device)
         sid_cls = torch.full((B, 1), self.cls_id, dtype=torch.long, device=device)
 

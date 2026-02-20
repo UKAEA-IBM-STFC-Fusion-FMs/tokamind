@@ -27,9 +27,9 @@ import logging
 logger = logging.getLogger("mmt.Eval")
 
 
-# ============================================================================
+# ------------------------------------------------------------------
 # Forward + decode + destandardize
-# ============================================================================
+# ------------------------------------------------------------------
 
 
 def forward_decode_native(
@@ -89,10 +89,10 @@ def forward_decode_native(
 
     y_pred_std_id = out.get("pred", {})  # Dict[int, Tensor] (standardised coeffs)
 
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------------
     # Optional debug: MSE in *standardised coeff space*,
     # same space as training loss (pred vs output_emb).
-    # ---------------------------------------------------------
+    # ------------------------------------------------------------------
     if logger.isEnabledFor(logging.DEBUG):
         if y_true_emb_id is not None:
             for sig_id, pred_std in y_pred_std_id.items():

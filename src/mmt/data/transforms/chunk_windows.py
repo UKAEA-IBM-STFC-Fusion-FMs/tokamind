@@ -68,6 +68,7 @@ logger = logging.getLogger("mmt.Chunking")
 
 
 class ChunkWindowsTransform:
+
     def __init__(
         self,
         *,
@@ -92,8 +93,6 @@ class ChunkWindowsTransform:
                 raise KeyError(
                     f"ChunkWindowsTransform: dict_metadata missing top-level key {k!r}"
                 )
-
-    # ------------------------------------------------------------------
 
     @staticmethod
     def _slice_with_pad(arr: np.ndarray, start: int, length: int) -> np.ndarray:
@@ -218,8 +217,6 @@ class ChunkWindowsTransform:
             )
 
         return chunks
-
-    # ------------------------------------------------------------------
 
     def __call__(self, window: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if window is None:

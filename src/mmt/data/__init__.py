@@ -14,14 +14,14 @@ Key modules
 - embeddings/       : codec utilities for signal compression/embedding
 """
 
-# -----------------------------
+# ------------------------------------------------------------------
 # Datasets
-# -----------------------------
+# ------------------------------------------------------------------
 from .datasets import WindowCachedDataset
 
-# -----------------------------
+# ------------------------------------------------------------------
 # Transforms
-# -----------------------------
+# ------------------------------------------------------------------
 from .transforms.chunk_windows import ChunkWindowsTransform
 from .transforms.trim_chunks import TrimChunksTransform
 from .transforms.select_valid_windows import SelectValidWindowsTransform
@@ -32,9 +32,9 @@ from .transforms.tune_ranked_dct3d import TuneRankedDCT3DTransform
 from .transforms.compose import ComposeTransforms
 
 
-# -----------------------------
+# ------------------------------------------------------------------
 # Core utilities
-# -----------------------------
+# ------------------------------------------------------------------
 from .collate import MMTCollate
 from .data_loaders import initialize_mmt_dataloader
 from .signal_spec import (
@@ -43,9 +43,9 @@ from .signal_spec import (
     infer_modality,
 )
 
-# -----------------------------
+# ------------------------------------------------------------------
 # Codec utils
-# -----------------------------
+# ------------------------------------------------------------------
 from .embeddings.codec_utils import build_codecs
 
 __all__ = [

@@ -106,9 +106,9 @@ class BuildTokensTransform:
         mod_list: List[int] = []
         pos_list: List[int] = []
 
-        # -------------------------
+        # ------------------------------------------------------------------
         # 1) CONTEXT TOKENS (INPUT)
-        # -------------------------
+        # ------------------------------------------------------------------
         for ch in input_chunks_sorted:
             pos = int(ch["pos"])
             emb_map = ch.get("embeddings") or {}
@@ -124,9 +124,9 @@ class BuildTokensTransform:
                 mod_list.append(self._signal_id_to_mod_id[sid])
                 pos_list.append(pos)
 
-        # -------------------------
+        # ------------------------------------------------------------------
         # 2) ACTUATOR TOKENS
-        # -------------------------
+        # ------------------------------------------------------------------
         for ch in act_chunks_sorted:
             pos = int(ch["pos"])
             emb_map = ch.get("embeddings") or {}
@@ -142,17 +142,17 @@ class BuildTokensTransform:
                 mod_list.append(self._signal_id_to_mod_id[sid])
                 pos_list.append(pos)
 
-        # -------------------------
+        # ------------------------------------------------------------------
         # 3) OUTPUTS (window-level)
-        # -------------------------
+        # ------------------------------------------------------------------
         embedded_output = window.get("embedded_output") or {}
         output_emb: Dict[int, np.ndarray] = {
             int(k): v for k, v in embedded_output.items()
         }
 
-        # -------------------------
+        # ------------------------------------------------------------------
         # 4) WRITE BACK (contract)
-        # -------------------------
+        # ------------------------------------------------------------------
         window["emb_chunks"] = emb_list
         window["pos"] = np.asarray(pos_list, dtype=np.int32)
         window["id"] = np.asarray(sig_list, dtype=np.int32)

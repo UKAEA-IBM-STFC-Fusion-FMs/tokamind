@@ -53,6 +53,7 @@ WINDOW_METRICS_FILE = "windows_metrics.csv"
 
 _LOG_INTERVAL = 50000
 
+
 def _safe_unlink(path: Path) -> None:
     """Best-effort unlink for eval artifacts.
 
@@ -67,7 +68,6 @@ def _safe_unlink(path: Path) -> None:
     except Exception:
         # Non-fatal cleanup failure (e.g. permissions / transient FS issues).
         logger.warning("Could not delete file: %s", path, exc_info=True)
-
 
 
 def _reduce_mask(mask: np.ndarray) -> np.ndarray:
@@ -210,9 +210,9 @@ def evaluate_benchmark_and_diagnostics(
                 logger.info("Evaluated %d windows so far", next_log_at)
                 next_log_at += _LOG_INTERVAL
 
-            # ------------------------------
+            # ------------------------------------------------------------------
             # Benchmark per-window metrics
-            # ------------------------------
+            # ------------------------------------------------------------------
             if window_writer is not None:
                 for out_name in stats.keys():
                     if out_name not in y_true or out_name not in y_pred:
@@ -236,9 +236,9 @@ def evaluate_benchmark_and_diagnostics(
                         feature_name=out_name,
                     )
 
-            # ------------------------------
+            # ------------------------------------------------------------------
             # Per-timestamp metrics CSV
-            # ------------------------------
+            # ------------------------------------------------------------------
             if wr_ts is not None:
                 for out_name in stats.keys():
                     if out_name not in y_true or out_name not in y_pred:
@@ -271,9 +271,9 @@ def evaluate_benchmark_and_diagnostics(
                                 ]
                             )
 
-            # ------------------------------
+            # ------------------------------------------------------------------
             # Traces collection
-            # ------------------------------
+            # ------------------------------------------------------------------
             if do_traces:
                 for b in range(B):
                     sid = int(shot_ids[b])

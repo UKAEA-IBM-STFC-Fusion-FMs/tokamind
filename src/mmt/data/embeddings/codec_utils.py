@@ -111,7 +111,7 @@ def compute_embedding_dim_for_encoder(
 
     if encoder_name == "dct3d":
         selection_mode = encoder_kwargs.get("selection_mode", "spatial")
-        
+
         if selection_mode == "rank":
             # Rank mode: dimension is number of selected coefficients
             num_coeffs = encoder_kwargs.get("num_coeffs")
@@ -185,7 +185,7 @@ def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]
     -------
     Dict[int, Any]
         Mapping signal_id -> codec instance.
-        
+
     Raises
     ------
     ValueError
@@ -196,7 +196,7 @@ def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]
         if spec.encoder_name == "dct3d":
             kw = dict(spec.encoder_kwargs or {})
             selection_mode = kw.get("selection_mode", "spatial")
-            
+
             if selection_mode == "rank":
                 # Rank mode: load coefficient indices from .npy file
                 if config_dir is None:
@@ -210,10 +210,10 @@ def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]
                         f"encoder_kwargs.coeff_indices_path required for rank mode "
                         f"(signal {spec.role}:{spec.name})"
                     )
-                
+
                 # Load indices
                 coeff_indices = load_coeff_indices(config_dir, coeff_indices_path)
-                
+
                 # Build codec with loaded indices
                 codec_kw = {
                     "keep_h": kw.get("keep_h", 1),  # Dummy values for rank mode
@@ -227,7 +227,7 @@ def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]
             else:
                 # Spatial mode: use keep_h/w/t directly (no config_dir needed)
                 codecs[spec.signal_id] = DCT3DCodec(**kw)
-                
+
         elif spec.encoder_name == "identity":
             codecs[spec.signal_id] = IdentityCodec()
         elif spec.encoder_name == "vae":

@@ -38,10 +38,11 @@ import numpy as np
 import torch
 
 
-# --------------------------------------------------------------------------------------
+# ------------------------------------------------------------------
 # Lazy imports in a "benchmark_imports.py style" (but wrapped in a function so that
 # importing MMT does not require VAE_fairmast unless encoder_name='vae' is used).
-# --------------------------------------------------------------------------------------
+# ------------------------------------------------------------------
+
 
 def _import_vae_pipeline():
     try:
@@ -68,9 +69,10 @@ def _import_vae_pipeline():
     return config_setup_mod, get_settings, beta_VAE
 
 
-# --------------------------------------------------------------------------------------
+# ------------------------------------------------------------------
 # Config + path helpers
-# --------------------------------------------------------------------------------------
+# ------------------------------------------------------------------
+
 
 def _read_json(path: Path) -> Dict[str, Any]:
     with path.open("r", encoding="utf-8") as f:
@@ -193,9 +195,10 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
         "in_channels": in_channels,
         "seq_len": seq_len,
     }
-# --------------------------------------------------------------------------------------
+# ------------------------------------------------------------------
 # Codec implementation
-# --------------------------------------------------------------------------------------
+# ------------------------------------------------------------------
+
 
 class VAECodec:
     """
@@ -243,9 +246,9 @@ class VAECodec:
         self.model.to(self.device)
         self.model.eval()
 
-    # -------------------------
+    # ------------------------------------------------------------------
     # shape helpers
-    # -------------------------
+    # ------------------------------------------------------------------
 
     def _to_ct(self, x: np.ndarray) -> Tuple[np.ndarray, Tuple[int, ...]]:
         if not isinstance(x, np.ndarray):
@@ -282,9 +285,9 @@ class VAECodec:
             return x_ct.reshape(original_shape)
         raise ValueError(f"Unsupported original_shape={original_shape}")
 
-    # -------------------------
+    # ------------------------------------------------------------------
     # public API
-    # -------------------------
+    # ------------------------------------------------------------------
 
     def encode(self, x: np.ndarray) -> np.ndarray:
         x_ct, _orig_shape = self._to_ct(np.asarray(x))

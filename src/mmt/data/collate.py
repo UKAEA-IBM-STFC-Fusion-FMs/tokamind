@@ -164,11 +164,10 @@ class MMTCollate:
                 )
             self.output_id_to_name = {int(k): str(v) for k, v in m.items()}
 
-    # ------------------------------------------------------------------
     def __call__(self, batch: List[Any]) -> Dict[str, Any]:
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 0) Sanity-check + filter None
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         flat_windows: List[Dict[str, Any]] = []
         for item in batch:
             if item is None:
@@ -184,9 +183,9 @@ class MMTCollate:
         if B == 0:
             raise ValueError("MMTCollate received an empty batch of windows.")
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 1) Extract per-window arrays
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         emb_lists: List[List[np.ndarray]] = []
         pos_lists: List[np.ndarray] = []
         id_lists: List[np.ndarray] = []
@@ -213,9 +212,9 @@ class MMTCollate:
             out_dicts.append(out_emb)
             all_target_ids.update(int(k) for k in out_emb.keys())
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 2) Allocate padded token arrays
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         lengths = [len(e) for e in emb_lists]
         L_max = max(lengths)
 
@@ -228,9 +227,9 @@ class MMTCollate:
         input_mask = np.ones((B, L_max), dtype=np.int8)
         actuator_mask = np.ones((B, L_max), dtype=np.int8)
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 3) Fill padded arrays
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         for i in range(B):
             Li = lengths[i]
             if Li == 0:
@@ -241,9 +240,9 @@ class MMTCollate:
             role_batch[i, :Li] = role_lists[i]
             padding_mask[i, :Li] = 1
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # Helper: drop a token (set PAD metadata + update role mask)
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         def _drop_token(i: int, t: int, *, kind: str) -> None:
             if kind == "input":
                 input_mask[i, t] = 0
@@ -257,9 +256,9 @@ class MMTCollate:
             role_batch[i, t] = PAD_ROLE
             pos_batch[i, t] = PAD_POS
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 4) Input dropout (per-token)
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         p_drop_in = float(self.cfg.get("p_drop_inputs", 0.0))
         if p_drop_in > 0.0 or self.drop_inputs_overrides:
             for i in range(B):
@@ -275,9 +274,9 @@ class MMTCollate:
                     if random.random() < p:
                         _drop_token(i, int(t), kind="input")
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 5) Actuator dropout (per-token)
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         p_drop_act = float(self.cfg.get("p_drop_actuators", 0.0))
         if p_drop_act > 0.0 or self.drop_act_overrides:
             for i in range(B):
@@ -293,9 +292,9 @@ class MMTCollate:
                     if random.random() < p:
                         _drop_token(i, int(t), kind="actuator")
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 6) Chunk dropout (coarse time masking, per-pos group)
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         p_drop_inputs_chunks = float(self.cfg.get("p_drop_inputs_chunks", 0.0))
         p_drop_actuators_chunks = float(self.cfg.get("p_drop_actuators_chunks", 0.0))
 
@@ -333,9 +332,9 @@ class MMTCollate:
                             if role_batch[i, int(t)] == ROLE_ACTUATOR:
                                 _drop_token(i, int(t), kind="actuator")
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # Guard: ensure at least one valid token remains per sample
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # With stochastic per-token/per-chunk dropout (and some inherently
         # missing signals), it is possible for a sample to end up with *zero*
         # valid tokens (all PAD_ID). That can trigger NaNs downstream (e.g.,
@@ -375,9 +374,9 @@ class MMTCollate:
                 B,
             )
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 7) Output embeddings + dropout
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         p_drop_outputs = float(self.cfg.get("p_drop_outputs", 0.0))
 
         output_emb_batch: Dict[int, List[np.ndarray]] = {}
@@ -428,9 +427,9 @@ class MMTCollate:
             output_emb_batch[sig_id] = emb_list
             output_mask_batch_np[sig_id] = mask
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 8) Optional: native outputs (eval only)
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         output_native_batch_np: Dict[int, np.ndarray] = {}
         if self.keep_output_native:
             assert self.output_id_to_name is not None
@@ -491,9 +490,9 @@ class MMTCollate:
 
                 output_native_batch_np[sig_id] = np.stack(per_sig_vals, axis=0)
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 9) Convert arrays to torch
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         pos_t = torch.from_numpy(pos_batch).long()
         id_t = torch.from_numpy(id_batch).long()
         mod_t = torch.from_numpy(mod_batch.astype(np.int64))
@@ -503,9 +502,9 @@ class MMTCollate:
         input_mask_t = torch.from_numpy(input_mask.astype(bool))
         actuator_mask_t = torch.from_numpy(actuator_mask.astype(bool))
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 10) Pack embeddings by signal_id
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         emb_by_sid_np: Dict[int, List[np.ndarray]] = {}
         emb_index_np: Dict[int, List[int]] = {}
 
@@ -559,9 +558,9 @@ class MMTCollate:
             for sig_id, arr in output_native_batch_np.items():
                 output_native_t[sig_id] = torch.from_numpy(arr)
 
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 11) Assemble final batch dict
-        # ---------------------------------------------------------------
+        # ------------------------------------------------------------------
         batch_out: Dict[str, Any] = {
             "emb": emb_by_sid_t,
             "emb_index": emb_index_t,

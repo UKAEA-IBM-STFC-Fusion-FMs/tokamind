@@ -180,9 +180,9 @@ class SelectValidWindowsTransform:
         shot_id = window.get("shot_id")
         t_cut = window.get("t_cut")
 
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 1) Chunk-level validation (copy before masking)
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
         chunks = window.get("chunks") or {}
         valid_chunks_by_sig = {
             "input": defaultdict(int),
@@ -219,9 +219,9 @@ class SelectValidWindowsTransform:
 
         n_inputs_actuators = len(valid_x_signals)
 
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 2) Output-level validation (copy before masking)
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
         output = window.get("output") or {}
         output2: Dict[str, Any] = {}
         n_outputs_valid = 0
@@ -241,18 +241,18 @@ class SelectValidWindowsTransform:
             if not mask:
                 n_outputs_valid += 1
 
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 3) Validity decision
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
         keep = True
         if n_inputs_actuators < self.min_valid_inputs_actuators:
             keep = False
         if n_outputs_valid < self.min_valid_outputs:
             keep = False
 
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
         # 4) Optional subsampling — only among kept windows
-        # --------------------------------------------------------------
+        # ------------------------------------------------------------------
         if keep and not self._passes_window_stride(shot_id, w_idx, t_cut):
             keep = False
 

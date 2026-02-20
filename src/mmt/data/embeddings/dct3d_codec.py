@@ -178,7 +178,7 @@ class DCT3DCodec:
             raise ValueError(
                 f"selection_mode must be 'spatial' or 'rank', got {self.selection_mode!r}"
             )
-        
+
         if self.selection_mode == "rank":
             if self.coeff_indices is None:
                 raise ValueError(
@@ -191,7 +191,7 @@ class DCT3DCodec:
                 )
             if len(self.coeff_indices) == 0:
                 raise ValueError("coeff_indices cannot be empty")
-            
+
             # Validate indices are non-negative
             if np.any(self.coeff_indices < 0):
                 raise ValueError("coeff_indices must contain non-negative integers")
@@ -235,23 +235,23 @@ class DCT3DCodec:
                         f"Input shape mismatch: expected coeff_shape={self.coeff_shape}, "
                         f"got (H,W,T)={H,W,T} from input shape {x.shape}"
                     )
-            
+
             X_flat = X.reshape(-1)
-            
+
             # Validate indices are within bounds
             max_idx = H * W * T
             if np.any(self.coeff_indices >= max_idx):
                 raise ValueError(
                     f"coeff_indices contains out-of-bounds indices (max={max_idx-1})"
                 )
-            
+
             z = X_flat[self.coeff_indices].astype(self.dtype, copy=False)
         else:
             # Spatial mode: keep top-left-front block
             h_eff = min(self.keep_h, H)
             w_eff = min(self.keep_w, W)
             t_eff = min(self.keep_t, T)
-            
+
             X_crop = X[:h_eff, :w_eff, :t_eff]
             z = X_crop.reshape(-1).astype(self.dtype, copy=False)
 
@@ -305,7 +305,7 @@ class DCT3DCodec:
                         f"Shape mismatch: expected coeff_shape={self.coeff_shape}, "
                         f"got (H,W,T)={H_full,W_full,T_full} from original_shape={original_shape}"
                     )
-            
+
             assert self.coeff_indices is not None  # Already validated in __post_init__
             expected_dim = len(self.coeff_indices)
             if z.size != expected_dim:
@@ -313,7 +313,7 @@ class DCT3DCodec:
                     f"Encoded vector has size {z.size}, but expected "
                     f"{expected_dim} (len(coeff_indices)) for original_shape={original_shape!r}"
                 )
-            
+
             X_flat = X_full.reshape(-1)
             X_flat[self.coeff_indices] = z
             X_full = X_flat.reshape(H_full, W_full, T_full)
@@ -340,9 +340,9 @@ class DCT3DCodec:
         return x_hat.astype(self.dtype, copy=False)
 
 
-# =====================================================================
+# ------------------------------------------------------------------
 # Demo / tests
-# =====================================================================
+# ------------------------------------------------------------------
 
 
 def _demo_roundtrip(codec: DCT3DCodec, x: np.ndarray, desc: str) -> None:

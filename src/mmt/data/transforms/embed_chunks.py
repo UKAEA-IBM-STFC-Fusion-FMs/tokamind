@@ -79,8 +79,6 @@ class EmbedChunksTransform:
         # We only need within-shot reuse; clear caches when shot_id changes.
         self._last_shot_id: Any = None
 
-    # ------------------------------------------------------------------
-
     def _get_spec(self, role: str, name: str):
         spec = self.signal_specs.get(role, name)
         if spec is None:
@@ -91,8 +89,6 @@ class EmbedChunksTransform:
         if sid not in self.codecs:
             raise KeyError(f"No codec registered for signal_id={sid}")
         return self.codecs[sid]
-
-    # ------------------------------------------------------------------
 
     def __call__(self, window: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if window is None:

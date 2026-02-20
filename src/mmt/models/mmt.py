@@ -361,7 +361,6 @@ class MultiModalTransformer(nn.Module):
 
         self._print_init_summary(modalities, per_mod_hidden, per_mod_dim)
 
-    # ------------------------------------------------------------------
     def _print_init_summary(
         self,
         modalities: List[str],
@@ -386,7 +385,6 @@ class MultiModalTransformer(nn.Module):
                 f"    - {spec.name} (id={sid}, modality={mod}): dim={self.output_dims[sid]}, hidden={hidden}"
             )
 
-    # ------------------------------------------------------------------
     def forward(self, batch: Dict[str, Any]) -> Dict[str, Any]:
         """
         batch: output of MMTCollate, with at least:
