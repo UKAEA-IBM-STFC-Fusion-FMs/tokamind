@@ -57,7 +57,7 @@ def parse_args_finetune() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=str,
-        default=None,
+        default="_test",
         help="Source model for warm-start (run_id or path). Example: tokamind_base_v1",
     )
     parser.add_argument(
@@ -108,10 +108,12 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Task metadata + MAST datasets
     # ------------------------------------------------------------------
-    dict_task_metadata, mast_dataset_train, mast_dataset_val, _mast_test = build_mast_datasets(
-        cfg_task,
-        cfg_data=cfg_data,
-        phase="finetune",
+    dict_task_metadata, mast_dataset_train, mast_dataset_val, _mast_test = (
+        build_mast_datasets(
+            cfg_task,
+            cfg_data=cfg_data,
+            phase="finetune",
+        )
     )
 
     # ------------------------------------------------------------------
