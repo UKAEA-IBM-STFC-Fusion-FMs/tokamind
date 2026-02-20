@@ -53,6 +53,9 @@ embeddings:
       actuator: false
       output: true
 
+  guardrails:
+      enable: true
+
 
 collate:
   p_drop_inputs: 0.05
