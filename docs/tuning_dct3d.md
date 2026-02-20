@@ -1,482 +1,155 @@
-# Tuning DCT3D Embeddings
+# DCT3D Tuning
 
-Many MAST signals are encoded with a lightweight **DCT3D** codec before being projected into the model.
+Related documentation: [Project README](../README.md) | [Configuration Guide](config_guide.md) | [Configuration Reference](config_reference.md)
 
-The DCT3D codec now supports two coefficient selection modes:
+DCT3D tuning selects rank-mode coefficients from data and writes run-local embedding artifacts.
 
-1. **Spatial mode** (default): Selects the top-left-front block of DCT coefficients (low-frequency components)
-2. **Rank mode** (tuned): Selects top-K coefficients by explained variance, regardless of spatial position
+## Core Idea
+The codec supports two selection modes:
+- `spatial`: fixed low-frequency block by `keep_h/keep_w/keep_t`
+- `rank`: top coefficients by explained energy
 
-This document explains:
-- The two selection modes and when to use each
-- How the tuning pipeline works (rank mode)
-- Where tuned results are written
-- How tuned overrides are consumed by training and evaluation
+Tuning computes rank selections and stores them per run.
+The objective is role-specific: each role can target different explained-energy thresholds and budgets.
 
----
+## Where Tuning Runs
+Tuning is integrated in training scripts and controlled by config:
+- pretrain: role selection from `embeddings.tune_embeddings.roles`
+- finetune: role selection from `embeddings.tune_embeddings.roles`, combined with `embeddings.mode`
 
-## Selection Modes
+There is no separate tuning phase in the open-source flow.
 
-### Spatial Mode (Manual Configuration)
+## Runtime Artifacts
+When rank tuning is used, a run writes:
 
-**Use when:**
-- Prototyping or quick experiments
-- Default settings work well for your signals
-- You don't want to run tuning
+```text
+runs/<run_id>/embeddings/
+  dct3d.yaml
+  dct3d_indices/
+    <role>_<signal>.npy
+```
 
-**Configuration:**
+`dct3d.yaml` stores `embeddings.per_signal_overrides` with rank metadata.
+Each `.npy` file stores 1D coefficient indices consumed by rank-mode codecs at runtime.
+
+## Key Config Block
+Base tuning settings live in `scripts_mast/configs/common/embeddings.yaml`:
+
 ```yaml
 embeddings:
-  defaults:
-    dct3d:
-      encoder_name: dct3d
-      encoder_kwargs:
-        selection_mode: spatial  # default
-        keep_h: 16
-        keep_w: 8
-        keep_t: 64
+  tune_embeddings:
+    n_shots: 100
+    max_windows: 15000
+    objective:
+      thresholds:
+        input: 0.999
+        actuator: 0.999
+        output: 0.995
+      max_budget:
+        input: 4096
+        actuator: 4096
+        output: 4096
+    guardrails:
+      enable: true
 ```
 
-The codec keeps the first `(keep_h, keep_w, keep_t)` coefficients from the DCT spectrum (low-frequency components).
+Parameter intent:
+- `n_shots`: number of shots sampled for tuning statistics
+- `max_windows`: upper bound on analyzed windows
+- `thresholds`: minimum explained energy target by role
+- `max_budget`: hard cap on selected coefficients by role
+- `guardrails`: optional sanity checks to avoid under-dimensioned selections
 
-### Rank Mode (Variance-Based Selection)
+## Pretrain Behavior
+`pretrain.yaml` controls which roles tune:
 
-**Use when:**
-- You want optimal compression for your specific signals
-- Different signals have different spectral characteristics
-- You're willing to run a one-time tuning step
-
-**How it works:**
-1. Computes per-coefficient energy `E[c_i²]` across a sample of windows
-2. Sorts all coefficients by energy (descending)
-3. Selects top-K coefficients that achieve target explained energy
-4. Saves coefficient indices to `.npy` files
-
-**Mathematical foundation:**
-
-For an orthonormal DCT, the explained energy ratio is:
-```
-explained_energy = sum(c_i² for i in selected) / sum(c_i² for all i)
-```
-
-The optimal K coefficients that minimize expected MSE are those with largest `E[c_i²]`.
-
-**Benefits:**
-- 10-30% fewer coefficients for same reconstruction quality
-- OR 5-15% better quality for same number of coefficients
-- Automatically adapts to each signal's spectral content
-
----
-
-## Why Tune DCT3D?
-
-DCT3D truncation trades off:
-- **Smaller/cheaper embeddings** (fewer coefficients)
-- vs **Explained energy** percentage (higher is better)
-
-Different signals often have very different spectral content. A single global truncation setting can be:
-- Overly conservative for some signals (wasting capacity)
-- Too aggressive for others (losing important information)
-
-**Rank mode tuning** automatically finds the optimal coefficient set for each signal.
-
----
-
-## Tuning Pipeline (Rank Mode)
-
-Tuning uses the same upstream preprocessing as training:
-
-```
-ChunkWindows → SelectValidWindows → TrimChunks → TuneRankedDCT3DTransform
-```
-
-The `TuneRankedDCT3DTransform`:
-1. Computes full DCT for each chunk
-2. Accumulates per-coefficient energy `E[c_i²]`
-3. After streaming all windows, selects top-K coefficients per signal
-4. Writes coefficient indices to `.npy` files
-5. Generates config with `selection_mode: rank`
-
-### Aggregation Strategy
-
-The tuning process uses a **pooled energy aggregation** approach:
-
-1. **For each window/chunk**: Compute full DCT: `z = DCT(x)`
-2. **Accumulate energies**: `acc_energy[i] += z[i]²` for all coefficients
-3. **After all windows**: Compute mean energy per coefficient: `E[c_i²] = acc_energy[i] / n_windows`
-4. **Compute explained energy**: `sum(E[c_i²] for selected) / sum(E[c_i²] for all)`
-
-This computes the **ratio of expected energies**: `E[sum(z_selected²)] / E[sum(z_all²)]`
-
-**Important:** This differs from the old `TuneDCT3DTransform` which computed the **expected ratio**: `E[sum(z_selected²) / sum(z_all²)]` by averaging per-window ratios. The pooled approach is more robust to windows with varying signal energy and provides a more accurate estimate of compression performance on the overall dataset.
-
-### Key Differences from Old Approach
-
-- ✅ No grid search over `(keep_h, keep_w, keep_t)` combinations
-- ✅ Much faster: 50-200x speedup
-- ✅ Better compression: coefficients selected by actual importance
-- ✅ More robust aggregation: pools energy across all windows before computing ratios
-
----
-
-## Tuning Configuration
-
-Edit `scripts_mast/configs/common/tune_dct3d.yaml`:
-
-```yaml
-tune_dct3d:
-  sampling:
-    max_windows: 15000  # Number of windows to sample
-
-  objective:
-    thresholds:
-      input: 0.999      # Target explained energy (99.9%)
-      actuator: 0.999
-      output: 0.995
-    max_budget:
-      input: 4096       # Max coefficients per signal
-      actuator: 4096
-      output: 4096
-```
-
-### Parameters
-
-**`max_windows`**: Cap on total windows processed. Use smaller values (1000-5000) for fast iteration, larger (10000-20000) for final tuning.
-
-**`thresholds`**: Per-role target explained energy (0-1 scale). Higher values preserve more signal information but use more coefficients.
-- 0.999 = 99.9% of signal energy preserved
-- 0.995 = 99.5% preserved
-- Typical range: 0.99-0.999
-
-**`max_budget`**: Maximum allowed coefficients per role. Prevents any signal from using excessive capacity.
-- Candidates with more coefficients are excluded
-- If no candidates fit budget, smallest candidate is used
-- Typical range: 2048-8192
-
-### Guardrails (Optional Dimension Coverage)
-
-Guardrails ensure minimum unique indices per dimension (H, W, T) are represented in the selected coefficients, preventing over-compression.
-
-#### Dimension Mapping
-
-**All signals are internally represented as (H, W, T) for DCT processing:**
-
-| Signal Type | Native Shape | Internal (H, W, T) | Notes |
-|-------------|--------------|-------------------|-------|
-| Timeseries  | `(T,)`       | `(1, 1, T)`       | Single time series |
-| Profile     | `(C, T)`     | `(C, 1, T)`       | **C channels map to H dimension** |
-| Video/Map   | `(H, W, T)`  | `(H, W, T)`       | Direct mapping |
-
-This canonical representation ensures consistent DCT processing across all signal types.
-
-**Configuration:**
-```yaml
-tune_dct3d:
-  guardrails:
-    enable: false  # Disabled by default
-    timeseries:     # For (T,) signals → (1, 1, T)
-      min_unique_t: 5
-    profile:        # For (C, T) signals → (C, 1, T)
-      min_unique_h: 10  # Minimum unique channel indices (C maps to H)
-      min_unique_t: 5
-    video:          # For (H, W, T) signals
-      min_unique_h: 10
-      min_unique_w: 10
-      min_unique_t: 5
-```
-
-**How it works:**
-1. Sort coefficients by energy (descending)
-2. Compute K_target from explained energy threshold
-3. Compute K_guardrail_min from dimension coverage constraints
-4. Set K = max(K_target, K_guardrail_min)
-5. **Guardrails are strict**: If K exceeds budget, guardrails take precedence (budget is violated with warning)
-
-**When to use:**
-- ✅ Enable for finetuning (prevent over-compression on task-specific outputs)
-- ❌ Disable for pretraining (maximize compression)
-
-**Typical impact:** 5-15% more coefficients, better generalization.
-
-**Important:** Guardrails take precedence over budget caps. If guardrails require more coefficients than the budget allows, the budget will be exceeded and a warning will be logged. Adjust budget or guardrail settings if this occurs frequently.
-
-Values are clamped to actual dimensions: `eff_min = min(configured_min, actual_dim)`
-
----
-
-## Output Files
-
-Tuning produces two types of outputs:
-
-### 1. Config File
-```
-scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d.yaml
-```
-
-Example:
 ```yaml
 embeddings:
-  per_signal_overrides:
-    input:
-      pf_active-coil_current:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: "@common/dct3d_indices/input_pf_active-coil_current.npy"
-          coeff_shape: [16, 1, 128]
-          num_coeffs: 512
-          explained_energy: 0.9985
-    output:
-      equilibrium-psi:
-        encoder_name: dct3d
-        encoder_kwargs:
-          selection_mode: rank
-          coeff_indices_path: dct3d_indices/output_equilibrium-psi.npy
-          coeff_shape: [32, 32, 64]
-          num_coeffs: 2048
-          explained_energy: 0.9972
+  tune_embeddings:
+    roles:
+      input: false
+      actuator: false
+      output: false
 ```
 
-### Path Resolution
+Set any role to `true` to tune it during pretrain.
 
-The `coeff_indices_path` supports two formats:
-
-**1. Relative paths** (for task-specific outputs):
-```yaml
-coeff_indices_path: dct3d_indices/output_equilibrium-psi.npy
-```
-Resolved relative to the task's embeddings_overrides directory:
-```
-scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d_indices/
-```
-
-**2. @common/ prefix** (for shared input/actuator indices):
-```yaml
-coeff_indices_path: "@common/dct3d_indices/input_pf_active-coil_current.npy"
-```
-**Note:** The path must be quoted in YAML because `@` is a special character.
-Resolved to the common config directory:
-```
-scripts_mast/configs/common/dct3d_indices/
-```
-
-**Why use @common/?**
-- Input and actuator signals use the same 5ms chunk representation across all tasks
-- Their indices are tuned once (on the pretrain task) and reused everywhere
-- Output signals are task-specific and have their own indices per task
-- The @common/ prefix avoids duplicating shared indices in every task directory
-
-**Understanding the output:**
-
-- `coeff_shape`: Original DCT spectrum dimensions `[height, width, time]`
-- `num_coeffs`: Number of coefficients selected (out of `h × w × t` total)
-- `explained_energy`: Fraction of signal energy preserved (0-1 scale)
-
-**Note on dimension distribution:** In rank mode, coefficients are selected by variance regardless of spatial position. Unlike spatial mode (which takes a contiguous low-frequency block), rank mode may select coefficients scattered across all three dimensions. The selected coefficients automatically adapt to each signal's spectral characteristics - some signals may have more energy in temporal frequencies, others in spatial frequencies.
-
-To see which dimensions are represented, you can load the `.npy` file and check:
-```python
-import numpy as np
-indices = np.load("dct3d_indices/input_signal.npy")
-h, w, t = 16, 1, 128  # coeff_shape
-indices_3d = np.unravel_index(indices, (h, w, t))
-unique_h = len(np.unique(indices_3d[0]))  # How many height positions used
-unique_w = len(np.unique(indices_3d[1]))  # How many width positions used
-unique_t = len(np.unique(indices_3d[2]))  # How many time positions used
-```
-
-### 2. Coefficient Indices (.npy files)
-```
-scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/dct3d_indices/
-├── input_signal1.npy
-├── input_signal2.npy
-├── output_signal1.npy
-└── ...
-```
-
-Each `.npy` file contains a 1D array of integer indices specifying which DCT coefficients to keep.
-
-### 3. History (Archived Copies)
-```
-scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/history/
-├── dct3d_20260216_143052.yaml
-└── dct3d_indices_20260216_143052/
-    ├── input_signal1.npy
-    └── ...
-```
-
-Timestamped copies preserve previous tuning runs.
-
----
-
-## How Tuned Overrides Are Used
-
-The config loader merges tuned overrides last, so they win over defaults:
-
-1. `common/embeddings.yaml` (global defaults)
-2. `common/<phase>.yaml` (phase-specific settings)
-3. `tasks_overrides/<task>/<phase>_overrides.yaml` (optional task overrides)
-4. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` (tuned settings)
-
-**Note:** During `tune_dct3d`, the embeddings overrides are NOT merged (to avoid circular dependency).
-
-This means:
-- Future pretrain/finetune/eval runs automatically use tuned settings
-- Common defaults remain clean and task-agnostic
-- Easy to compare tuned vs default performance
-
----
-
-## Practical Workflow
-
-### Option A: Use Spatial Mode (No Tuning)
-
-For quick experiments or when defaults work:
+## Finetune Behavior
+Finetune uses `embeddings.mode`:
 
 ```yaml
-# In your task config or common/embeddings.yaml
 embeddings:
-  defaults:
-    dct3d:
-      encoder_name: dct3d
-      encoder_kwargs:
-        selection_mode: spatial
-        keep_h: 16
-        keep_w: 8
-        keep_t: 64
+  mode: source   # source | config
+  tune_embeddings:
+    roles:
+      input: false
+      actuator: false
+      output: false
 ```
 
-### Option B: Use Rank Mode (With Tuning)
+### `mode: source`
+- copies source run `embeddings/` artifacts
+- inherited roles read source rank overrides
+- roles set to `true` are retuned in current run
+- inherited source roles are validated strictly
 
-For optimal performance:
+### `mode: config`
+- ignores source run embedding artifacts
+- uses merged profile config directly
+- all roles must stay `false`
 
-**Step 1:** Run tuning
-```bash
-python scripts_mast/run_tune_dct3d.py --task task_1-1
+## Example Patterns
+### Inherit all roles during finetune
+```yaml
+embeddings:
+  mode: source
+  tune_embeddings:
+    roles:
+      input: false
+      actuator: false
+      output: false
 ```
 
-Optional: Restrict to specific roles:
-```bash
-python scripts_mast/run_tune_dct3d.py --task task_1-1 --roles input,output
+### Retune only output during finetune
+```yaml
+embeddings:
+  mode: source
+  tune_embeddings:
+    roles:
+      input: false
+      actuator: false
+      output: true
 ```
 
-**Step 2:** Review generated files
-- Check `embeddings_overrides/dct3d.yaml` for selected coefficients
-- Verify `explained_energy` values meet your requirements
-- Inspect `num_coeffs` to ensure reasonable sizes
-
-**Step 3:** Run training/evaluation
-```bash
-# Tuned settings are automatically loaded
-python scripts_mast/run_pretrain.py --task task_1-1
-python scripts_mast/run_finetune.py --task task_1-1
-python scripts_mast/run_eval.py --task task_1-1
+### Use profile config only
+```yaml
+embeddings:
+  mode: config
+  tune_embeddings:
+    roles:
+      input: false
+      actuator: false
+      output: false
 ```
 
-**Step 4:** (Optional) Commit tuned files
-If satisfied with results, commit:
-- `embeddings_overrides/dct3d.yaml`
-- `embeddings_overrides/dct3d_indices/*.npy`
+## Profile Override Files
+Task profile files under `embeddings_overrides/<profile>.yaml` should keep only config overrides.
 
----
+Do not store:
+- `coeff_indices` arrays
+- committed per-run rank artifacts
 
-## Performance Comparison
-
-### Tuning Phase
-
-| Metric | Old (Grid Search) | New (Rank Mode) | Improvement |
-|--------|------------------|-----------------|-------------|
-| Candidates evaluated | 50-200 configs | 1 (all coeffs) | **50-200x faster** |
-| Typical runtime | 10-30 min | 1-3 min | **~10x faster** |
-| Memory overhead | High | Moderate | Better |
-
-### Runtime (Encode/Decode)
-
-| Operation | Spatial Mode | Rank Mode | Delta |
-|-----------|--------------|-----------|-------|
-| Encode | O(HWT) DCT + O(1) slice | O(HWT) DCT + O(K) gather | +1-5% |
-| Decode | O(HWT) IDCT + O(1) place | O(HWT) IDCT + O(K) scatter | +1-5% |
-
-The gather/scatter overhead is negligible compared to DCT computation.
-
-### Compression Quality
-
-Rank mode typically achieves:
-- **10-30% fewer coefficients** for same reconstruction quality
-- **5-15% better quality** for same number of coefficients
-- Better adaptation to signal-specific spectral characteristics
-
----
-
-## Tips and Best Practices
-
-### Tuning
-- Start with `max_windows: 5000` for fast iteration
-- Increase to `max_windows: 15000-20000` for final tuning
-- Use representative data (typically train split)
-- If signals fail to meet threshold, try:
-  - Lowering thresholds slightly (e.g., 0.999 → 0.995)
-  - Increasing `max_budget`
-  - Checking if signal has unusual characteristics
-
-### Configuration
-- Use spatial mode for prototyping
-- Use rank mode for production deployments
-- Keep spatial mode configs as fallback
-- Document any manual overrides
-
-### Debugging
-- Check tuning logs for warnings about signals not meeting targets
-- Verify `.npy` files exist before running training
-- Compare `explained_energy` values across signals
-- Use `num_coeffs` to identify unusually large/small embeddings
-
----
+Run-local artifacts belong in `runs/<run_id>/embeddings/`.
 
 ## Troubleshooting
+### Missing inherited source role in finetune
+- Cause: source run has no required role entries in `embeddings/dct3d.yaml`.
+- Fix: set that role to retune, or switch to `mode: config`.
 
-### Error: "coeff_indices_path required for rank mode"
+### Rank mode cannot load indices
+- Cause: missing `dct3d_indices/*.npy` for a rank override.
+- Fix: ensure the run has matching artifacts in `runs/<run_id>/embeddings/`.
 
-**Cause:** Config specifies `selection_mode: rank` but missing indices file reference.
-
-**Solution:** Run tuning to generate indices:
-```bash
-python scripts_mast/run_tune_dct3d.py --task <your_task>
-```
-
-### Error: "Coefficient indices file not found"
-
-**Cause:** `.npy` file referenced in config doesn't exist.
-
-**Solutions:**
-1. Re-run tuning if files were deleted
-2. Check path in config matches actual file location
-3. Verify you're in the correct task directory
-
-### Warning: "Signal cannot reach target threshold"
-
-**Cause:** Signal has insufficient energy in any K coefficients to meet target.
-
-**Solutions:**
-1. Lower threshold in `tune_dct3d.yaml` (e.g., 0.999 → 0.995)
-2. Increase `max_budget` to allow more coefficients
-3. Check if signal has unusual characteristics (very noisy, sparse, etc.)
-4. Verify signal preprocessing is correct
-
-### Tuning is too slow
-
-**Solutions:**
-1. Reduce `max_windows` (e.g., 15000 → 5000)
-2. Use fewer shots in dataset sampling
-3. Restrict to specific roles: `--roles output`
-4. Check if dataset loading is bottleneck
-
----
-
-
-## References
-
-- DCT3D codec implementation: `src/mmt/data/embeddings/dct3d_codec.py`
-- Rank mode tuning transform: `src/mmt/data/transforms/tune_ranked_dct3d.py`
-- Tuning script: `scripts_mast/run_tune_dct3d.py`
-- Config reference: `docs/config_reference.md`
+### No tuning executed
+- Cause: all role flags are `false`.
+- Fix: set desired role(s) to `true`.

@@ -1,123 +1,62 @@
-# Evaluation (metrics, traces, and ablations)
+# Evaluation
 
-Evaluation is designed to be:
+Related documentation: [Project README](../README.md) | [Configuration Guide](config_guide.md) | [Checkpointing and Warmstart](checkpointing_and_warmstart.md)
 
-- **reproducible** (strict checkpoint loading),
-- **config-driven** (no ad-hoc flags),
-- **flexible** (evaluate with missing inputs/outputs via masking, without changing model weights).
+Evaluation loads a trained run, runs one pass on the test split, and writes metrics/traces under an eval directory.
 
-This document describes what evaluation does, where outputs are written, and how to run common ablations.
-
----
-
-## Selecting which model to evaluate
-
-Evaluation needs a trained run directory that contains checkpoints.
-
-Recommended config key:
-
-```yaml
-model_source:
-  run_id: "<training_run_id>"
-  model_path: null   # if set, overrides run_id
+## Run Command
+```bash
+python scripts_mast/run_eval.py \
+  --task <task> \
+  --model <run_id_or_path>
 ```
 
-> it is the source run whose checkpoint weights will be loaded.
+## Source Model Resolution
+`--model` accepts:
+- run id under `runs/`
+- path to a run directory
 
-Evaluation loads the **best** checkpoint if present, otherwise it falls back to the latest checkpoint.
-
-To keep evaluation consistent across models, the config loader rebuilds the **model spec** from the source run's saved merged config:
-
+The loader resolves `model_source.run_dir` and imports:
 - `model`
 - `embeddings`
-- `preprocess.chunk` and `preprocess.trim_chunks`
+- `preprocess.chunk`
+- `preprocess.trim_chunks`
 
-It reads them from the source run folder's saved merged config:
+from the source run snapshot.
 
-```
-<source_run_dir>/<run_id>.yaml
-```
+## Output Paths
+Eval writes to:
 
-So your `eval.yaml` / `eval_overrides.yaml` should focus on evaluation knobs (drop lists, metrics, traces, etc.), not architecture.
-
-
----
-
-## Output location
-
-Eval outputs are written under the source run directory:
-
-```
-<source_run_dir>/<eval_id>/
-  <eval_id>.yaml
+```text
+runs/<model_id>/eval/
+  eval.yaml
   benchmark/
   metrics/
   traces/
 ```
 
-- `eval_id` can be set in `tasks_overrides/<task>/eval_overrides.yaml`.
-- If omitted, the loader typically uses a timestamped default like `eval__YYYYMMDD_HHMMSS`.
+## What Is Evaluated
+- best checkpoint from source run (fallback to latest if needed)
+- same model spec as source run
+- same embedding spec as source run
+- same chunking/trim behavior as source run
 
-This keeps all evaluations for a run grouped next to the run.
-
----
-
-## Keep the model spec fixed
-
-A key design choice is:
-
-> Evaluation does not rebuild a “smaller model” for subsets of signals.
-> It evaluates the same trained model and uses **masking** to simulate missing inputs/outputs.
-
-This avoids:
-- changing signal ids,
-- resizing heads/encoders,
-- accidental checkpoint mismatches.
-
----
-
-## Forcing missing inputs/actuators/outputs (ablations)
-
-Eval supports deterministic ablations via config:
+## Forced Drop Ablations
+Configure deterministic drops in `eval.drop`:
 
 ```yaml
 eval:
   drop:
-    inputs:    ["summary-ip"]
+    inputs: ["summary-ip"]
     actuators: ["pf_active-coil_voltage"]
-    outputs:   ["pf_active-coil_current"]
+    outputs: ["pf_active-coil_current"]
 ```
 
-Semantics:
+Behavior:
+- dropped inputs/actuators: tokens are omitted
+- dropped outputs: excluded from metrics/traces
 
-- Dropped **inputs/actuators**: no tokens are emitted for those signals.
-  The backbone sees less context; model weights are unchanged.
-- Dropped **outputs**: the output mask is set false so they:
-  - contribute no loss,
-  - are excluded from metrics,
-  - are excluded from traces.
-
-Implementation detail:
-
-- The collate function is configured with force-drop overrides:
-
-```yaml
-collate:
-  p_drop_inputs_overrides:    { "<name>": 1.0, ... }
-  p_drop_actuators_overrides: { "<name>": 1.0, ... }
-  p_drop_outputs_overrides:   { "<name>": 1.0, ... }
-```
-
-The `eval.drop.*` convenience lists are typically translated into these overrides internally.
-
----
-
-## Metrics
-
-Metrics are controlled by `eval.compute_metrics`.
-
-Metrics are computed only for outputs that remain active (`output_mask=True`).
-
+## Metrics Configuration
 ```yaml
 eval:
   compute_metrics:
@@ -126,127 +65,42 @@ eval:
     per_timestamp: false
 ```
 
-What each flag does:
+Outputs:
+- benchmark-level files in `benchmark/`
+- optional per-timestamp csv in `metrics/`
 
-- `per_task` (**benchmark-aligned**): computes the official task-level scores and writes:
-  - `<eval_run_dir>/benchmark/<task_name>/tasks_metrics.csv`
-  (includes per-signal rows plus an extra row for the task aggregate).
+## What Is a Trace
+A trace is a per-shot diagnostic record that aligns:
+- model predictions
+- reference targets
+- time axis for selected windows/signals
 
-- `per_window` (**benchmark-aligned**): keeps the intermediate per-window file:
-  - `<eval_run_dir>/benchmark/<task_name>/windows_metrics.csv`
+Traces are used for qualitative inspection (shape, lag, spikes, drop effects), not only aggregate scoring.
 
-  If `per_task=true` but `per_window=false`, evaluation still creates `windows_metrics.csv`
-  as an intermediate input for the benchmark aggregator and then deletes it to save disk.
-
-- `per_timestamp` (**MMT diagnostic**): writes a per-timestamp CSV:
-  - `<eval_run_dir>/metrics/<task_name>_metrics_per_timestamp.csv`
-  (per-shot, per-window, per-time, per-output; computed in native space).
-
-To disable metrics entirely, set all flags to `false`:
-
-```yaml
-eval:
-  compute_metrics:
-    per_task: false
-    per_window: false
-    per_timestamp: false
-```
-
----
-
-## Traces (qualitative inspection)
-
-Enable/disable:
-
+## Trace Configuration
 ```yaml
 eval:
   traces:
     enable: true
-    n_max: 8
-    signals: ["pf_active-coil_current"]   # null → all outputs
-    times_indexes: [0, 1, 2]              # null → full horizon
+    n_max: 5
+    signals: null
+    times_indexes: null
 ```
 
-Traces are intended for “quick look” diagnostics:
+Outputs:
+- trace artifacts under `traces/`
+- each artifact is limited by `n_max` and optional signal/time filters
 
-- `n_max`: max number of **shots** to save traces for
-- `signals`: optional subset of output signals to save
-- `times_indexes`: optional subset of time indices
+Filter behavior:
+- `signals: null`: include all output signals
+- `times_indexes: null`: include all available timestamps
+- explicit lists: keep only selected outputs/time indexes
 
-Outputs are generally saved under:
-
-```
-<eval_run_dir>/traces/
-```
-
-Each trace is saved as one NPZ per (shot, output):
-
-- `<shot_id>__<output_name>.npz`
-
-Arrays inside each NPZ:
-
-- `true`: stacked native-space targets, ordered by `window_index`
-- `pred`: stacked native-space predictions, ordered by `window_index`
-- `window_index`: window indices for the stacked rows
-
-
-### `keep_output_native`
-
-Traces (and some metrics) often need native outputs.
-For that reason, evaluation typically sets:
-
+## Required Eval Data Setting
+Eval requires:
 ```yaml
 data:
   keep_output_native: true
 ```
 
-If you set this to `false`, you may still be able to compute metrics from `output_emb`,
-but you will likely lose rich trace information.
-
----
-
-## Window caching for evaluation
-
-Evaluation uses the same window caching mechanism as training:
-
-- **Cached mode** (`data.cache.enable: true`, recommended): Windows are materialized to RAM for fast, deterministic evaluation
-- **Streaming mode** (`data.cache.enable: false`): Windows are generated on-the-fly from the MAST integration's IterableDataset
-
-For consistent metrics and faster evaluation, caching is recommended.
-
----
-
-## Common evaluation workflows
-
-### Evaluate a trained run (default)
-Specify the model to evaluate via the `--model` CLI argument:
-
-```bash
-# Evaluate a finetuned model
-python scripts_mast/run_eval.py --task task_2-1 --model ft-task_2-1-exp1-pretrain_base_v1
-
-# Evaluate a pretrained model directly
-python scripts_mast/run_eval.py --task task_2-1 --model pretrain_base_v1
-```
-
-Evaluation results are saved in `runs/{model}/eval/`.
-
-### Evaluate under missing inputs
-Set:
-
-```yaml
-eval:
-  drop:
-    inputs: ["some_input_signal"]
-```
-
-### Evaluate only a subset of outputs
-Set:
-
-```yaml
-eval:
-  drop:
-    outputs: ["output_to_disable"]
-```
-
-This keeps the model spec fixed and simply disables supervision/metrics for those outputs.
+This is needed to decode and score outputs in native space.
