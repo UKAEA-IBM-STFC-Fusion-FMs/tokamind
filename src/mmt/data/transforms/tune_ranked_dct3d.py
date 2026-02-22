@@ -557,48 +557,54 @@ class TuneRankedDCT3DTransform:
                         K,
                     )
 
-                # Apply guardrails if enabled
-                budget_violated = False
-                if self.guardrails_enable and guardrail_min_K > 0:
-                    # Guardrails enabled: compute K_req = max(K_target, K_guardrail_min)
-                    K_req = max(K, guardrail_min_K)
+                # Combine target + guardrails, then enforce budget as hard cap.
+                K_target = K
+                K_req = K_target
+                budget_capped = False
+                budget_violated_for_guardrails = False
 
-                    if K < guardrail_min_K:
-                        logger.info(
-                            "Signal %s:%s: increasing K from %d to %d to meet guardrails",
-                            role,
-                            name,
-                            K,
-                            K_req,
-                        )
+                if self.guardrails_enable and guardrail_min_K > K_target:
+                    K_req = guardrail_min_K
+                    logger.info(
+                        "Signal %s:%s: increasing K from %d to %d to meet guardrails",
+                        role,
+                        name,
+                        K_target,
+                        K_req,
+                    )
 
-                    # Strict guardrails: check if they exceed budget
-                    if budget is not None and K_req > budget:
-                        budget_violated = True
+                if budget is not None and K_req > budget:
+                    budget_capped = True
+                    K = int(budget)
+                    guardrail_driven = (
+                        self.guardrails_enable and guardrail_min_K > K_target
+                    )
+                    if guardrail_driven:
+                        budget_violated_for_guardrails = True
+
+                    if guardrail_driven:
                         logger.warning(
-                            "Signal %s:%s: guardrails require K=%d, exceeding budget=%d. "
-                            "Keeping K=%d (guardrails take precedence).",
+                            "Signal %s:%s: guardrails need K=%d but budget=%d. "
+                            "Capping to budget=%d (guardrails not fully satisfied).",
                             role,
                             name,
                             K_req,
                             budget,
-                            K_req,
+                            K,
                         )
-
-                    K = K_req
+                    else:
+                        logger.warning(
+                            "Signal %s:%s: target=%.4f needs K=%d but budget=%d. "
+                            "Capping to budget=%d.",
+                            role,
+                            name,
+                            target,
+                            K_req,
+                            budget,
+                            K,
+                        )
                 else:
-                    # Guardrails disabled: apply budget cap normally (hard cap)
-                    if budget is not None and K > budget:
-                        K = int(budget)
-                        logger.info(
-                            "Signal %s:%s capped at budget %d (target would need %d)",
-                            role,
-                            name,
-                            budget,
-                            len(meets_target) + 1
-                            if len(meets_target) > 0
-                            else len(sorted_indices),
-                        )
+                    K = K_req
 
                 # Select top-K indices
                 coeff_indices = sorted_indices[:K].astype(np.int32)
@@ -612,7 +618,8 @@ class TuneRankedDCT3DTransform:
                     "target": target,
                     "n_windows": acc_count,
                     "max_budget": budget,
-                    "budget_violated_for_guardrails": budget_violated,
+                    "budget_capped": budget_capped,
+                    "budget_violated_for_guardrails": budget_violated_for_guardrails,
                 }
 
         return out
