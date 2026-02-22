@@ -32,6 +32,13 @@ runs/<run_id>/embeddings/
 `dct3d.yaml` stores `embeddings.per_signal_overrides` with rank metadata.
 Each `.npy` file stores 1D coefficient indices consumed by rank-mode codecs at runtime.
 
+Each tuned signal entry in `dct3d.yaml` includes:
+- rank payload: `coeff_shape`, `num_coeffs`, `explained_energy`
+- coverage stats: `dim_distribution.unique_h/unique_w/unique_t`
+- policy trace (`tuning_info`):
+  - `target`, `k_target`, `guardrail_min_k`, `k_after_guardrails`, `k_final`
+  - `max_budget`, `n_windows`, `flags`, `tuned_in_run_id`
+
 ## Key Config Block
 Base tuning settings live in `scripts_mast/configs/common/embeddings.yaml`:
 
@@ -59,6 +66,52 @@ Parameter intent:
 - `thresholds`: minimum explained energy target by role
 - `max_budget`: hard cap on selected coefficients by role
 - `guardrails`: optional sanity checks to avoid under-dimensioned selections
+
+## Selection Policy (Transform)
+`TuneRankedDCT3DTransform` applies selection in this order for each signal:
+1. Compute `K_target` from explained-energy threshold.
+2. If guardrails are enabled, compute modality-specific minimum coverage and lift K to:
+   `K_after_guardrails = max(K_target, guardrail_min_k)`.
+3. Apply role budget as hard cap:
+   `K_final = min(K_after_guardrails, max_budget)` when budget is set.
+
+This means budget always caps final dimensionality.
+When budget prevents full guardrail satisfaction, tuning keeps the capped K and emits a warning.
+
+## Guardrails by Modality
+Guardrails operate on canonical DCT dimensions `(H, W, T)`:
+- timeseries: usually enforces `min_unique_t`
+- profile: usually enforces `min_unique_h` and `min_unique_t`
+- video: usually enforces `min_unique_h`, `min_unique_w`, `min_unique_t`
+
+Example:
+```yaml
+embeddings:
+  tune_embeddings:
+    guardrails:
+      enable: true
+      timeseries:
+        min_unique_t: 5
+      profile:
+        min_unique_h: 10
+        min_unique_t: 5
+      video:
+        min_unique_h: 10
+        min_unique_w: 10
+        min_unique_t: 5
+```
+
+Values are clamped by actual signal dimensions; impossible requirements fallback to all coefficients.
+
+## Runtime Logs
+At `INFO` level tuning logs include:
+- global tuning start (`n_shots`, `max_windows`, `roles`, budgets, guardrails state)
+- active guardrail rules (when enabled)
+- per-signal guardrail lifts:
+  - `Signal <role>:<name> hit guardrails: K <old> -> <new> | coverage(H,W,T) (...) -> (...)`
+- budget-cap warnings if requested K exceeds role budget
+- final summary:
+  - `signals=<N> guardrail_up=<N> budget_capped=<N>`
 
 ## Pretrain Behavior
 `pretrain.yaml` controls which roles tune:

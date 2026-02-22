@@ -40,9 +40,35 @@ Selection Strategy
 For each (role, signal):
   1. Compute mean(c_i²) across all windows (pooled energy)
   2. Sort coefficients descending by energy
-  3. Find smallest K where cumsum(energy[:K])/total >= threshold
-  4. Apply max_budget cap if provided
-  5. Return top-K indices
+  3. Find `K_target`: smallest K where cumsum(energy[:K])/total >= threshold
+  4. If guardrails are enabled, compute `guardrail_min_k` from minimum unique
+     index coverage by modality and lift K to `max(K_target, guardrail_min_k)`
+  5. Apply `max_budget` as a hard cap (final K never exceeds budget)
+  6. Return top-K indices and selection metadata
+
+Selection Metadata
+------------------
+`select_best()` returns per-signal metadata used by artifact writers:
+- coefficient payload: `coeff_indices`, `coeff_shape`, `num_coeffs`
+- objective outcome: `explained_energy`, `target`, `n_windows`
+- policy breakdown:
+  - `k_target`
+  - `guardrail_min_k`
+  - `k_after_guardrails`
+  - `max_budget`
+  - `guardrail_increased_k`
+  - `budget_capped`
+  - `budget_violated_for_guardrails`
+- diagnostics:
+  - `dim_distribution.{unique_h,unique_w,unique_t}`
+  - `flags` (e.g. `guardrail_up`, `budget_cap`, `budget_cap_guardrail`)
+
+Runtime Logging
+---------------
+At INFO level the transform reports:
+- active guardrail rules (once at init, if enabled),
+- per-signal guardrail lifts (`K old -> new`, with coverage before/after),
+- budget-cap warnings when requested K exceeds role budget.
 
 Expected Window Format
 ----------------------
@@ -104,6 +130,19 @@ def _format_guardrail_rules(rules: Mapping[str, Any]) -> str:
         if val is not None:
             parts.append(f"{key}={val}")
     return ", ".join(parts) if parts else "-"
+
+
+def _coverage_shape_for_topk(
+    sorted_indices: np.ndarray, *, K: int, W: int, T: int
+) -> Tuple[int, int, int]:
+    """Return unique-dimension coverage (H, W, T) for the first K indices."""
+    if K <= 0:
+        return (0, 0, 0)
+    topk = np.asarray(sorted_indices[:K], dtype=np.int64)
+    h_idx = topk // (W * T)
+    w_idx = (topk % (W * T)) // T
+    t_idx = topk % T
+    return (int(len(np.unique(h_idx))), int(len(np.unique(w_idx))), int(len(np.unique(t_idx))))
 
 
 class TuneRankedDCT3DTransform:
@@ -493,6 +532,43 @@ class TuneRankedDCT3DTransform:
         )
         return len(sorted_indices)
 
+    @staticmethod
+    def _selection_flags(
+        *,
+        guardrail_increased_k: bool,
+        budget_capped: bool,
+        budget_violated_for_guardrails: bool,
+    ) -> List[str]:
+        """Build stable selection flags for one tuned signal."""
+        flags: List[str] = []
+        if guardrail_increased_k:
+            flags.append("guardrail_up")
+        if budget_capped:
+            if budget_violated_for_guardrails:
+                flags.append("budget_cap_guardrail")
+            else:
+                flags.append("budget_cap")
+        return flags
+
+    @staticmethod
+    def summarize_selection(best: Mapping[str, Mapping[str, Mapping[str, Any]]]) -> Dict[str, int]:
+        """Return compact counters for tuning summary logs."""
+        n_signals = 0
+        n_guardrail_up = 0
+        n_budget_capped = 0
+        for by_sig in best.values():
+            for info in by_sig.values():
+                n_signals += 1
+                if bool(info.get("guardrail_increased_k", False)):
+                    n_guardrail_up += 1
+                if bool(info.get("budget_capped", False)):
+                    n_budget_capped += 1
+        return {
+            "signals": int(n_signals),
+            "guardrail_up": int(n_guardrail_up),
+            "budget_capped": int(n_budget_capped),
+        }
+
     def select_best(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """Select top-K coefficients by variance for each signal.
 
@@ -507,6 +583,14 @@ class TuneRankedDCT3DTransform:
                 "target": float,
                 "n_windows": int,
                 "max_budget": int | None,
+                "k_target": int,
+                "guardrail_min_k": int,
+                "k_after_guardrails": int,
+                "guardrail_increased_k": bool,
+                "budget_capped": bool,
+                "budget_violated_for_guardrails": bool,
+                "dim_distribution": {"unique_h": int, "unique_w": int, "unique_t": int},
+                "flags": List[str],
             }}}
         """
         out: Dict[str, Dict[str, Dict[str, Any]]] = {}
@@ -591,12 +675,20 @@ class TuneRankedDCT3DTransform:
                 if self.guardrails_enable and guardrail_min_K > K_target:
                     guardrail_increased_k = True
                     K_req = guardrail_min_K
-                    logger.debug(
-                        "Signal %s:%s: increasing K from %d to %d to meet guardrails",
+                    coverage_before = _coverage_shape_for_topk(
+                        sorted_indices, K=K_target, W=W, T=T
+                    )
+                    coverage_after = _coverage_shape_for_topk(
+                        sorted_indices, K=K_req, W=W, T=T
+                    )
+                    logger.info(
+                        "Signal %s:%s hit guardrails: K %d -> %d | coverage(H,W,T) %s -> %s",
                         role,
                         name,
                         K_target,
                         K_req,
+                        coverage_before,
+                        coverage_after,
                     )
 
                 if budget is not None and K_req > budget:
@@ -635,6 +727,14 @@ class TuneRankedDCT3DTransform:
                 # Select top-K indices
                 coeff_indices = sorted_indices[:K].astype(np.int32)
                 achieved_energy = float(cumsum_energy[K - 1] / total_energy)
+                indices_3d = np.unravel_index(coeff_indices, (H, W, T))
+                flags = self._selection_flags(
+                    guardrail_increased_k=bool(guardrail_increased_k),
+                    budget_capped=bool(budget_capped),
+                    budget_violated_for_guardrails=bool(
+                        budget_violated_for_guardrails
+                    ),
+                )
 
                 out.setdefault(role, {})[name] = {
                     "coeff_indices": coeff_indices,
@@ -650,6 +750,12 @@ class TuneRankedDCT3DTransform:
                     "guardrail_increased_k": bool(guardrail_increased_k),
                     "budget_capped": budget_capped,
                     "budget_violated_for_guardrails": budget_violated_for_guardrails,
+                    "dim_distribution": {
+                        "unique_h": int(len(np.unique(indices_3d[0]))),
+                        "unique_w": int(len(np.unique(indices_3d[1]))),
+                        "unique_t": int(len(np.unique(indices_3d[2]))),
+                    },
+                    "flags": flags,
                 }
 
         return out

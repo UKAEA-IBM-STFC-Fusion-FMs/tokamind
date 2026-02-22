@@ -143,11 +143,39 @@ embeddings:
 
 ### `embeddings.tune_embeddings.objective.max_budget.{input,actuator,output}`
 - Type: `int`
-- Description: maximum selected coefficients per role.
+- Description: maximum selected coefficients per role (hard final cap).
 
 ### `embeddings.tune_embeddings.guardrails`
 - Type: mapping
 - Description: optional minimum-dimension coverage constraints.
+
+### `embeddings.tune_embeddings.guardrails.enable`
+- Type: `bool`
+- Description: enable/disable guardrail lifting during rank tuning.
+
+### `embeddings.tune_embeddings.guardrails.timeseries.min_unique_t`
+- Type: `int`
+- Description: minimum unique T indices required for timeseries signals.
+
+### `embeddings.tune_embeddings.guardrails.profile.min_unique_h`
+- Type: `int`
+- Description: minimum unique H indices required for profile signals.
+
+### `embeddings.tune_embeddings.guardrails.profile.min_unique_t`
+- Type: `int`
+- Description: minimum unique T indices required for profile signals.
+
+### `embeddings.tune_embeddings.guardrails.video.min_unique_h`
+- Type: `int`
+- Description: minimum unique H indices required for video signals.
+
+### `embeddings.tune_embeddings.guardrails.video.min_unique_w`
+- Type: `int`
+- Description: minimum unique W indices required for video signals.
+
+### `embeddings.tune_embeddings.guardrails.video.min_unique_t`
+- Type: `int`
+- Description: minimum unique T indices required for video signals.
 
 ## Collate
 Top-level location: `collate:`

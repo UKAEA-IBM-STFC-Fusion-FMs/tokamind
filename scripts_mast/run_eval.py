@@ -119,7 +119,8 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Window data (test split only)
     # ------------------------------------------------------------------
-    logging.getLogger("mmt").info("")
+    if cfg_data.get("cache", {}).get("enable", False):
+        logging.getLogger("mmt").info("")
     window_data = build_window_data(
         cfg_mmt=cfg_mmt,
         mast_datasets={"test": mast_dataset_test},
@@ -141,6 +142,7 @@ def main() -> None:
         device=device,
         skip_warmstart=True,
     )
+    logging.getLogger("mmt").info("")
 
     # ------------------------------------------------------------------
     # Load best weights from training run

@@ -1,12 +1,33 @@
 """
-DCT3D embedding tuning utility for MAST.
+DCT3D embedding tuning orchestration for MAST.
 
-run_dct3d_tuning()         — build a MAST dataset subsample, stream windows through
-                             TuneRankedDCT3DTransform, and save results to
-                             runs/<run_id>/embeddings/.
+This module is intentionally orchestration-first:
 
-load_embeddings_overrides() — read per-signal rank-mode overrides from a run folder
-                              (used by finetune and eval).
+- dataset construction and streaming for a small tuning subset,
+- transform wiring (`TuneRankedDCT3DTransform`) with role-specific objective
+  config (thresholds, guardrails, budgets),
+- persistence of run-local artifacts (`dct3d_indices/*.npy`, `dct3d.yaml`),
+- loading helpers for downstream finetune/eval inheritance.
+
+The transform owns selection policy and signal-level metadata computation.
+This module consumes that output and writes stable runtime artifacts.
+
+Main entrypoints
+----------------
+- `run_dct3d_tuning(...)`
+  Runs tuning and writes:
+  - `runs/<run_id>/embeddings/dct3d_indices/<role>_<signal>.npy`
+  - `runs/<run_id>/embeddings/dct3d.yaml`
+- `load_embeddings_overrides(...)`
+  Reads `dct3d.yaml` and returns `embeddings.per_signal_overrides`.
+
+Persisted rank metadata
+-----------------------
+Each tuned signal in `dct3d.yaml` stores rank-mode kwargs and tuning metadata:
+- `coeff_shape`, `num_coeffs`, `explained_energy`
+- `dim_distribution.{unique_h,unique_w,unique_t}`
+- `tuning_info.{target,k_target,guardrail_min_k,k_after_guardrails,k_final,
+  n_windows,max_budget,flags,tuned_in_run_id}`
 """
 
 from __future__ import annotations
@@ -185,18 +206,9 @@ def run_dct3d_tuning(
     # Select best and log
     # ------------------------------------------------------------------
     best = tune_transform.select_best()
-
-    n_signals = 0
-    n_guardrail_up = 0
-    n_budget_capped = 0
+    summary = tune_transform.summarize_selection(best)
     for role, by_sig in best.items():
         for name, info in by_sig.items():
-            n_signals += 1
-            if bool(info.get("guardrail_increased_k", False)):
-                n_guardrail_up += 1
-            if bool(info.get("budget_capped", False)):
-                n_budget_capped += 1
-
             logger.debug(
                 "[%s:%s] shape=%s K_target=%s K_final=%d expl_energy=%.4f flags={guardrail_up:%s,budget_cap:%s}",
                 role,
@@ -210,9 +222,9 @@ def run_dct3d_tuning(
             )
     logger.info(
         "DCT3D tuning summary: signals=%d guardrail_up=%d budget_capped=%d",
-        n_signals,
-        n_guardrail_up,
-        n_budget_capped,
+        summary["signals"],
+        summary["guardrail_up"],
+        summary["budget_capped"],
     )
 
     # ------------------------------------------------------------------
@@ -234,17 +246,6 @@ def run_dct3d_tuning(
             filename = f"{role}_{name}.npy"
             np.save(indices_dir / filename, coeff_indices)
 
-            h, w, t = info["coeff_shape"]
-            indices_3d = np.unravel_index(coeff_indices, (h, w, t))
-            flags: list[str] = []
-            if bool(info.get("guardrail_increased_k", False)):
-                flags.append("guardrail_up")
-            if bool(info.get("budget_capped", False)):
-                if bool(info.get("budget_violated_for_guardrails", False)):
-                    flags.append("budget_cap_guardrail")
-                else:
-                    flags.append("budget_cap")
-
             per_signal_overrides.setdefault(role, {})[name] = {
                 "encoder_name": "dct3d",
                 "encoder_kwargs": {
@@ -253,11 +254,7 @@ def run_dct3d_tuning(
                     "coeff_shape": list(info["coeff_shape"]),
                     "num_coeffs": int(info["num_coeffs"]),
                     "explained_energy": float(info["explained_energy"]),
-                    "dim_distribution": {
-                        "unique_h": int(len(np.unique(indices_3d[0]))),
-                        "unique_w": int(len(np.unique(indices_3d[1]))),
-                        "unique_t": int(len(np.unique(indices_3d[2]))),
-                    },
+                    "dim_distribution": dict(info.get("dim_distribution", {})),
                     "tuning_info": {
                         "target": float(info["target"]),
                         "k_target": int(info.get("k_target", info["num_coeffs"])),
@@ -270,7 +267,7 @@ def run_dct3d_tuning(
                         "max_budget": None
                         if info.get("max_budget") is None
                         else int(info["max_budget"]),
-                        "flags": flags,
+                        "flags": list(info.get("flags", [])),
                         "tuned_in_run_id": str(run_dir.name),
                     },
                 },

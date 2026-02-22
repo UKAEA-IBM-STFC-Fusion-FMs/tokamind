@@ -22,6 +22,7 @@ The shared entry helpers use:
 5. `BuildTokensTransform`
 6. `FinalizeWindowTransform`
 
+
 ## Stage Summary
 ### 1) ChunkWindowsTransform
 - builds fixed chunk slots for input/actuator history
@@ -49,12 +50,6 @@ The shared entry helpers use:
 - keeps or drops native output payload based on `keep_output_native`
 - this controls whether eval can score/trace in native units
 
-## Codec Modes Relevant to Transforms
-For DCT3D signals:
-- spatial mode uses configured `keep_h/keep_w/keep_t`
-- rank mode reads `coeff_indices_path` from run-local embedding artifacts
-
-Rank mode is deterministic once index files are fixed for a run.
 
 ## Configuration Keys
 Main transform-related keys:
@@ -73,5 +68,13 @@ preprocess:
     window_stride_sec: 0.01
 ```
 
-## Extension Points
-- When extending the chain, keep input/output field contracts explicit to avoid silent sample drops.
+## Tuning-Only Transform
+`TuneRankedDCT3DTransform` is used only during DCT3D rank tuning
+
+- role: collects pooled coefficient energies and selects rank-mode coefficients
+- policy order: threshold target -> guardrail lift -> hard budget cap
+- output: selected indices plus tuning metadata consumed by
+  `runs/<run_id>/embeddings/dct3d.yaml`
+- implementation: `src/mmt/data/transforms/tune_ranked_dct3d.py`
+- detailed behavior: see [DCT3D Tuning](tuning_dct3d.md)
+
