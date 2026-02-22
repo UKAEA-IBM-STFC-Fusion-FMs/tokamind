@@ -55,7 +55,7 @@ embeddings:
       output: true
     
     guardrails:
-      enable: false
+      enable: true
 
 
 collate:
