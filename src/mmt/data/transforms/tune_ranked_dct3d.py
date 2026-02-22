@@ -93,6 +93,7 @@ Usage
 from __future__ import annotations
 
 from collections import defaultdict
+from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List, Mapping, Tuple
 
 import logging
@@ -102,6 +103,22 @@ from mmt.data.signal_spec import SignalSpecRegistry
 from mmt.data.embeddings.dct3d_codec import DCT3DCodec
 
 logger = logging.getLogger("mmt.TuneRankedDCT3D")
+
+
+Shape3D = Tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class _KSelection:
+    """Final K policy decision for one signal."""
+
+    k_target: int
+    guardrail_min_k: int
+    k_after_guardrails: int
+    k_final: int
+    guardrail_increased_k: bool
+    budget_capped: bool
+    budget_violated_for_guardrails: bool
 
 
 def _dct_view_shape(native_shape: Tuple[int, ...]) -> Tuple[int, int, int]:
@@ -142,7 +159,11 @@ def _coverage_shape_for_topk(
     h_idx = topk // (W * T)
     w_idx = (topk % (W * T)) // T
     t_idx = topk % T
-    return (int(len(np.unique(h_idx))), int(len(np.unique(w_idx))), int(len(np.unique(t_idx))))
+    return (
+        int(len(np.unique(h_idx))),
+        int(len(np.unique(w_idx))),
+        int(len(np.unique(t_idx))),
+    )
 
 
 class TuneRankedDCT3DTransform:
@@ -280,118 +301,106 @@ class TuneRankedDCT3DTransform:
         return codec
 
     def __call__(self, window: Dict[str, Any]) -> Dict[str, Any]:
-        """Process one window and accumulate coefficient energies."""
-        # Progress logging
-        if self.progress_every_n_shots is not None:
-            self._windows_seen += 1
-            shot_id = window.get("shot_id")
-            if shot_id is not None and shot_id != self._last_shot_id:
-                self._last_shot_id = shot_id
-                self._shots_seen += 1
-                if self._shots_seen % self.progress_every_n_shots == 0:
-                    logger.info(
-                        "TuneRankedDCT3D progress: shots=%d, windows=%d",
-                        self._shots_seen,
-                        self._windows_seen,
-                    )
-
-        # Process chunk-based roles (input, actuator)
-        if any(r in self.roles for r in ("input", "actuator")):
-            if "chunks" not in window:
-                raise KeyError("Expected window['chunks'] for input/actuator roles")
-
-            chunks = window.get("chunks") or {}
-            for role in ("input", "actuator"):
-                if role not in self.roles:
-                    continue
-                for ch in chunks.get(role) or []:
-                    sigs = ch.get("signals") or {}
-                    for name, values in sigs.items():
-                        if values is None:
-                            continue
-                        if self.signal_specs.get(role, name) is None:
-                            continue
-
-                        x = np.asarray(values)
-                        if x.size == 0 or x.ndim not in (1, 2, 3):
-                            continue
-
-                        # Store representative shape
-                        self.rep_shape.setdefault((role, name), tuple(x.shape))
-
-                        # Clean non-finite values
-                        finite = np.isfinite(x)
-                        if not finite.any():
-                            continue
-                        x_clean = np.where(finite, x, 0.0)
-
-                        # Compute full DCT
-                        native_shape = tuple(x.shape)
-                        H, W, T = _dct_view_shape(native_shape)
-                        codec_full = self._full_codec(H, W, T)
-
-                        z_full = codec_full.encode(x_clean)  # (H*W*T,)
-                        z64 = np.asarray(z_full, dtype=np.float64)
-                        energy = z64 * z64  # per-coefficient energy
-
-                        # Accumulate
-                        key = (H, W, T)
-                        if key not in self.coeff_energy[role][name]:
-                            self.coeff_energy[role][name][key] = (
-                                np.zeros(H * W * T, dtype=np.float64),
-                                0,
-                            )
-
-                        acc_energy, acc_count = self.coeff_energy[role][name][key]
-                        acc_energy += energy
-                        self.coeff_energy[role][name][key] = (acc_energy, acc_count + 1)
-
-        # Process output role
-        if "output" in self.roles:
-            out_group = window.get("output")
-            if isinstance(out_group, dict):
-                for name, entry in out_group.items():
-                    if self.signal_specs.get("output", name) is None:
-                        continue
-                    if not isinstance(entry, dict) or "values" not in entry:
-                        raise TypeError(
-                            f"Expected window['output'][{name!r}] to have 'values' key"
-                        )
-                    values = entry["values"]
-                    if values is None:
-                        continue
-
-                    x = np.asarray(values)
-                    if x.size == 0 or x.ndim not in (1, 2, 3):
-                        continue
-
-                    self.rep_shape.setdefault(("output", name), tuple(x.shape))
-
-                    finite = np.isfinite(x)
-                    if not finite.any():
-                        continue
-                    x_clean = np.where(finite, x, 0.0)
-
-                    native_shape = tuple(x.shape)
-                    H, W, T = _dct_view_shape(native_shape)
-                    codec_full = self._full_codec(H, W, T)
-
-                    z_full = codec_full.encode(x_clean)
-                    z64 = np.asarray(z_full, dtype=np.float64)
-                    energy = z64 * z64
-
-                    key = (H, W, T)
-                    if key not in self.coeff_energy["output"][name]:
-                        self.coeff_energy["output"][name][key] = (
-                            np.zeros(H * W * T, dtype=np.float64),
-                            0,
-                        )
-
-                    acc_energy, acc_count = self.coeff_energy["output"][name][key]
-                    acc_energy += energy
-                    self.coeff_energy["output"][name][key] = (acc_energy, acc_count + 1)
-
+        """Process one window and accumulate per-coefficient energies."""
+        self._log_progress(window)
+        self._accumulate_chunk_roles(window)
+        self._accumulate_output_role(window)
         return window
+
+    # ------------------------------------------------------------------
+    # Window ingestion helpers
+    # ------------------------------------------------------------------
+
+    def _log_progress(self, window: Mapping[str, Any]) -> None:
+        if self.progress_every_n_shots is None:
+            return
+        self._windows_seen += 1
+        shot_id = window.get("shot_id")
+        if shot_id is None or shot_id == self._last_shot_id:
+            return
+        self._last_shot_id = shot_id
+        self._shots_seen += 1
+        if self._shots_seen % self.progress_every_n_shots == 0:
+            logger.info(
+                "TuneRankedDCT3D progress: shots=%d, windows=%d",
+                self._shots_seen,
+                self._windows_seen,
+            )
+
+    def _accumulate_chunk_roles(self, window: Mapping[str, Any]) -> None:
+        if not any(r in self.roles for r in ("input", "actuator")):
+            return
+        if "chunks" not in window:
+            raise KeyError("Expected window['chunks'] for input/actuator roles")
+        chunks = window.get("chunks") or {}
+        for role in ("input", "actuator"):
+            if role not in self.roles:
+                continue
+            for ch in chunks.get(role) or []:
+                sigs = ch.get("signals") or {}
+                for name, values in sigs.items():
+                    self._accumulate_signal_values(role=role, name=name, values=values)
+
+    def _accumulate_output_role(self, window: Mapping[str, Any]) -> None:
+        if "output" not in self.roles:
+            return
+        out_group = window.get("output")
+        if not isinstance(out_group, dict):
+            return
+        for name, entry in out_group.items():
+            if self.signal_specs.get("output", name) is None:
+                continue
+            if not isinstance(entry, dict) or "values" not in entry:
+                raise TypeError(
+                    f"Expected window['output'][{name!r}] to have 'values' key"
+                )
+            self._accumulate_signal_values(
+                role="output", name=name, values=entry.get("values")
+            )
+
+    def _accumulate_signal_values(
+        self, *, role: str, name: str, values: Any
+    ) -> None:
+        if values is None:
+            return
+        if self.signal_specs.get(role, name) is None:
+            return
+        x = np.asarray(values)
+        if x.size == 0 or x.ndim not in (1, 2, 3):
+            return
+
+        self.rep_shape.setdefault((role, name), tuple(x.shape))
+
+        finite = np.isfinite(x)
+        if not finite.any():
+            return
+        x_clean = np.where(finite, x, 0.0)
+
+        H, W, T = _dct_view_shape(tuple(x.shape))
+        codec_full = self._full_codec(H, W, T)
+        z_full = codec_full.encode(x_clean)  # (H*W*T,)
+        z64 = np.asarray(z_full, dtype=np.float64)
+        energy = z64 * z64
+
+        self._accumulate_energy(role=role, name=name, key=(H, W, T), energy=energy)
+
+    def _accumulate_energy(
+        self, *, role: str, name: str, key: Shape3D, energy: np.ndarray
+    ) -> None:
+        if key not in self.coeff_energy[role][name]:
+            H, W, T = key
+            self.coeff_energy[role][name][key] = (
+                np.zeros(H * W * T, dtype=np.float64),
+                0,
+            )
+
+        acc_energy, acc_count = self.coeff_energy[role][name][key]
+        acc_energy += energy
+        self.coeff_energy[role][name][key] = (acc_energy, acc_count + 1)
+
+    # ------------------------------------------------------------------
+    # Guardrail helpers
+    # ------------------------------------------------------------------
 
     def _determine_signal_type(self, shape: Tuple[int, ...]) -> str:
         """Determine signal type from shape.
@@ -569,6 +578,216 @@ class TuneRankedDCT3DTransform:
             "budget_capped": int(n_budget_capped),
         }
 
+    # ------------------------------------------------------------------
+    # Selection helpers
+    # ------------------------------------------------------------------
+
+    def _prepare_signal_selection(
+        self,
+        *,
+        role: str,
+        name: str,
+        by_shape: Mapping[Shape3D, Tuple[np.ndarray, int]],
+    ) -> Tuple[Tuple[int, ...], Shape3D, int, np.ndarray, float, np.ndarray] | None:
+        """Prepare mean-energy statistics and sorted indices for one signal."""
+        shape = self.rep_shape.get((role, name))
+        if shape is None:
+            return None
+
+        if len(by_shape) != 1:
+            logger.warning(
+                "Signal %s:%s has multiple shapes: %s. Using first.",
+                role,
+                name,
+                list(by_shape.keys()),
+            )
+
+        key = next(iter(by_shape.keys()))
+        acc_energy, acc_count = by_shape[key]
+        if acc_count == 0:
+            logger.warning("Signal %s:%s has no windows, skipping", role, name)
+            return None
+
+        mean_energy = acc_energy / acc_count
+        total_energy = float(np.sum(mean_energy))
+        if total_energy <= 0:
+            logger.warning("Signal %s:%s has zero total energy, skipping", role, name)
+            return None
+
+        sorted_indices = np.argsort(mean_energy)[::-1]  # descending
+        return shape, key, acc_count, mean_energy, total_energy, sorted_indices
+
+    def _compute_target_k(
+        self,
+        *,
+        role: str,
+        name: str,
+        sorted_indices: np.ndarray,
+        mean_energy: np.ndarray,
+        total_energy: float,
+        target: float,
+    ) -> Tuple[int, np.ndarray]:
+        """Compute K required to meet explained-energy target."""
+        cumsum_energy = np.cumsum(mean_energy[sorted_indices])
+        explained_ratio = cumsum_energy / total_energy
+
+        meets_target = np.where(explained_ratio >= target)[0]
+        if len(meets_target) > 0:
+            k_target = int(meets_target[0]) + 1  # +1 because index is 0-based
+        else:
+            k_target = len(sorted_indices)
+            logger.warning(
+                "Signal %s:%s cannot reach target %.4f (max: %.4f), using all %d coeffs",
+                role,
+                name,
+                target,
+                explained_ratio[-1],
+                k_target,
+            )
+        return k_target, cumsum_energy
+
+    def _compute_guardrail_min_k(
+        self,
+        *,
+        shape: Tuple[int, ...],
+        sorted_indices: np.ndarray,
+        H: int,
+        W: int,
+        T: int,
+        role: str,
+        name: str,
+    ) -> int:
+        """Compute minimum K required by guardrails for one signal."""
+        if not self.guardrails_enable:
+            return 0
+        signal_type = self._determine_signal_type(shape)
+        return self._apply_dimension_guardrails(
+            sorted_indices, H, W, T, signal_type, role, name
+        )
+
+    def _resolve_k_selection(
+        self,
+        *,
+        role: str,
+        name: str,
+        sorted_indices: np.ndarray,
+        H: int,
+        W: int,
+        T: int,
+        k_target: int,
+        guardrail_min_k: int,
+        budget: int | None,
+        target: float,
+    ) -> _KSelection:
+        """Apply guardrail lift and budget cap to produce final K selection."""
+        k_after_guardrails = k_target
+        guardrail_increased_k = False
+        if self.guardrails_enable and guardrail_min_k > k_target:
+            guardrail_increased_k = True
+            k_after_guardrails = guardrail_min_k
+            coverage_before = _coverage_shape_for_topk(
+                sorted_indices, K=k_target, W=W, T=T
+            )
+            coverage_after = _coverage_shape_for_topk(
+                sorted_indices, K=k_after_guardrails, W=W, T=T
+            )
+            logger.info(
+                "Signal %s:%s hit guardrails: K %d -> %d | coverage(H,W,T) %s -> %s",
+                role,
+                name,
+                k_target,
+                k_after_guardrails,
+                coverage_before,
+                coverage_after,
+            )
+
+        k_final = k_after_guardrails
+        budget_capped = False
+        budget_violated_for_guardrails = False
+
+        if budget is not None and k_after_guardrails > budget:
+            budget_capped = True
+            k_final = int(budget)
+            guardrail_driven = self.guardrails_enable and guardrail_min_k > k_target
+            if guardrail_driven:
+                budget_violated_for_guardrails = True
+                logger.warning(
+                    "Signal %s:%s: guardrails need K=%d but budget=%d. "
+                    "Capping to budget=%d (guardrails not fully satisfied).",
+                    role,
+                    name,
+                    k_after_guardrails,
+                    budget,
+                    k_final,
+                )
+            else:
+                logger.warning(
+                    "Signal %s:%s: target=%.4f needs K=%d but budget=%d. "
+                    "Capping to budget=%d.",
+                    role,
+                    name,
+                    target,
+                    k_after_guardrails,
+                    budget,
+                    k_final,
+                )
+
+        return _KSelection(
+            k_target=int(k_target),
+            guardrail_min_k=int(guardrail_min_k),
+            k_after_guardrails=int(k_after_guardrails),
+            k_final=int(k_final),
+            guardrail_increased_k=bool(guardrail_increased_k),
+            budget_capped=bool(budget_capped),
+            budget_violated_for_guardrails=bool(budget_violated_for_guardrails),
+        )
+
+    def _build_selection_payload(
+        self,
+        *,
+        sorted_indices: np.ndarray,
+        cumsum_energy: np.ndarray,
+        total_energy: float,
+        H: int,
+        W: int,
+        T: int,
+        selection: _KSelection,
+        target: float,
+        n_windows: int,
+        budget: int | None,
+    ) -> Dict[str, Any]:
+        """Build per-signal result payload from selection decision."""
+        coeff_indices = sorted_indices[: selection.k_final].astype(np.int32)
+        achieved_energy = float(cumsum_energy[selection.k_final - 1] / total_energy)
+        indices_3d = np.unravel_index(coeff_indices, (H, W, T))
+        flags = self._selection_flags(
+            guardrail_increased_k=selection.guardrail_increased_k,
+            budget_capped=selection.budget_capped,
+            budget_violated_for_guardrails=selection.budget_violated_for_guardrails,
+        )
+
+        return {
+            "coeff_indices": coeff_indices,
+            "coeff_shape": (H, W, T),
+            "num_coeffs": selection.k_final,
+            "explained_energy": achieved_energy,
+            "target": target,
+            "n_windows": n_windows,
+            "max_budget": budget,
+            "k_target": selection.k_target,
+            "guardrail_min_k": selection.guardrail_min_k,
+            "k_after_guardrails": selection.k_after_guardrails,
+            "guardrail_increased_k": selection.guardrail_increased_k,
+            "budget_capped": selection.budget_capped,
+            "budget_violated_for_guardrails": selection.budget_violated_for_guardrails,
+            "dim_distribution": {
+                "unique_h": int(len(np.unique(indices_3d[0]))),
+                "unique_w": int(len(np.unique(indices_3d[1]))),
+                "unique_t": int(len(np.unique(indices_3d[2]))),
+            },
+            "flags": flags,
+        }
+
     def select_best(self) -> Dict[str, Dict[str, Dict[str, Any]]]:
         """Select top-K coefficients by variance for each signal.
 
@@ -603,159 +822,55 @@ class TuneRankedDCT3DTransform:
             budget = self.max_budget.get(role)
 
             for name, by_shape in by_sig.items():
-                shape = self.rep_shape.get((role, name))
-                if shape is None:
+                prepared = self._prepare_signal_selection(
+                    role=role, name=name, by_shape=by_shape
+                )
+                if prepared is None:
                     continue
-
-                # Should have exactly one shape key per signal
-                if len(by_shape) != 1:
-                    logger.warning(
-                        "Signal %s:%s has multiple shapes: %s. Using first.",
-                        role,
-                        name,
-                        list(by_shape.keys()),
-                    )
-
-                key = list(by_shape.keys())[0]
-                acc_energy, acc_count = by_shape[key]
-
-                if acc_count == 0:
-                    logger.warning("Signal %s:%s has no windows, skipping", role, name)
-                    continue
-
-                # Mean energy per coefficient
-                mean_energy = acc_energy / acc_count
-                total_energy = float(np.sum(mean_energy))
-
-                if total_energy <= 0:
-                    logger.warning(
-                        "Signal %s:%s has zero total energy, skipping", role, name
-                    )
-                    continue
-
-                # Sort coefficients by energy descending
-                sorted_indices = np.argsort(mean_energy)[::-1]  # descending
-
-                # Apply guardrails if enabled
+                shape, key, acc_count, mean_energy, total_energy, sorted_indices = prepared
                 H, W, T = key
-                guardrail_min_K = 0
-                if self.guardrails_enable:
-                    signal_type = self._determine_signal_type(shape)
-                    guardrail_min_K = self._apply_dimension_guardrails(
-                        sorted_indices, H, W, T, signal_type, role, name
-                    )
 
-                # Find smallest K where cumsum(energy[:K])/total >= target
-                cumsum_energy = np.cumsum(mean_energy[sorted_indices])
-                explained_ratio = cumsum_energy / total_energy
-
-                # Find first K that meets target
-                meets_target = np.where(explained_ratio >= target)[0]
-                if len(meets_target) > 0:
-                    K = int(meets_target[0]) + 1  # +1 because index is 0-based
-                else:
-                    # Target not achievable, use all coefficients
-                    K = len(sorted_indices)
-                    logger.warning(
-                        "Signal %s:%s cannot reach target %.4f (max: %.4f), using all %d coeffs",
-                        role,
-                        name,
-                        target,
-                        explained_ratio[-1],
-                        K,
-                    )
-
-                # Combine target + guardrails, then enforce budget as hard cap.
-                K_target = K
-                K_req = K_target
-                budget_capped = False
-                budget_violated_for_guardrails = False
-
-                guardrail_increased_k = False
-                if self.guardrails_enable and guardrail_min_K > K_target:
-                    guardrail_increased_k = True
-                    K_req = guardrail_min_K
-                    coverage_before = _coverage_shape_for_topk(
-                        sorted_indices, K=K_target, W=W, T=T
-                    )
-                    coverage_after = _coverage_shape_for_topk(
-                        sorted_indices, K=K_req, W=W, T=T
-                    )
-                    logger.info(
-                        "Signal %s:%s hit guardrails: K %d -> %d | coverage(H,W,T) %s -> %s",
-                        role,
-                        name,
-                        K_target,
-                        K_req,
-                        coverage_before,
-                        coverage_after,
-                    )
-
-                if budget is not None and K_req > budget:
-                    budget_capped = True
-                    K = int(budget)
-                    guardrail_driven = (
-                        self.guardrails_enable and guardrail_min_K > K_target
-                    )
-                    if guardrail_driven:
-                        budget_violated_for_guardrails = True
-
-                    if guardrail_driven:
-                        logger.warning(
-                            "Signal %s:%s: guardrails need K=%d but budget=%d. "
-                            "Capping to budget=%d (guardrails not fully satisfied).",
-                            role,
-                            name,
-                            K_req,
-                            budget,
-                            K,
-                        )
-                    else:
-                        logger.warning(
-                            "Signal %s:%s: target=%.4f needs K=%d but budget=%d. "
-                            "Capping to budget=%d.",
-                            role,
-                            name,
-                            target,
-                            K_req,
-                            budget,
-                            K,
-                        )
-                else:
-                    K = K_req
-
-                # Select top-K indices
-                coeff_indices = sorted_indices[:K].astype(np.int32)
-                achieved_energy = float(cumsum_energy[K - 1] / total_energy)
-                indices_3d = np.unravel_index(coeff_indices, (H, W, T))
-                flags = self._selection_flags(
-                    guardrail_increased_k=bool(guardrail_increased_k),
-                    budget_capped=bool(budget_capped),
-                    budget_violated_for_guardrails=bool(
-                        budget_violated_for_guardrails
-                    ),
+                guardrail_min_k = self._compute_guardrail_min_k(
+                    shape=shape,
+                    sorted_indices=sorted_indices,
+                    H=H,
+                    W=W,
+                    T=T,
+                    role=role,
+                    name=name,
+                )
+                k_target, cumsum_energy = self._compute_target_k(
+                    role=role,
+                    name=name,
+                    sorted_indices=sorted_indices,
+                    mean_energy=mean_energy,
+                    total_energy=total_energy,
+                    target=target,
+                )
+                selection = self._resolve_k_selection(
+                    role=role,
+                    name=name,
+                    sorted_indices=sorted_indices,
+                    H=H,
+                    W=W,
+                    T=T,
+                    k_target=k_target,
+                    guardrail_min_k=guardrail_min_k,
+                    budget=budget,
+                    target=target,
                 )
 
-                out.setdefault(role, {})[name] = {
-                    "coeff_indices": coeff_indices,
-                    "coeff_shape": (H, W, T),
-                    "num_coeffs": K,
-                    "explained_energy": achieved_energy,
-                    "target": target,
-                    "n_windows": acc_count,
-                    "max_budget": budget,
-                    "k_target": int(K_target),
-                    "guardrail_min_k": int(guardrail_min_K),
-                    "k_after_guardrails": int(K_req),
-                    "guardrail_increased_k": bool(guardrail_increased_k),
-                    "budget_capped": budget_capped,
-                    "budget_violated_for_guardrails": budget_violated_for_guardrails,
-                    "dim_distribution": {
-                        "unique_h": int(len(np.unique(indices_3d[0]))),
-                        "unique_w": int(len(np.unique(indices_3d[1]))),
-                        "unique_t": int(len(np.unique(indices_3d[2]))),
-                    },
-                    "flags": flags,
-                }
+                out.setdefault(role, {})[name] = self._build_selection_payload(
+                    sorted_indices=sorted_indices,
+                    cumsum_energy=cumsum_energy,
+                    total_energy=total_energy,
+                    H=H,
+                    W=W,
+                    T=T,
+                    selection=selection,
+                    target=target,
+                    n_windows=acc_count,
+                    budget=budget,
+                )
 
         return out
