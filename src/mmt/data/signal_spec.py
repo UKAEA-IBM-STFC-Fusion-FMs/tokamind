@@ -58,7 +58,10 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Mapping, Optional, Tuple
 import logging
 
-from mmt.data.embeddings.codec_utils import compute_embedding_dim_for_encoder
+from mmt.data.embeddings.codec_utils import (
+    compute_embedding_dim_for_encoder,
+    infer_hw_from_values_shape,
+)
 
 logger = logging.getLogger("mmt.SignalSpec")
 
@@ -203,6 +206,7 @@ def build_signal_specs(
     signals_by_role: Mapping[str, Mapping[str, str]],
     dict_metadata: Mapping[str, Mapping[str, Any]],
     chunk_length_sec: float,
+    log_summary: bool = True,
 ) -> SignalSpecRegistry:
     """
     Build a SignalSpecRegistry from embedding config + adapter-provided signal lists.
@@ -233,6 +237,8 @@ def build_signal_specs(
     chunk_length_sec:
         Chunk length used for input/actuator chunking (seconds). This is used to
         derive chunk counts/strides and to validate embeddings.
+    log_summary:
+        If True, print the grouped SignalSpec summary to ``mmt.SignalSpec`` logger.
 
     Returns
     -------
@@ -246,6 +252,7 @@ def build_signal_specs(
     overrides = embeddings_cfg.get("per_signal_overrides") or {}
 
     specs: List[SignalSpec] = []
+    native_shape_by_key: Dict[Tuple[str, str], Tuple[int, int, int]] = {}
     next_id = 0  # Unique ID per (role, name)
 
     # Deterministic ordering: sorted by role, then by name
@@ -300,6 +307,12 @@ def build_signal_specs(
                 chunk_length_sec=length_sec,
             )
 
+            # Native shape used by codec logic: canonical (H, W, T).
+            n_samples = max(1, int(round(float(length_sec) / float(dt))))
+            h_native, w_native = infer_hw_from_values_shape(values_shape)
+            native_shape = (int(h_native), int(w_native), int(n_samples))
+            native_shape_by_key[(role, name)] = native_shape
+
             # --- Create the SignalSpec
             spec = SignalSpec(
                 name=name,
@@ -315,20 +328,8 @@ def build_signal_specs(
 
     registry = SignalSpecRegistry(specs)
 
-    # Logging summary
-    logger.info(
-        "Built SignalSpecRegistry with %d role-specific signals", registry.num_signals
-    )
-    for spec in registry.specs:
-        logger.info(
-            "  • %-30s | role=%-8s | id=%3d | modality=%-10s | encoder=%s | dim=%s",
-            spec.name,
-            spec.role,
-            spec.signal_id,
-            spec.modality,
-            spec.encoder_name,
-            spec.embedding_dim,
-        )
+    if log_summary:
+        _log_signal_spec_summary(registry, native_shape_by_key=native_shape_by_key)
 
     return registry
 
@@ -336,6 +337,52 @@ def build_signal_specs(
 # ------------------------------------------------------------------
 # Helpers
 # ------------------------------------------------------------------
+
+
+def _format_explained_energy(encoder_kwargs: Mapping[str, Any]) -> str:
+    v = encoder_kwargs.get("explained_energy")
+    if isinstance(v, (int, float)):
+        return f"{float(v):.4f}"
+    return "-"
+
+
+def _role_log_order(roles: List[str]) -> List[str]:
+    preferred = ["output", "actuator", "input"]
+    out = [r for r in preferred if r in roles]
+    out.extend(sorted(r for r in roles if r not in preferred))
+    return out
+
+
+def _log_signal_spec_summary(
+    registry: SignalSpecRegistry,
+    *,
+    native_shape_by_key: Mapping[Tuple[str, str], Tuple[int, int, int]] | None = None,
+) -> None:
+    logger.info("Built SignalSpecRegistry with %d role-specific signals", registry.num_signals)
+    role_order = _role_log_order(registry.roles)
+    for role in role_order:
+        specs = sorted(registry.specs_for_role(role), key=lambda s: s.signal_id)
+        logger.info("%s:", role)
+        logger.info("  id | name | modality | encoder | native_shape | encoded_dim | expl_energy")
+        for spec in specs:
+            encoder_kwargs = (
+                spec.encoder_kwargs if isinstance(spec.encoder_kwargs, Mapping) else {}
+            )
+            native_shape = "-"
+            if native_shape_by_key is not None:
+                ns = native_shape_by_key.get((spec.role, spec.name))
+                if ns is not None:
+                    native_shape = str(tuple(ns))
+            logger.info(
+                "  id=%d | name=%s | modality=%s | encoder=%s | native_shape=%s | encoded_dim=%d | expl_energy=%s",
+                int(spec.signal_id),
+                str(spec.name),
+                str(spec.modality),
+                str(spec.encoder_name),
+                native_shape,
+                int(spec.embedding_dim),
+                _format_explained_energy(encoder_kwargs),
+            )
 
 
 def infer_modality(values_shape: Tuple[int, ...]) -> str:

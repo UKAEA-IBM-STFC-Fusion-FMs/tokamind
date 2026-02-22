@@ -291,6 +291,7 @@ def build_window_data(
                 shuffle_shots=(is_train and cfg_loader["shuffle_train"]),
                 seed=cfg_mmt.seed,
                 dtype=cfg_cache.get("dtype", None),
+                split_name=split_name,
             )
         else:
             window_dataset = window_iterable

@@ -27,6 +27,15 @@ from pathlib import Path
 import logging as py_logging
 
 
+class _BlankLineFormatter(py_logging.Formatter):
+    """Formatter that emits true blank lines when message is empty."""
+
+    def format(self, record: py_logging.LogRecord) -> str:
+        if record.getMessage() == "":
+            return ""
+        return super().format(record)
+
+
 def setup_logging(
     run_dir: Path,
     *,
@@ -70,7 +79,7 @@ def setup_logging(
     logger.setLevel(level_value)
 
     # Common formatter for all handlers
-    formatter = py_logging.Formatter(
+    formatter = _BlankLineFormatter(
         fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
     )

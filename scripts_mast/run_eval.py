@@ -119,6 +119,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Window data (test split only)
     # ------------------------------------------------------------------
+    logging.getLogger("mmt").info("")
     window_data = build_window_data(
         cfg_mmt=cfg_mmt,
         mast_datasets={"test": mast_dataset_test},
@@ -133,6 +134,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model
     # ------------------------------------------------------------------
+    logging.getLogger("mmt").info("")
     model = build_model_and_optional_warmstart(
         cfg_mmt=cfg_mmt,
         signal_specs=signal_specs,

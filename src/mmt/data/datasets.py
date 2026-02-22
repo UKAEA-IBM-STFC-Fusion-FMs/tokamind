@@ -169,6 +169,7 @@ class WindowCachedDataset(Dataset):
         shuffle_shots: bool = False,
         seed: int = 0,
         dtype: Optional[str] = None,
+        split_name: Optional[str] = None,
     ) -> "WindowCachedDataset":
         """Create a WindowCachedDataset from an IterableDataset.
 
@@ -186,6 +187,8 @@ class WindowCachedDataset(Dataset):
             Random seed for shuffling (only used if shuffle_shots=True).
         dtype:
             Optional dtype for cached embeddings ("float16" or "float32").
+        split_name:
+            Optional split label for logging (e.g., "train", "val", "test").
 
         Returns
         -------
@@ -199,6 +202,7 @@ class WindowCachedDataset(Dataset):
             shuffle_shots=shuffle_shots,
             seed=seed,
             dtype=dtype,
+            split_name=split_name,
         )
 
 
@@ -263,6 +267,7 @@ def materialize_tokenized_split_to_ram(
     shuffle_shots: bool = False,
     seed: int = 0,
     dtype: Optional[str] = None,
+    split_name: Optional[str] = None,
 ) -> WindowCachedDataset:
     """Materialise windows from an IterableDataset into a RAM-backed window dataset.
 
@@ -288,6 +293,8 @@ def materialize_tokenized_split_to_ram(
         Random seed for post-caching shuffle (only used if shuffle_shots=True).
     dtype:
         Optional dtype for cached embeddings ("float16" or "float32").
+    split_name:
+        Optional split label for logging (e.g., "train", "val", "test").
 
     Returns
     -------
@@ -302,6 +309,15 @@ def materialize_tokenized_split_to_ram(
     """
 
     dtype_np = _normalize_cache_dtype(dtype)
+    prefix = f"{split_name} | " if split_name else ""
+    logger.info(
+        "%sStarting cache materialization: max_windows=%s | num_workers_cache=%d | shuffle_shots=%s | dtype=%s",
+        prefix,
+        "all" if max_windows is None else int(max_windows),
+        int(num_workers_cache),
+        bool(shuffle_shots),
+        str(dtype) if dtype is not None else "none",
+    )
 
     # Note on shuffling: IterableDataset doesn't support DataLoader shuffling.
     # Shuffling must be configured in the IterableDataset itself (e.g., shuffle_windows=True).
@@ -348,11 +364,17 @@ def materialize_tokenized_split_to_ram(
 
     # Shuffle after caching if requested (since IterableDataset doesn't support DataLoader shuffle)
     if shuffle_shots and flat_windows:
-        logger.info("Shuffling %d cached windows (seed=%d)...", len(flat_windows), seed)
+        logger.info(
+            "%sShuffling %d cached windows (seed=%d)",
+            prefix,
+            len(flat_windows),
+            seed,
+        )
         random.Random(int(seed)).shuffle(flat_windows)
 
     logger.info(
-        "Materialised %d tokenised windows (num_workers_cache=%d, shuffle_shots=%s, dtype=%s, Final RAM: %.3f GB)",
+        "%sMaterialised %d tokenised windows (num_workers_cache=%d, shuffle_shots=%s, dtype=%s, Final RAM: %.3f GB)",
+        prefix,
         len(flat_windows),
         int(num_workers_cache),
         bool(shuffle_shots),

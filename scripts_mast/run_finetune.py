@@ -136,6 +136,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Window data
     # ------------------------------------------------------------------
+    logging.getLogger("mmt").info("")
     window_data = build_window_data(
         cfg_mmt=cfg_mmt,
         mast_datasets={"train": mast_dataset_train, "val": mast_dataset_val},
@@ -152,6 +153,7 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Model
     # ------------------------------------------------------------------
+    logging.getLogger("mmt").info("")
     model = build_model_and_optional_warmstart(
         cfg_mmt=cfg_mmt,
         signal_specs=signal_specs,
@@ -161,9 +163,9 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Finetune
     # ------------------------------------------------------------------
-    logging.getLogger("mmt.Train").info("Starting finetuning...")
+    logging.getLogger("mmt.Train").info("")
     with sdpa_math_only_ctx():
-        history = train_finetune(
+        train_finetune(
             model=model,
             train_loader=dataloader_mmt_train,
             val_loader=dataloader_mmt_val,
@@ -171,8 +173,6 @@ def main() -> None:
             train_cfg=cfg_train,
             loader_cfg=cfg_loader,
         )
-
-    logging.getLogger("mmt.Train").info("%s", history)
 
 
 if __name__ == "__main__":

@@ -89,6 +89,23 @@ def _dct_view_shape(native_shape: Tuple[int, ...]) -> Tuple[int, int, int]:
     raise ValueError(f"Unsupported native_shape={native_shape!r}")
 
 
+def _format_guardrail_rules(rules: Mapping[str, Any]) -> str:
+    """Format active guardrail rules in stable key order."""
+    ordered_keys = ("min_unique_h", "min_unique_w", "min_unique_t")
+    parts: List[str] = []
+    for key in ordered_keys:
+        val = rules.get(key)
+        if val is not None:
+            parts.append(f"{key}={int(val)}")
+    for key in sorted(rules.keys()):
+        if key in ordered_keys:
+            continue
+        val = rules.get(key)
+        if val is not None:
+            parts.append(f"{key}={val}")
+    return ", ".join(parts) if parts else "-"
+
+
 class TuneRankedDCT3DTransform:
     """Variance-based DCT3D coefficient selector (rank mode)."""
 
@@ -200,12 +217,19 @@ class TuneRankedDCT3DTransform:
                 if isinstance(type_config, dict):
                     self.guardrails_config[signal_type] = dict(type_config)
 
-        logger.info(
+        logger.debug(
             "TuneRankedDCT3D initialized | roles=%s | budgets=%s | guardrails=%s",
             ",".join(self.roles),
             {r: self.max_budget.get(r) for r in self.roles},
             "enable" if self.guardrails_enable else "disabled",
         )
+        if self.guardrails_enable:
+            logger.info(
+                "Active guardrails: timeseries[%s] profile[%s] video[%s]",
+                _format_guardrail_rules(self.guardrails_config["timeseries"]),
+                _format_guardrail_rules(self.guardrails_config["profile"]),
+                _format_guardrail_rules(self.guardrails_config["video"]),
+            )
 
     def _full_codec(self, H: int, W: int, T: int) -> DCT3DCodec:
         """Get (or create) a codec that keeps the full DCT grid."""
@@ -563,9 +587,11 @@ class TuneRankedDCT3DTransform:
                 budget_capped = False
                 budget_violated_for_guardrails = False
 
+                guardrail_increased_k = False
                 if self.guardrails_enable and guardrail_min_K > K_target:
+                    guardrail_increased_k = True
                     K_req = guardrail_min_K
-                    logger.info(
+                    logger.debug(
                         "Signal %s:%s: increasing K from %d to %d to meet guardrails",
                         role,
                         name,
@@ -618,6 +644,10 @@ class TuneRankedDCT3DTransform:
                     "target": target,
                     "n_windows": acc_count,
                     "max_budget": budget,
+                    "k_target": int(K_target),
+                    "guardrail_min_k": int(guardrail_min_K),
+                    "k_after_guardrails": int(K_req),
+                    "guardrail_increased_k": bool(guardrail_increased_k),
                     "budget_capped": budget_capped,
                     "budget_violated_for_guardrails": budget_violated_for_guardrails,
                 }

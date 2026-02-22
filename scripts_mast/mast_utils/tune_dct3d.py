@@ -32,7 +32,7 @@ from mmt.data import (
     ComposeTransforms,
 )
 
-logger = logging.getLogger("mmt.TuneEmbeddings")
+logger = logging.getLogger("mmt.TuneRankedDCT3D")
 
 
 def run_dct3d_tuning(
@@ -83,16 +83,27 @@ def run_dct3d_tuning(
     cfg_data = cfg_mmt.data
     cfg_prep = cfg_mmt.preprocess
     cfg_tune = cfg_mmt.embeddings.get("tune_embeddings", {})
+    cfg_objective = cfg_tune.get("objective", {})
 
     n_shots = cfg_tune.get("n_shots", 100)
     max_windows = cfg_tune.get("max_windows", 15000)
     local_flag = cfg_data.get("local", True)
+    max_budget_cfg = cfg_objective.get("max_budget", {})
+    budget_summary = (
+        {r: max_budget_cfg.get(r) for r in roles}
+        if isinstance(max_budget_cfg, Mapping)
+        else max_budget_cfg
+    )
+    guardrails_cfg = cfg_tune.get("guardrails") or {}
+    guardrails_state = "enabled" if guardrails_cfg.get("enable") else "disabled"
 
     logger.info(
-        "Starting DCT3D embedding tuning: n_shots=%d max_windows=%d roles=%s",
+        "n_shots=%d | max_windows=%d | roles=%s | budgets=%s | guardrails=%s",
         n_shots,
         max_windows,
         ",".join(roles),
+        budget_summary,
+        guardrails_state,
     )
 
     # ------------------------------------------------------------------
@@ -122,10 +133,10 @@ def run_dct3d_tuning(
 
     tune_transform = TuneRankedDCT3DTransform(
         signal_specs=signal_specs,
-        thresholds=cfg_tune.get("objective", {}).get("thresholds", {}),
-        max_budget=cfg_tune.get("objective", {}).get("max_budget", {}),
+        thresholds=cfg_objective.get("thresholds", {}),
+        max_budget=max_budget_cfg,
         roles=roles,
-        guardrails=cfg_tune.get("guardrails"),
+        guardrails=guardrails_cfg,
     )
 
     transform_pipeline = ComposeTransforms(
@@ -175,16 +186,34 @@ def run_dct3d_tuning(
     # ------------------------------------------------------------------
     best = tune_transform.select_best()
 
+    n_signals = 0
+    n_guardrail_up = 0
+    n_budget_capped = 0
     for role, by_sig in best.items():
         for name, info in by_sig.items():
-            logger.info(
-                "[%s:%s] shape=%s num_coeffs=%d expl_energy=%.4f",
+            n_signals += 1
+            if bool(info.get("guardrail_increased_k", False)):
+                n_guardrail_up += 1
+            if bool(info.get("budget_capped", False)):
+                n_budget_capped += 1
+
+            logger.debug(
+                "[%s:%s] shape=%s K_target=%s K_final=%d expl_energy=%.4f flags={guardrail_up:%s,budget_cap:%s}",
                 role,
                 name,
                 info["coeff_shape"],
+                info.get("k_target", "-"),
                 info["num_coeffs"],
                 info["explained_energy"],
+                bool(info.get("guardrail_increased_k", False)),
+                bool(info.get("budget_capped", False)),
             )
+    logger.info(
+        "DCT3D tuning summary: signals=%d guardrail_up=%d budget_capped=%d",
+        n_signals,
+        n_guardrail_up,
+        n_budget_capped,
+    )
 
     # ------------------------------------------------------------------
     # Save indices and config
@@ -207,6 +236,14 @@ def run_dct3d_tuning(
 
             h, w, t = info["coeff_shape"]
             indices_3d = np.unravel_index(coeff_indices, (h, w, t))
+            flags: list[str] = []
+            if bool(info.get("guardrail_increased_k", False)):
+                flags.append("guardrail_up")
+            if bool(info.get("budget_capped", False)):
+                if bool(info.get("budget_violated_for_guardrails", False)):
+                    flags.append("budget_cap_guardrail")
+                else:
+                    flags.append("budget_cap")
 
             per_signal_overrides.setdefault(role, {})[name] = {
                 "encoder_name": "dct3d",
@@ -220,6 +257,21 @@ def run_dct3d_tuning(
                         "unique_h": int(len(np.unique(indices_3d[0]))),
                         "unique_w": int(len(np.unique(indices_3d[1]))),
                         "unique_t": int(len(np.unique(indices_3d[2]))),
+                    },
+                    "tuning_info": {
+                        "target": float(info["target"]),
+                        "k_target": int(info.get("k_target", info["num_coeffs"])),
+                        "guardrail_min_k": int(info.get("guardrail_min_k", 0)),
+                        "k_after_guardrails": int(
+                            info.get("k_after_guardrails", info["num_coeffs"])
+                        ),
+                        "k_final": int(info["num_coeffs"]),
+                        "n_windows": int(info["n_windows"]),
+                        "max_budget": None
+                        if info.get("max_budget") is None
+                        else int(info["max_budget"]),
+                        "flags": flags,
+                        "tuned_in_run_id": str(run_dir.name),
                     },
                 },
             }

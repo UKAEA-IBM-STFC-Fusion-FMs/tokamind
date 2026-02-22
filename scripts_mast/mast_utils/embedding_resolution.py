@@ -120,10 +120,11 @@ def resolve_pretrain_embeddings(
             signals_by_role=signals_by_role,
             dict_metadata=dict_task_metadata,
             chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
+            log_summary=False,
         )
 
         # Step 2: tune DCT3D coefficients and save indices to run_dir/embeddings/
-        logger.info("Running DCT3D embedding tuning for roles: %s", roles_to_tune)
+        logger.info("")
         per_signal_overrides = run_dct3d_tuning(
             cfg_mmt=cfg_mmt,
             signal_specs=signal_specs,
@@ -143,6 +144,7 @@ def resolve_pretrain_embeddings(
         save_config_snapshot(cfg_mmt, run_dir, logger)
 
     # Step 5: (re)build signal_specs with tuned config (rank-mode dims)
+    logger.info("")
     signal_specs = build_signal_specs(
         embeddings_cfg=cfg_mmt.embeddings,
         signals_by_role=signals_by_role,
@@ -340,6 +342,7 @@ def resolve_finetune_embeddings(
         roles_to_inherit = [
             r for r in ("input", "actuator", "output") if r not in roles_to_tune
         ]
+        logger.info("")
         logger.info(
             "Embeddings mode=source | retune=%s | inherit=%s",
             roles_to_tune or "none",
@@ -380,6 +383,7 @@ def resolve_finetune_embeddings(
                     signals_by_role=signals_by_role,
                     dict_metadata=dict_task_metadata,
                     chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
+                    log_summary=False,
                 )
 
                 # Strict validation: check signal-level parameters
@@ -410,6 +414,7 @@ def resolve_finetune_embeddings(
                 signals_by_role=signals_by_role,
                 dict_metadata=dict_task_metadata,
                 chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
+                log_summary=False,
             )
             logger.info("Re-tuning DCT3D embeddings for roles: %s", roles_to_tune)
             new_overrides = run_dct3d_tuning(
@@ -429,11 +434,13 @@ def resolve_finetune_embeddings(
         save_config_snapshot(cfg_mmt, run_dir, logger)
 
     else:  # emb_mode == "config"
+        logger.info("")
         logger.info(
             "Embeddings mode=config: using emb_profile config directly (no source artifacts)"
         )
 
     # Step 6: (Re)build signal_specs with final config
+    logger.info("")
     signal_specs = build_signal_specs(
         embeddings_cfg=cfg_mmt.embeddings,
         signals_by_role=signals_by_role,
@@ -493,6 +500,7 @@ def resolve_eval_embeddings(
             cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
 
     # Build signal_specs with loaded config
+    logger.info("")
     signal_specs = build_signal_specs(
         embeddings_cfg=cfg_mmt.embeddings,
         signals_by_role=signals_by_role,
