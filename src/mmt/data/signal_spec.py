@@ -347,7 +347,7 @@ def _format_explained_energy(encoder_kwargs: Mapping[str, Any]) -> str:
 
 
 def _role_log_order(roles: List[str]) -> List[str]:
-    preferred = ["output", "actuator", "input"]
+    preferred = ["input", "actuator", "output"]
     out = [r for r in preferred if r in roles]
     out.extend(sorted(r for r in roles if r not in preferred))
     return out
@@ -358,12 +358,16 @@ def _log_signal_spec_summary(
     *,
     native_shape_by_key: Mapping[Tuple[str, str], Tuple[int, int, int]] | None = None,
 ) -> None:
-    logger.info("Built SignalSpecRegistry with %d role-specific signals", registry.num_signals)
+    logger.info(
+        "Built SignalSpecRegistry with %d role-specific signals", registry.num_signals
+    )
     role_order = _role_log_order(registry.roles)
     for role in role_order:
         specs = sorted(registry.specs_for_role(role), key=lambda s: s.signal_id)
         logger.info("%s:", role)
-        logger.info("  id | name | modality | encoder | native_shape | encoded_dim | expl_energy")
+        logger.info(
+            "  id | name | modality | encoder | native_shape | encoded_dim | expl_energy"
+        )
         for spec in specs:
             encoder_kwargs = (
                 spec.encoder_kwargs if isinstance(spec.encoder_kwargs, Mapping) else {}
