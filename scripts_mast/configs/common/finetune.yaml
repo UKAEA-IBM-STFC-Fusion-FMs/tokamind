@@ -65,14 +65,14 @@ embeddings:
       actuator: false
       output: true
 
-  guardrails:
-    enable: true
+    guardrails:
+      enable: true
 
-  objective:
-    thresholds:
-      output: 0.999
-    max_budget:
-      output: 9216
+    objective:
+      thresholds:
+        output: 0.999
+      max_budget:
+        output: 9216
 
 
 collate:
