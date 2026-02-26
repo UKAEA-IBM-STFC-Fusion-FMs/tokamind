@@ -37,7 +37,7 @@ from __future__ import annotations
 import csv
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Optional, cast
 
 import numpy as np
 import torch
@@ -165,7 +165,7 @@ def evaluate_benchmark_and_diagnostics(
         wr_ts.writerow(
             [
                 "shot_id",
-                "window_id",
+                "window_index",
                 "time_id",
                 "feature_name",
                 "RMSE",
@@ -233,7 +233,7 @@ def evaluate_benchmark_and_diagnostics(
                         y_target=y_t,
                         y_pred=y_p,
                         shot_id=shot_ids[idx],
-                        window_id=window_indices[idx],
+                        window_index=window_indices[idx],
                         feature_name=out_name,
                     )
 
@@ -352,7 +352,9 @@ def evaluate_benchmark_and_diagnostics(
 
     try:
         if per_task:
-            df = compute_task_metrics(task=task_name, output_dir=benchmark_dir, save=True)
+            df = cast(
+                Any, compute_task_metrics(task=task_name, output_dir=str(benchmark_dir), save=True)
+            )
             # Return a small, JSON-friendly summary for logging.
             if task_name in df.index:
                 result["task_metrics"] = {
