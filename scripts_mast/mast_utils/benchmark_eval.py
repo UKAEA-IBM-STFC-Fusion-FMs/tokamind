@@ -44,30 +44,12 @@ import torch
 
 from mmt.eval.forward import forward_decode_native
 
-from .benchmark_imports import WindowMetricsWriter, compute_task_metrics
+from .benchmark_imports import WindowMetricsAccumulator, compute_metrics
 
 
 logger = logging.getLogger("mmt.Eval")
 
-WINDOW_METRICS_FILE = "windows_metrics.csv"
-
 _LOG_INTERVAL = 50000
-
-
-def _safe_unlink(path: Path) -> None:
-    """Best-effort unlink for eval artifacts.
-
-    The benchmark's AutoAppendingDataFrame may create sidecar lock files
-    (e.g. ``windows_metrics.csv.lock``). We remove those at the end of eval
-    to keep the run directory clean.
-    """
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        return
-    except Exception:
-        # Non-fatal cleanup failure (e.g. permissions / transient FS issues).
-        logger.warning("Could not delete file: %s", path, exc_info=True)
 
 
 def _reduce_mask(mask: np.ndarray) -> np.ndarray:
@@ -143,15 +125,8 @@ def evaluate_benchmark_and_diagnostics(
     if cfg_traces.get("enable", False):
         traces_dir.mkdir(parents=True, exist_ok=True)
 
-    # ------------------------------------------------------------------
-    # Benchmark writers (MAST_benchmark)
-    # ------------------------------------------------------------------
-    need_windows_file = bool(per_task or per_window)
-    window_writer = (
-        WindowMetricsWriter(task=task_name, output_dir=benchmark_dir)
-        if need_windows_file
-        else None
-    )
+    need_benchmark_metrics = bool(per_task or per_window)
+    accumulator = WindowMetricsAccumulator(task_name) if need_benchmark_metrics else None
 
     # ------------------------------------------------------------------
     # Per-timestamp CSV writer (MMT-native diagnostic)
@@ -212,9 +187,9 @@ def evaluate_benchmark_and_diagnostics(
                 next_log_at += _LOG_INTERVAL
 
             # ------------------------------------------------------------------
-            # Benchmark per-window metrics
+            # Benchmark per-window metrics (buffered in memory)
             # ------------------------------------------------------------------
-            if window_writer is not None:
+            if need_benchmark_metrics:
                 for out_name in stats.keys():
                     if out_name not in y_true or out_name not in y_pred:
                         continue
@@ -229,13 +204,14 @@ def evaluate_benchmark_and_diagnostics(
                     y_t = y_true[out_name][idx].reshape(len(idx), -1)
                     y_p = y_pred[out_name][idx].reshape(len(idx), -1)
 
-                    window_writer.compute_and_append(
-                        y_target=y_t,
-                        y_pred=y_p,
-                        shot_id=shot_ids[idx],
-                        window_index=window_indices[idx],
-                        feature_name=out_name,
-                    )
+                    if accumulator is not None:
+                        accumulator.add_batch(
+                            y_target=y_t,
+                            y_pred=y_p,
+                            shot_id=shot_ids[idx],
+                            window_index=window_indices[idx],
+                            feature_name=out_name,
+                        )
 
             # ------------------------------------------------------------------
             # Per-timestamp metrics CSV
@@ -347,38 +323,25 @@ def evaluate_benchmark_and_diagnostics(
         "task": task_name,
     }
 
-    window_metrics_path = benchmark_dir / task_name / WINDOW_METRICS_FILE
-    lock_path = window_metrics_path.with_suffix(window_metrics_path.suffix + ".lock")
+    if need_benchmark_metrics:
+        if accumulator is None or accumulator.is_empty():
+            logger.warning("No benchmark windows were collected for task %s", task_name)
+            return result
 
-    try:
-        if per_task:
-            df = cast(
-                Any, compute_task_metrics(task=task_name, output_dir=str(benchmark_dir), save=True)
-            )
-            # Return a small, JSON-friendly summary for logging.
-            if task_name in df.index:
-                result["task_metrics"] = {
-                    k: float(v) for k, v in df.loc[task_name].to_dict().items()
-                }
-    finally:
-        # Best-effort close underlying writer to release locks before cleanup.
-        if window_writer is not None:
-            w = getattr(window_writer, "writer", None)
-            close_fn = getattr(w, "close", None) if w is not None else None
-            if callable(close_fn):
-                try:
-                    close_fn()
-                except Exception:
-                    logger.debug(
-                        "Ignoring error while closing benchmark AutoAppendingDataFrame",
-                        exc_info=True,
-                    )
-
-        # Always remove the lock sidecar if it exists.
-        _safe_unlink(lock_path)
-
-        # If users don't want per-window outputs, remove the intermediate CSV too.
-        if need_windows_file and (not per_window):
-            _safe_unlink(window_metrics_path)
+        df = cast(
+            Any,
+            compute_metrics(
+                task=task_name,
+                output_dir=str(benchmark_dir),
+                window_metrics_accumulator=accumulator,
+                save_windows_metrics=per_window,
+                save_task_metrics=per_task,
+            ),
+        )
+        # Return a small, JSON-friendly summary for logging.
+        if per_task and task_name in df.index:
+            result["task_metrics"] = {
+                k: float(v) for k, v in df.loc[task_name].to_dict().items()
+            }
 
     return result
