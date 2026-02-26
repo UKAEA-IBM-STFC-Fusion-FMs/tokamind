@@ -6,13 +6,13 @@ The repository is split into two layers:
 - `src/mmt/`: dataset-agnostic core library (model, codecs, transforms, training loop)
 - `scripts_mast/`: FAIR/MAST integration layer (task configs, data wiring, entry scripts)
 
-## Description
+## 📝 Description
 TokaMind implements a schema-flexible tokenization pipeline and a modular multi-modal Transformer with per-output adapters.
 
 [![MMT architecture](assets/mmt_architecture.png)](assets/mmt_architecture.pdf)
 *Figure: Tokenization + model flow.* Windowed multimodal inputs and actuators are chunked and compressed by signal-specific codecs into tokens. Tokens are projected to a shared model dimension, processed by a Transformer backbone, and mapped to targets via modality heads and per-output adapters.
 
-## Documentation
+## 📚 Documentation
 - [Configuration Guide](docs/config_guide.md)
 - [Configuration Reference](docs/config_reference.md)
 - [DCT3D Tuning](docs/tuning_dct3d.md)
@@ -23,7 +23,7 @@ TokaMind implements a schema-flexible tokenization pipeline and a modular multi-
 - [Model Architecture](docs/model_architecture.md)
 - [Model Flexibility](docs/model_flexibility.md)
 
-## Repository Layout
+## 🗂️ Repository Layout
 ```text
 .
 ├── src/mmt/                           # Core package
@@ -93,7 +93,7 @@ cd ../vae-fairmast
 pip install -e .
 ```
 
-## Run Workflow
+## 🚀 Run Workflow
 ### 1) Pretrain
 ```bash
 python scripts_mast/run_pretrain.py \
@@ -122,14 +122,14 @@ python scripts_mast/run_finetune.py \
   --tag exp1
 ```
 
-### 3) Evaluate
+### 3) 🔍 Evaluate
 ```bash
 python scripts_mast/run_eval.py \
   --task task_2-1 \
   --model ft-task_2-1-ws-tokamind_base-exp1
 ```
 
-## Configuration Model
+## ⚙️ Configuration Model
 Configuration is convention-based and merged by phase.
 
 Base files:
@@ -151,7 +151,7 @@ Details are in:
 - [Configuration Guide](docs/config_guide.md)
 - [Configuration Reference](docs/config_reference.md)
 
-## Embedding Resolution
+## 🧩 Embedding Resolution
 DCT3D tuning is integrated in the training scripts and controlled through `embeddings.tune_embeddings`.
 
 - Pretrain: `tune_embeddings.roles` selects which roles to tune.
@@ -160,7 +160,7 @@ DCT3D tuning is integrated in the training scripts and controlled through `embed
 
 Details are in [DCT3D Tuning](docs/tuning_dct3d.md).
 
-## Outputs
+## 📁 Outputs
 Training runs are written under:
 - `runs/<run_id>/`
 
@@ -176,5 +176,5 @@ See:
 - [Checkpointing and Warmstart](docs/checkpointing_and_warmstart.md)
 - [Evaluation](docs/evaluation.md)
 
-## License
+## 📄 License
 MIT (see `pyproject.toml`).
