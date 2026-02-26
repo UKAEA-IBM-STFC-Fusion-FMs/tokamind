@@ -43,7 +43,7 @@ def _coerce_overrides_to_int_keys(d: Any, *, name: str) -> Dict[int, float]:
     """Coerce a mapping {signal_id -> p} into a Dict[int, float].
 
     The public YAML config is allowed to be name-keyed, but it must be
-    converted to id-keyed *once at startup* (see pipeline_helpers.make_collate_fn).
+    converted to id-keyed *once at startup* (see pipeline_ops.make_collate_fn).
 
     Keeping collate id-keyed avoids storing per-token signal names in every window.
     """
@@ -94,7 +94,7 @@ class MMTCollate:
     -------------
     Public config still specifies override keys by *signal name* (human-friendly).
     The run pipeline converts those override dicts to be keyed by numeric
-    `signal_id` once at startup (see `pipeline_helpers.make_collate_fn`).
+    `signal_id` once at startup (see `pipeline_ops.make_collate_fn`).
 
     This class expects the post-conversion form:
 
@@ -124,7 +124,7 @@ class MMTCollate:
     -----
     - Per-signal dropout overrides used by collate are keyed by **signal_id**.
       Name-keyed overrides should be converted once at startup (see
-      ``pipeline_helpers.make_collate_fn``).
+      ``pipeline_ops.make_collate_fn``).
 
     - This collate keeps the dtype of token embeddings and output embeddings
       (e.g. float16 cached windows remain float16 through collation).

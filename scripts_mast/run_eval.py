@@ -14,7 +14,7 @@ This script is intentionally thin:
 - writes outputs under the eval run directory (cfg_mmt.paths["run_dir"]).
 
 Shared boilerplate lives in:
-- `mast_utils.entry_script_helpers`
+- `mast_utils.entry_helpers`
 - `mast_utils.embedding_resolution`
 """
 

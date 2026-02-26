@@ -17,7 +17,7 @@ build_model_and_optional_warmstart() — Model construction + warmstart
 Design notes:
 -------------
 - These helpers are intentionally high-level orchestration functions
-- Low-level primitives (transforms, collate, etc.) remain in pipeline_helpers.py
+- Low-level primitives (transforms, collate, etc.) remain in pipeline_ops.py
 - Embedding resolution logic lives in embedding_resolution.py / tune_dct3d.py
 """
 
@@ -35,7 +35,7 @@ from mast_utils.benchmark_imports import (
     get_train_test_val_shots,
 )
 
-from mast_utils.pipeline_helpers import (
+from mast_utils.pipeline_ops import (
     setup_device_and_mp,
     build_default_transform,
     make_collate_fn,
