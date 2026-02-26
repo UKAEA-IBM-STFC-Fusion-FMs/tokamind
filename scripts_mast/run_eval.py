@@ -225,7 +225,7 @@ def main() -> None:
 
         if "task_metrics" in result:
             logger.info("Benchmark task metrics: %s", result["task_metrics"])
-        logger.info("Benchmark outputs dir: %s", result.get("benchmark_dir"))
+        logger.info("Task metrics dir: %s", result.get("metrics_task_dir"))
     else:
         logger.info(
             "[eval] compute_metrics: per_task, per_window, per_timestamp and traces are disabled; skipping evaluation."

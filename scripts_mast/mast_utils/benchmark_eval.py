@@ -12,21 +12,21 @@ What this module provides
 -------------------------
 One *single-pass* evaluation loop that can produce:
 
-- Benchmark metrics:
+- Task metrics:
     - per-window: ``windows_metrics.csv`` (optional)
     - per-task:   ``tasks_metrics.csv`` (optional)
+    - per-timestamp: ``timestamps_metrics.csv`` (optional)
 
   written under:
 
-    ``<eval_run_dir>/benchmark/<task>/``
+    ``<eval_run_dir>/metrics/<task>/``
 
-- Optional MMT-native diagnostics:
-    - per-timestamp metrics CSV
+- Optional traces diagnostics:
     - qualitative traces (NPZ)
 
   written under:
 
-    ``<eval_run_dir>/metrics/`` and ``<eval_run_dir>/traces/``
+    ``<eval_run_dir>/traces/``
 
 The loop uses ``mmt.eval.forward.forward_decode_native`` so decoding and
 de-standardisation remain in `mmt/`.
@@ -50,6 +50,7 @@ from .benchmark_imports import WindowMetricsAccumulator, compute_metrics
 logger = logging.getLogger("mmt.Eval")
 
 _LOG_INTERVAL = 50000
+TIMESTAMPS_METRICS_FILE = "timestamps_metrics.csv"
 
 
 def _reduce_mask(mask: np.ndarray) -> np.ndarray:
@@ -115,17 +116,17 @@ def evaluate_benchmark_and_diagnostics(
     # ------------------------------------------------------------------
     # Output directories
     # ------------------------------------------------------------------
-    benchmark_dir = run_dir / "benchmark"
-    metrics_dir = run_dir / "metrics"
+    metrics_root_dir = run_dir / "metrics"
+    metrics_task_dir = metrics_root_dir / task_name
     traces_dir = run_dir / "traces"
 
-    benchmark_dir.mkdir(parents=True, exist_ok=True)
-    if per_timestamp:
-        metrics_dir.mkdir(parents=True, exist_ok=True)
+    need_benchmark_metrics = bool(per_task or per_window)
+    need_metrics_task_dir = bool(need_benchmark_metrics or per_timestamp)
+    if need_metrics_task_dir:
+        metrics_task_dir.mkdir(parents=True, exist_ok=True)
     if cfg_traces.get("enable", False):
         traces_dir.mkdir(parents=True, exist_ok=True)
 
-    need_benchmark_metrics = bool(per_task or per_window)
     accumulator = WindowMetricsAccumulator(task_name) if need_benchmark_metrics else None
 
     # ------------------------------------------------------------------
@@ -134,7 +135,7 @@ def evaluate_benchmark_and_diagnostics(
     f_ts = None
     wr_ts = None
     if per_timestamp:
-        csv_ts = metrics_dir / f"{task_name}_metrics_per_timestamp.csv"
+        csv_ts = metrics_task_dir / TIMESTAMPS_METRICS_FILE
         f_ts = csv_ts.open("w", newline="")
         wr_ts = csv.writer(f_ts)
         wr_ts.writerow(
@@ -316,10 +317,11 @@ def evaluate_benchmark_and_diagnostics(
                 )
 
     # ------------------------------------------------------------------
-    # Benchmark task aggregation
+    # Task aggregation
     # ------------------------------------------------------------------
     result: Dict[str, Any] = {
-        "benchmark_dir": str(benchmark_dir),
+        "metrics_task_dir": str(metrics_task_dir),
+        "metrics_root_dir": str(metrics_root_dir),
         "task": task_name,
     }
 
@@ -332,7 +334,7 @@ def evaluate_benchmark_and_diagnostics(
             Any,
             compute_metrics(
                 task=task_name,
-                output_dir=str(benchmark_dir),
+                output_dir=str(metrics_root_dir),
                 window_metrics_accumulator=accumulator,
                 save_windows_metrics=per_window,
                 save_task_metrics=per_task,
