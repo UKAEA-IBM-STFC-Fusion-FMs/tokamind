@@ -14,7 +14,7 @@ One *single-pass* evaluation loop that can produce:
 
 - Task metrics:
     - per-window: ``windows_metrics.csv`` (optional)
-    - per-task:   ``tasks_metrics.csv`` (optional)
+    - per-task:   ``task_metrics.csv`` (optional)
     - per-timestamp: ``timestamps_metrics.csv`` (optional)
 
   written under:
@@ -92,7 +92,7 @@ def evaluate_benchmark_and_diagnostics(
         Whether to enable AMP in the forward pass.
     compute_metrics_cfg : dict
         Supports keys:
-          - per_task: bool (benchmark aggregation -> tasks_metrics.csv)
+          - per_task: bool (benchmark aggregation -> task_metrics.csv)
           - per_window: bool (keep windows_metrics.csv)
           - per_timestamp: bool (MMT-native per-timestamp CSV)
     traces_cfg : dict

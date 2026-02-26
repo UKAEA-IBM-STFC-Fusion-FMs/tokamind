@@ -9,7 +9,7 @@ This script is intentionally thin:
 - builds eval window data via shared helpers,
 - loads the best checkpoint from model_source.run_dir,
 - runs a single-pass evaluation loop:
-  - benchmark-aligned metrics (windows_metrics.csv + tasks_metrics.csv)
+  - benchmark-aligned metrics (windows_metrics.csv + task_metrics.csv)
   - optional MMT-native diagnostics (per-timestamp CSV + traces),
 - writes outputs under the eval run directory (cfg_mmt.paths["run_dir"]).
 
