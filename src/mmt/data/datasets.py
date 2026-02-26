@@ -176,7 +176,7 @@ class WindowCachedDataset(Dataset):
         Parameters
         ----------
         streaming_dataset:
-            An IterableDataset that yields windows (e.g., TaskModelTransformWrapperIterable).
+            An IterableDataset that yields windows (e.g., TokaMarkDataset).
         max_windows:
             Optional cap on number of windows to cache.
         num_workers_cache:
@@ -278,7 +278,7 @@ def materialize_tokenized_split_to_ram(
     Parameters
     ----------
     streaming_dataset:
-        An IterableDataset that yields windows directly (e.g., TaskModelTransformWrapperIterable).
+        An IterableDataset that yields windows directly (e.g., TokaMarkDataset).
         The IterableDataset's __iter__ method handles worker splitting internally.
     max_windows:
         Optional cap on number of windows to cache.

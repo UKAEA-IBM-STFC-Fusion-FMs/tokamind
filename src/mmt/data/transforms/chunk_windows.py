@@ -16,7 +16,7 @@ Key design (v0)
 
 Expected input window
 ---------------------
-From TaskModelTransformWrapper:
+From TokaMarkDataset (benchmark window iterable):
 
     window["input"][key]    = {"time": ..., "values": np.ndarray[..., T]}
     window["actuator"][key] = {"time": ..., "values": np.ndarray[..., T]}

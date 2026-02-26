@@ -41,7 +41,7 @@ import yaml
 
 from mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
-    initialize_model_dataset_iterable,
+    initialize_TokaMark_dataset,
     get_train_test_val_shots,
 )
 
@@ -178,11 +178,11 @@ def run_dct3d_tuning(
         ]
     )
 
-    ds_windows = initialize_model_dataset_iterable(
+    ds_windows = initialize_TokaMark_dataset(
         mast_dataset,
         dict_task_metadata,
         cfg_task,
-        model_specific_transform=transform_pipeline,
+        custom_transform=transform_pipeline,
         test_mode=False,
         shuffle_windows=False,
         shuffle_buffer_size=512,

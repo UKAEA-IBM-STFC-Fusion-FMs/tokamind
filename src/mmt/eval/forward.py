@@ -10,7 +10,7 @@ This helper:
 - returns per-window metadata (shot_id, window_index).
 
 It is used by evaluation and trace-saving routines and assumes
-window-level batches produced by TaskModelTransformWrapper + collate.
+window-level batches produced by TokaMarkDataset + collate.
 """
 
 from typing import Dict, Any, Tuple

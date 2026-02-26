@@ -30,7 +30,7 @@ import torch
 
 from mast_utils.benchmark_imports import (
     initialize_MAST_dataset,
-    initialize_model_dataset_iterable,
+    initialize_TokaMark_dataset,
     get_task_metadata,
     get_train_test_val_shots,
 )
@@ -261,11 +261,11 @@ def build_window_data(
         )
 
         # Create window iterable
-        window_iterable = initialize_model_dataset_iterable(
+        window_iterable = initialize_TokaMark_dataset(
             mast_dataset,
             dict_task_metadata,
             cfg_task,
-            model_specific_transform=mmt_transform,
+            custom_transform=mmt_transform,
             test_mode=(phase == "eval"),
             shuffle_windows=shuffle_at_iterable_level,
             shuffle_buffer_size=512,
