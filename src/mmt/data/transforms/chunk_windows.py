@@ -56,6 +56,8 @@ Notes
 - Input and actuator may have different number of chunks (role spans differ).
 - Within a role, all signals share the SAME number of chunk slots.
 - Each signal can have different sample count per chunk due to dt.
+- Role span is derived from current window arrays
+  (len(values_time_axis) * dt).
 """
 
 from __future__ import annotations
@@ -121,18 +123,43 @@ class ChunkWindowsTransform:
 
     def _role_sec_length(self, role: str, group: Dict[str, Any]) -> float:
         """
-        Role span (seconds) is taken from metadata for the first signal key.
-        Assumed consistent within the role (by construction from get_metadata()).
+        Role span (seconds) from current window payload.
+
+        We interpret a signal with T samples and dt as spanning T*dt seconds.
         """
         if not group:
             return 0.0
-        first_key = next(iter(group.keys()))
-        md = self.dict_metadata[role].get(first_key)
-        if md is None:
-            raise KeyError(
-                f"ChunkWindowsTransform: missing metadata for {role}:{first_key}"
-            )
-        return float(md["sec_length"])
+
+        spans_sec: List[float] = []
+
+        for key, entry in group.items():
+            md = self.dict_metadata[role].get(key)
+            if md is None:
+                raise KeyError(
+                    f"ChunkWindowsTransform: missing metadata for {role}:{key}"
+                )
+
+            dt = float(md["dt"])
+            if dt <= 0:
+                raise ValueError(
+                    f"ChunkWindowsTransform: non-positive dt for {role}:{key}: {dt}"
+                )
+
+            if not isinstance(entry, dict):
+                continue
+            values = entry.get("values")
+            if values is None:
+                continue
+
+            arr = np.asarray(values)
+            if arr.size == 0 or arr.ndim < 1:
+                continue
+
+            spans_sec.append(float(arr.shape[-1]) * dt)
+
+        if not spans_sec:
+            return 0.0
+        return float(max(spans_sec))
 
     def _num_chunks(self, role_span_sec: float) -> int:
         """
@@ -150,6 +177,8 @@ class ChunkWindowsTransform:
         group: Optional[Dict[str, Any]],
         role: str,
         base_global_index: int,
+        shot_id: Any,
+        window_idx: Any,
     ) -> List[Dict[str, Any]]:
         if not group:
             return []
@@ -158,6 +187,15 @@ class ChunkWindowsTransform:
         n_chunks = self._num_chunks(role_span_sec)
         if n_chunks <= 0:
             return []
+
+        logger.debug(
+            "win=%s (shot=%s) role=%s | span=%.6fs -> chunks=%d",
+            window_idx,
+            shot_id,
+            role,
+            role_span_sec,
+            n_chunks,
+        )
 
         chunks: List[Dict[str, Any]] = []
 
@@ -233,24 +271,27 @@ class ChunkWindowsTransform:
         if not isinstance(input_group, dict) or not input_group:
             raise ValueError("[ChunkWindowsTransform] window has no 'input' signals")
 
-        # Role start for both input/actuator slices is the start of the input span
-        first_input_key = next(iter(input_group.keys()))
-        md0 = self.dict_metadata["input"].get(first_input_key)
-        if md0 is None:
-            raise KeyError(
-                f"ChunkWindowsTransform: missing metadata for input:{first_input_key}"
-            )
-        input_len_sec = float(md0["sec_length"])
+        # Role start for both input/actuator slices is the start of the input span.
+        # Use current window span when available (dynamic history support).
+        input_len_sec = self._role_sec_length("input", input_group)
 
         # Shared global slot base: integer index on the stride grid
         t0_sec = t_cut - input_len_sec
         base_global_index = int(np.round(t0_sec / self.stride_sec))
 
         chunks_input = self._chunks_for_group(
-            group=input_group, role="input", base_global_index=base_global_index
+            group=input_group,
+            role="input",
+            base_global_index=base_global_index,
+            shot_id=window.get("shot_id"),
+            window_idx=window.get("window_index"),
         )
         chunks_act = self._chunks_for_group(
-            group=act_group, role="actuator", base_global_index=base_global_index
+            group=act_group,
+            role="actuator",
+            base_global_index=base_global_index,
+            shot_id=window.get("shot_id"),
+            window_idx=window.get("window_index"),
         )
 
         logger.debug(
