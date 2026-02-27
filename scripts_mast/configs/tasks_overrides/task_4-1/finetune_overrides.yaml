@@ -10,7 +10,7 @@
 
 preprocess:
   valid_windows:
-    window_stride_sec: 0.02
+    window_stride_sec: 0.01
 
 loader:
   batch_size: 256    # <- task specific

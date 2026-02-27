@@ -10,4 +10,4 @@
 
 preprocess:
   valid_windows:
-    window_stride_sec: 0.01
+    window_stride_sec: 0.005
