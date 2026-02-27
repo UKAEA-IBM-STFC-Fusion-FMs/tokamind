@@ -40,7 +40,8 @@ def load_experiment_config(
     2. CLI injection (`--model`, `--run-id`, `--tag`, `--init`)
     3. Phase semantics:
       - finetune scratch: build `model` from `model_scratch` + shared overrides
-      - finetune warmstart / eval: inherit from source run config
+      - finetune warmstart: inherit source model, keep current preprocess config
+      - eval: inherit from source run config
     4. Path finalization and config snapshot write
     """
     if phase not in ("pretrain", "finetune", "eval"):

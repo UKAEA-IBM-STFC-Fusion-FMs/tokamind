@@ -38,8 +38,8 @@ data:
 
 
 preprocess:
-  # Scratch uses this block directly.
-  # Warmstart inherits chunk/trim_chunks from source run config.
+  # Both scratch and warmstart use this block.
+  # Task-specific finetune_overrides.yaml can override these values.
   chunk:
     chunk_length: 0.005
     stride: null
@@ -51,7 +51,7 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: 0.01
+    window_stride_sec: 0.005
 
 
 embeddings:

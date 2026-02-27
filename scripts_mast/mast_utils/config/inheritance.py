@@ -4,14 +4,16 @@ Source-run inheritance and finetune model semantics.
 This module handles config inheritance from source models for warmstart/eval:
 - Resolves source model directories (run_id or path)
 - Loads source run config snapshots
-- Inherits preprocessing settings (chunk, trim_chunks)
+- Optionally inherits preprocessing settings (chunk, trim_chunks)
 - Applies finetune model semantics (scratch vs warmstart)
 - Merges source model config with current overrides
 
 Key concepts:
-- Warmstart: load weights + config from source, apply overrides
+- Warmstart: load source model weights/config, keep finetune preprocess from
+  current task config
 - Scratch: use model_scratch architecture, no source inheritance
-- Eval: always inherits from source model (weights + config + embeddings)
+- Eval: always inherits from source model (weights + config + embeddings),
+  including preprocess chunk/trim settings
 """
 
 from __future__ import annotations
@@ -229,8 +231,8 @@ def inherit_from_source_model(merged: Dict[str, Any], *, phase: str) -> None:
             merged["model"] = deep_merge(merged["model"], common_overrides)
         if ws_model_overrides:
             merged["model"] = deep_merge(merged["model"], ws_model_overrides)
-
-        inherit_preprocess_chunk_trim(merged, src_cfg, allow_override=False)
+        # Finetune warmstart: keep preprocess settings from current merged config
+        # (common + task overrides), do not force source chunk/trim inheritance.
     else:
         if "embeddings" not in src_cfg:
             raise KeyError(f"Source config missing 'embeddings' key: {src_run_dir}")
