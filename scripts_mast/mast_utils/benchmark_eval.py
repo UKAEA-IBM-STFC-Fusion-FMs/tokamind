@@ -127,7 +127,9 @@ def evaluate_benchmark_and_diagnostics(
     if cfg_traces.get("enable", False):
         traces_dir.mkdir(parents=True, exist_ok=True)
 
-    accumulator = WindowMetricsAccumulator(task_name) if need_benchmark_metrics else None
+    accumulator = (
+        WindowMetricsAccumulator(task_name) if need_benchmark_metrics else None
+    )
 
     # ------------------------------------------------------------------
     # Per-timestamp CSV writer (MMT-native diagnostic)
@@ -295,6 +297,9 @@ def evaluate_benchmark_and_diagnostics(
 
     if f_ts is not None:
         f_ts.close()
+
+    if n_windows > 0:
+        logger.info("Evaluated %d total windows", n_windows)
 
     # ------------------------------------------------------------------
     # Save traces
