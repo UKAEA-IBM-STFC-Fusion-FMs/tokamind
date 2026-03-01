@@ -9,6 +9,5 @@
 #   - preprocess settings specific to this task
 
 preprocess:
-
   trim_chunks:
     max_chunks: 21
