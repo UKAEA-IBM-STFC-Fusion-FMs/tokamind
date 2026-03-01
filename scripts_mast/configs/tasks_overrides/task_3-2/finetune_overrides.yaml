@@ -8,6 +8,6 @@
 #   - per-signal collate drop rates or masking policies
 #   - preprocess settings specific to this task
 
-preprocess:
-  valid_windows:
-    window_stride_sec: 0.005
+# preprocess:
+#   valid_windows:
+#     window_stride_sec: 0.005

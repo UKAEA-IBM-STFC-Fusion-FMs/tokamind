@@ -9,5 +9,6 @@
 #   - preprocess settings specific to this task
 
 preprocess:
-  valid_windows:
-    window_stride_sec: 0.005
+
+  trim_chunks:
+    max_chunks: 21
