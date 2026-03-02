@@ -141,7 +141,7 @@ embeddings:
 ```
 
 ### `mode: source`
-- copies source run `embeddings/` artifacts
+- stages only task-used source DCT3D artifacts into the current run
 - inherited roles read source rank overrides
 - roles set to `true` are retuned in current run
 - inherited source roles are validated strictly

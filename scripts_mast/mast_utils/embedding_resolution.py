@@ -1,17 +1,13 @@
 """
 Embedding resolution orchestration for pretrain, finetune, and eval phases.
 
-This module handles the high-level embedding workflow logic:
-- Pretrain: optional tuning + config snapshot
-- Finetune: mode/tune/inherit logic with strict validation
-- Eval: loading embeddings from training run
+This module owns the phase-level embedding decisions:
+- pretrain: optionally tune and snapshot DCT3D overrides
+- finetune: choose source/config mode, validate inherited roles, trigger retunes
+- eval: load the training run's resolved embedding artifacts
 
-Core functions:
----------------
-save_config_snapshot()              — Unified config snapshot saving
-resolve_pretrain_embeddings()       — Pretrain embedding orchestration
-resolve_finetune_embeddings()       — Finetune mode/tune/inherit with validation
-resolve_eval_embeddings()           — Eval embedding loading from training run
+It converts the merged experiment config plus task signal definitions into the
+final embedding artifacts and codec-ready signal specs used by each run phase.
 """
 
 from __future__ import annotations
@@ -68,9 +64,93 @@ def save_config_snapshot(
     return config_snapshot_path
 
 
-# ------------------------------------------------------------------
-# Embedding Resolution Helpers
-# ------------------------------------------------------------------
+def stage_task_used_dct3d_artifacts_from_source(
+    source_run_dir: Path,
+    run_dir: Path,
+    signals_by_role: dict,
+) -> bool:
+    """Stage only task-used DCT3D artifacts from a source run.
+
+    The destination finetune run receives only the source artifacts required
+    for the current task. This includes task-used signals that may later be
+    re-tuned, since their files and YAML entries are overwritten in-place by
+    the tuning step.
+
+    Parameters
+    ----------
+    source_run_dir:
+        Source training run directory.
+    run_dir:
+        Destination finetune run directory.
+    signals_by_role:
+        Task-used signals keyed by role. Each role value may be either a
+        mapping of signal name -> modality or an iterable of signal names.
+
+    Returns
+    -------
+    bool
+        ``True`` if the source ``embeddings/`` folder exists, else ``False``.
+    """
+    src_emb = source_run_dir / "embeddings"
+    if not src_emb.exists():
+        return False
+
+    src_overrides = load_embeddings_overrides(source_run_dir)
+    filtered_overrides: dict = {}
+    dst_emb = run_dir / "embeddings"
+
+    for role, role_signals in signals_by_role.items():
+        role_overrides = src_overrides.get(role)
+        if not isinstance(role_overrides, dict):
+            continue
+
+        if isinstance(role_signals, dict):
+            signal_names = role_signals.keys()
+        else:
+            signal_names = role_signals
+
+        for sig_name in signal_names:
+            if sig_name not in role_overrides:
+                continue
+
+            sig_override = role_overrides[sig_name]
+            filtered_overrides.setdefault(role, {})[sig_name] = sig_override
+
+            if not isinstance(sig_override, dict):
+                continue
+
+            encoder_kwargs = sig_override.get("encoder_kwargs")
+            if not isinstance(encoder_kwargs, dict):
+                continue
+
+            coeff_indices_path = encoder_kwargs.get("coeff_indices_path")
+            if not isinstance(coeff_indices_path, str):
+                continue
+
+            src_indices = src_emb / coeff_indices_path
+            if not src_indices.exists():
+                continue
+
+            dst_indices = dst_emb / coeff_indices_path
+            dst_indices.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src_indices, dst_indices)
+
+    dst_emb.mkdir(parents=True, exist_ok=True)
+    dct3d_yaml_path = dst_emb / "dct3d.yaml"
+    with dct3d_yaml_path.open("w", encoding="utf-8") as f:
+        yaml.safe_dump(
+            {"embeddings": {"per_signal_overrides": filtered_overrides}},
+            f,
+            sort_keys=False,
+            default_flow_style=False,
+        )
+
+    logger.info(
+        "Staged task-used DCT3D artifacts from %s -> %s",
+        src_emb,
+        dst_emb,
+    )
+    return True
 
 
 def resolve_pretrain_embeddings(
@@ -285,7 +365,8 @@ def resolve_finetune_embeddings(
     """Resolve embeddings for finetune phase with mode/tune/inherit logic.
 
     This function handles the complex finetune embedding workflow:
-    - mode=source: copy source embeddings, inherit/retune per role with strict validation
+    - mode=source: stage task-used source DCT3D artifacts, inherit/retune per
+      role with strict validation
     - mode=config: use config defaults directly (no source artifacts)
 
     Parameters
@@ -359,12 +440,13 @@ def resolve_finetune_embeddings(
 
         if source_run_dir is not None:
             src_emb = source_run_dir / "embeddings"
-            dst_emb = run_dir / "embeddings"
+            source_embeddings_available = stage_task_used_dct3d_artifacts_from_source(
+                source_run_dir=source_run_dir,
+                run_dir=run_dir,
+                signals_by_role=signals_by_role,
+            )
 
-            if src_emb.exists():
-                shutil.copytree(src_emb, dst_emb, dirs_exist_ok=True)
-                logger.info("Copied embeddings from %s → %s", src_emb, dst_emb)
-            elif roles_to_inherit:
+            if not source_embeddings_available and roles_to_inherit:
                 raise FileNotFoundError(
                     f"embeddings.mode=source requires source embeddings at {src_emb} "
                     f"for inherited roles {roles_to_inherit}. "

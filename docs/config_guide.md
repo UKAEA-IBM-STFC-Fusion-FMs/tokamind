@@ -109,7 +109,7 @@ When a source model is used, the loader resolves and stores:
   - `model = deep_merge(source_model, finetune_model_overrides, warmstart.model_overrides)`
   - `preprocess.chunk` and `preprocess.trim_chunks` are inherited from source run config.
 - Embeddings are resolved by `embeddings.mode`:
-  - `source`: copy `source_run/embeddings/` into current run, inherit and/or retune by role
+  - `source`: stage only task-used source DCT3D artifacts into current run, then inherit and/or retune by role
   - `config`: ignore source embedding artifacts and use merged config directly
 
 ### Eval

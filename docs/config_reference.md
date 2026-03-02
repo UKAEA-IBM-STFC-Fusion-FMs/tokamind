@@ -114,7 +114,7 @@ embeddings:
 - Type: `"source" | "config"`
 - Used in: finetune
 - Description:
-  - `source`: inherit source run embedding artifacts and optionally retune selected roles.
+  - `source`: stage only task-used source DCT3D artifacts into the current run and optionally retune selected roles.
   - `config`: ignore source artifacts and use merged config directly.
 
 ### `embeddings.tune_embeddings.roles.input`
