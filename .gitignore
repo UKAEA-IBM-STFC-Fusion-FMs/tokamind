@@ -49,3 +49,6 @@ logs/
 # history folders with legacy results
 history/
 **/history/
+
+# Local files
+local/
