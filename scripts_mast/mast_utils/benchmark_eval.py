@@ -6,7 +6,10 @@ This module lives in the *scripts_mast* integration layer on purpose:
 
 - The core library `mmt/` stays dataset / benchmark agnostic.
 - The MAST benchmark repository is the source of truth for the *official*
-  evaluation aggregation (window → shot → task), via its evaluator helpers.
+  evaluation aggregation, via its evaluator helpers:
+  window -> signal-within-shot -> task-within-shot -> task -> group
+  with equal-weight means/stds across shots (for signals/tasks) and across task
+  means (for groups).
 
 What this module provides
 -------------------------
