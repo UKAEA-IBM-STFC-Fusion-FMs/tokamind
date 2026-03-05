@@ -358,9 +358,7 @@ class TuneRankedDCT3DTransform:
                 role="output", name=name, values=entry.get("values")
             )
 
-    def _accumulate_signal_values(
-        self, *, role: str, name: str, values: Any
-    ) -> None:
+    def _accumulate_signal_values(self, *, role: str, name: str, values: Any) -> None:
         if values is None:
             return
         if self.signal_specs.get(role, name) is None:
@@ -560,7 +558,9 @@ class TuneRankedDCT3DTransform:
         return flags
 
     @staticmethod
-    def summarize_selection(best: Mapping[str, Mapping[str, Mapping[str, Any]]]) -> Dict[str, int]:
+    def summarize_selection(
+        best: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    ) -> Dict[str, int]:
         """Return compact counters for tuning summary logs."""
         n_signals = 0
         n_guardrail_up = 0
@@ -827,7 +827,9 @@ class TuneRankedDCT3DTransform:
                 )
                 if prepared is None:
                     continue
-                shape, key, acc_count, mean_energy, total_energy, sorted_indices = prepared
+                shape, key, acc_count, mean_energy, total_energy, sorted_indices = (
+                    prepared
+                )
                 H, W, T = key
 
                 guardrail_min_k = self._compute_guardrail_min_k(

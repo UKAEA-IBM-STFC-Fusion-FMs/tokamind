@@ -195,6 +195,8 @@ def read_vae_model_meta(model_dir: str | Path) -> Dict[str, Any]:
         "in_channels": in_channels,
         "seq_len": seq_len,
     }
+
+
 # ------------------------------------------------------------------
 # Codec implementation
 # ------------------------------------------------------------------
@@ -240,7 +242,10 @@ class VAECodec:
         sd = ckpt["model_state_dict"]
         # handle DataParallel prefix
         if any(k.startswith("module.") for k in sd.keys()):
-            sd = {k[len('module.'):] if k.startswith('module.') else k: v for k, v in sd.items()}
+            sd = {
+                k[len("module.") :] if k.startswith("module.") else k: v
+                for k, v in sd.items()
+            }
 
         self.model.load_state_dict(sd, strict=True)
         self.model.to(self.device)
@@ -256,18 +261,22 @@ class VAECodec:
         orig_shape = tuple(x.shape)
 
         if x.ndim == 1:
-            x_ct = x.reshape(1, x.shape[0])          # (1, T)
+            x_ct = x.reshape(1, x.shape[0])  # (1, T)
         elif x.ndim == 2:
-            x_ct = x                                # (C, T)
+            x_ct = x  # (C, T)
         elif x.ndim == 3:
             h, w, t = x.shape
-            x_ct = x.reshape(h * w, t)               # (H*W, T)
+            x_ct = x.reshape(h * w, t)  # (H*W, T)
         else:
-            raise ValueError(f"VAECodec supports x.ndim in {{1,2,3}}, got shape={x.shape}")
+            raise ValueError(
+                f"VAECodec supports x.ndim in {{1,2,3}}, got shape={x.shape}"
+            )
 
         return x_ct, orig_shape
 
-    def _reshape_back(self, x_ct: np.ndarray, original_shape: Tuple[int, ...]) -> np.ndarray:
+    def _reshape_back(
+        self, x_ct: np.ndarray, original_shape: Tuple[int, ...]
+    ) -> np.ndarray:
         if len(original_shape) == 1:
             if x_ct.shape[0] != 1:
                 raise ValueError(
@@ -305,7 +314,9 @@ class VAECodec:
             )
 
         # IMPORTANT: cast to float32 to match model weights/bias dtype
-        x_t = torch.from_numpy(np.asarray(x_ct, dtype=np.float32)).unsqueeze(0)  # (1,C,T)
+        x_t = torch.from_numpy(np.asarray(x_ct, dtype=np.float32)).unsqueeze(
+            0
+        )  # (1,C,T)
         x_t = x_t.to(device=self.device, dtype=torch.float32)
 
         with torch.no_grad():
@@ -328,7 +339,9 @@ class VAECodec:
             z = np.asarray(z)
 
         if z.ndim != 1 or z.shape[0] != self.latent_dim:
-            raise ValueError(f"VAECodec.decode expects z shape ({self.latent_dim},), got {tuple(z.shape)}")
+            raise ValueError(
+                f"VAECodec.decode expects z shape ({self.latent_dim},), got {tuple(z.shape)}"
+            )
 
         # IMPORTANT: latent must be float32 too
         z_t = torch.from_numpy(np.asarray(z, dtype=np.float32)).unsqueeze(0)
@@ -342,14 +355,18 @@ class VAECodec:
                 x_hat = self.model.decode(z_t.unsqueeze(1))
 
         if not isinstance(x_hat, torch.Tensor):
-            raise RuntimeError(f"VAE decode returned {type(x_hat).__name__}, expected torch.Tensor")
+            raise RuntimeError(
+                f"VAE decode returned {type(x_hat).__name__}, expected torch.Tensor"
+            )
 
         if x_hat.ndim == 3:
             x_ct = x_hat.squeeze(0)  # (C, T)
         elif x_hat.ndim == 2:
             x_ct = x_hat
         else:
-            raise RuntimeError(f"VAE decode returned tensor with shape {tuple(x_hat.shape)}; expected (B,C,T) or (C,T).")
+            raise RuntimeError(
+                f"VAE decode returned tensor with shape {tuple(x_hat.shape)}; expected (B,C,T) or (C,T)."
+            )
 
         x_ct_np = x_ct.detach().cpu().numpy().astype(np.float32, copy=False)
 
@@ -358,4 +375,6 @@ class VAECodec:
                 f"VAE decode produced shape {tuple(x_ct_np.shape)} but expected ({self.in_channels}, {self.seq_len})."
             )
 
-        return self._reshape_back(x_ct_np, tuple(original_shape)).astype(np.float32, copy=False)
+        return self._reshape_back(x_ct_np, tuple(original_shape)).astype(
+            np.float32, copy=False
+        )

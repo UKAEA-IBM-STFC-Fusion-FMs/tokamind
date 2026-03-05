@@ -181,9 +181,7 @@ class DCT3DCodec:
 
         if self.selection_mode == "rank":
             if self.coeff_indices is None:
-                raise ValueError(
-                    "coeff_indices required when selection_mode='rank'"
-                )
+                raise ValueError("coeff_indices required when selection_mode='rank'")
             self.coeff_indices = np.asarray(self.coeff_indices, dtype=np.int32)
             if self.coeff_indices.ndim != 1:
                 raise ValueError(
@@ -233,7 +231,7 @@ class DCT3DCodec:
                 if (H, W, T) != (expected_H, expected_W, expected_T):
                     raise ValueError(
                         f"Input shape mismatch: expected coeff_shape={self.coeff_shape}, "
-                        f"got (H,W,T)={H,W,T} from input shape {x.shape}"
+                        f"got (H,W,T)={H, W, T} from input shape {x.shape}"
                     )
 
             X_flat = X.reshape(-1)
@@ -242,7 +240,7 @@ class DCT3DCodec:
             max_idx = H * W * T
             if np.any(self.coeff_indices >= max_idx):
                 raise ValueError(
-                    f"coeff_indices contains out-of-bounds indices (max={max_idx-1})"
+                    f"coeff_indices contains out-of-bounds indices (max={max_idx - 1})"
                 )
 
             z = X_flat[self.coeff_indices].astype(self.dtype, copy=False)
@@ -303,7 +301,7 @@ class DCT3DCodec:
                 if (H_full, W_full, T_full) != (expected_H, expected_W, expected_T):
                     raise ValueError(
                         f"Shape mismatch: expected coeff_shape={self.coeff_shape}, "
-                        f"got (H,W,T)={H_full,W_full,T_full} from original_shape={original_shape}"
+                        f"got (H,W,T)={H_full, W_full, T_full} from original_shape={original_shape}"
                     )
 
             assert self.coeff_indices is not None  # Already validated in __post_init__

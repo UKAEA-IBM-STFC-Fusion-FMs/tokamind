@@ -70,7 +70,6 @@ logger = logging.getLogger("mmt.Chunking")
 
 
 class ChunkWindowsTransform:
-
     def __init__(
         self,
         *,

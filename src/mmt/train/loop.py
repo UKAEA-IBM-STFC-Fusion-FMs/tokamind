@@ -321,15 +321,9 @@ def train_finetune(
                     f"Continuing with fresh optimizer/scheduler."
                 )
 
-        logger.info(
-            f"----- Stage '{name}' (index {stage_idx}) -----"
-        )
-        logger.info(
-            f"  epochs={epochs}, grad_accum={grad_accum_steps}"
-        )
-        logger.info(
-            f"  total_steps={total_steps}, warmup_steps={warmup_steps}"
-        )
+        logger.info(f"----- Stage '{name}' (index {stage_idx}) -----")
+        logger.info(f"  epochs={epochs}, grad_accum={grad_accum_steps}")
+        logger.info(f"  total_steps={total_steps}, warmup_steps={warmup_steps}")
 
         # Create history list for this stage
         history["stages"][name] = []

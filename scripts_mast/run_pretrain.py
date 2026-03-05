@@ -100,10 +100,12 @@ def main() -> None:
     # ------------------------------------------------------------------
     # Task metadata + MAST datasets
     # ------------------------------------------------------------------
-    dict_task_metadata, mast_dataset_train, mast_dataset_val, _mast_test = build_mast_datasets(
-        cfg_task,
-        cfg_data=cfg_data,
-        phase="pretrain",
+    dict_task_metadata, mast_dataset_train, mast_dataset_val, _mast_test = (
+        build_mast_datasets(
+            cfg_task,
+            cfg_data=cfg_data,
+            phase="pretrain",
+        )
     )
 
     # ------------------------------------------------------------------

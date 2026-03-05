@@ -82,7 +82,9 @@ def load_coeff_indices(config_dir: Path, rel_path: str) -> np.ndarray:
         )
     indices = np.load(full_path)
     if indices.ndim != 1:
-        raise ValueError(f"Expected 1D array, got shape {indices.shape} from {full_path}")
+        raise ValueError(
+            f"Expected 1D array, got shape {indices.shape} from {full_path}"
+        )
     return indices.astype(np.int32)
 
 
@@ -137,7 +139,9 @@ def compute_embedding_dim_for_encoder(
 
     if encoder_name == "vae":
         if "model_dir" not in encoder_kwargs:
-            raise KeyError("encoder_kwargs.model_dir is required when encoder_name='vae'.")
+            raise KeyError(
+                "encoder_kwargs.model_dir is required when encoder_name='vae'."
+            )
 
         meta = read_vae_model_meta(str(encoder_kwargs["model_dir"]))
         latent_dim = int(meta["latent_dim"])
@@ -163,7 +167,9 @@ def compute_embedding_dim_for_encoder(
 
         return int(latent_dim)
 
-    raise ValueError(f"Unknown encoder_name={encoder_name!r} in compute_embedding_dim_for_encoder")
+    raise ValueError(
+        f"Unknown encoder_name={encoder_name!r} in compute_embedding_dim_for_encoder"
+    )
 
 
 def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]:
@@ -221,7 +227,9 @@ def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]
                     "keep_t": kw.get("keep_t", 1),
                     "selection_mode": "rank",
                     "coeff_indices": coeff_indices,
-                    "coeff_shape": tuple(kw["coeff_shape"]) if "coeff_shape" in kw else None,
+                    "coeff_shape": tuple(kw["coeff_shape"])
+                    if "coeff_shape" in kw
+                    else None,
                 }
                 codecs[spec.signal_id] = DCT3DCodec(**codec_kw)
             else:
@@ -237,7 +245,9 @@ def build_codecs(signal_specs, config_dir: Path | None = None) -> Dict[int, Any]
             allowed = ("model_dir", "device", "use_mu")
             vae_kw = {k: kw[k] for k in allowed if k in kw}
             if "model_dir" not in vae_kw:
-                raise KeyError(f"Missing required encoder_kwargs.model_dir for VAE signal {spec.name!r}.")
+                raise KeyError(
+                    f"Missing required encoder_kwargs.model_dir for VAE signal {spec.name!r}."
+                )
             codecs[spec.signal_id] = VAECodec(**vae_kw)
         else:
             raise ValueError(

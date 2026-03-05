@@ -32,9 +32,9 @@ def inject_cli_overrides_pretrain(
 ) -> None:
     """
     Inject CLI overrides for pretrain phase.
-    
+
     Generates or uses explicit run_id and stores CLI metadata.
-    
+
     Parameters
     ----------
     merged : Dict[str, Any]
@@ -45,7 +45,7 @@ def inject_cli_overrides_pretrain(
         Explicit run identifier, or None for auto-generation
     tag : str | None
         Optional experiment tag
-    
+
     Side Effects
     ------------
     Modifies merged dict in-place:
@@ -65,11 +65,11 @@ def inject_cli_overrides_finetune(
 ) -> None:
     """
     Inject CLI overrides for finetune phase.
-    
+
     Handles both warmstart and scratch initialization modes:
     - Warmstart: requires --model, sets model_source config
     - Scratch: ignores --model, sets model_source to None
-    
+
     Parameters
     ----------
     merged : Dict[str, Any]
@@ -81,21 +81,21 @@ def inject_cli_overrides_finetune(
         Optional experiment tag
     init_mode : str | None
         Initialization mode: "warmstart" (default) or "scratch"
-    
+
     Raises
     ------
     ValueError
         If init_mode invalid or warmstart missing --model
     TypeError
         If model_source config structure invalid
-    
+
     Side Effects
     ------------
     Modifies merged dict in-place:
     - Sets merged['run_id'] (auto-generated if not in config)
     - Sets merged['model_source'] (warmstart) or None (scratch)
     - Sets merged['cli'] with CLI metadata
-    
+
     Notes
     -----
     Model source resolution:
@@ -130,7 +130,9 @@ def inject_cli_overrides_finetune(
             model_source_cfg = {}
             merged["model_source"] = model_source_cfg
         if not isinstance(model_source_cfg, dict):
-            raise TypeError("Config key 'model_source' must be a mapping (dict) or null.")
+            raise TypeError(
+                "Config key 'model_source' must be a mapping (dict) or null."
+            )
 
         if model_is_path:
             model_source_cfg["model_path"] = str(Path(model_norm).resolve())
@@ -169,30 +171,30 @@ def inject_cli_overrides_eval(
 ) -> None:
     """
     Inject CLI overrides for eval phase.
-    
+
     Evaluation always requires a source model to evaluate. This function
     validates --model is provided and sets up model_source config.
-    
+
     Parameters
     ----------
     merged : Dict[str, Any]
         Merged config dictionary (modified in-place)
     model : str | None
         Source model to evaluate (run_id or path). Required.
-    
+
     Raises
     ------
     ValueError
         If model is None (--model required for eval)
     TypeError
         If model_source config structure invalid
-    
+
     Side Effects
     ------------
     Modifies merged dict in-place:
     - Sets merged['model_source'] with run_id or model_path
     - Sets merged['cli'] with CLI metadata
-    
+
     Notes
     -----
     Model source resolution:
@@ -236,9 +238,9 @@ def inject_cli_model_overrides(
 ) -> None:
     """
     Inject CLI model selection and run-id/eval-id metadata by phase.
-    
+
     Top-level dispatcher that routes to phase-specific CLI injection functions.
-    
+
     Parameters
     ----------
     merged : Dict[str, Any]
@@ -255,12 +257,12 @@ def inject_cli_model_overrides(
         Optional experiment tag (pretrain/finetune)
     finetune_init : str | None
         Finetune initialization mode: "warmstart" or "scratch"
-    
+
     Raises
     ------
     ValueError
         If phase unsupported or phase-specific validation fails
-    
+
     Side Effects
     ------------
     Modifies merged dict in-place via phase-specific injection functions.

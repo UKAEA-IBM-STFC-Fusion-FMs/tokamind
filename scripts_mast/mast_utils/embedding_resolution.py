@@ -480,7 +480,9 @@ def resolve_finetune_embeddings(
             if per_signal_overrides:
                 cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
                 for role, sigs in per_signal_overrides.items():
-                    cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
+                    cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(
+                        role, {}
+                    )
                     cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
         elif roles_to_inherit:
             logger.info(

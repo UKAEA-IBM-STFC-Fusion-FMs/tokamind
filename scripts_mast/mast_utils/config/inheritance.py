@@ -63,7 +63,9 @@ def resolve_model_source_dir(
     if model_path is not None:
         mp = str(model_path).strip()
         if not mp:
-            raise ValueError("model_source.model_path, if provided, must be a non-empty path string.")
+            raise ValueError(
+                "model_source.model_path, if provided, must be a non-empty path string."
+            )
         path = resolve_from_repo_root(mp)
         if not path.is_dir():
             raise FileNotFoundError(
@@ -130,14 +132,20 @@ def inherit_preprocess_chunk_trim(
 
     if allow_override:
         if override_chunk is not None:
-            if isinstance(override_chunk, dict) and isinstance(merged_pre["chunk"], dict):
+            if isinstance(override_chunk, dict) and isinstance(
+                merged_pre["chunk"], dict
+            ):
                 merged_pre["chunk"] = deep_merge(merged_pre["chunk"], override_chunk)
             else:
                 merged_pre["chunk"] = override_chunk
 
         if override_trim is not None:
-            if isinstance(override_trim, dict) and isinstance(merged_pre["trim_chunks"], dict):
-                merged_pre["trim_chunks"] = deep_merge(merged_pre["trim_chunks"], override_trim)
+            if isinstance(override_trim, dict) and isinstance(
+                merged_pre["trim_chunks"], dict
+            ):
+                merged_pre["trim_chunks"] = deep_merge(
+                    merged_pre["trim_chunks"], override_trim
+                )
             else:
                 merged_pre["trim_chunks"] = override_trim
 
@@ -197,7 +205,9 @@ def inherit_from_source_model(merged: Dict[str, Any], *, phase: str) -> None:
     if not isinstance(model_source, dict):
         raise TypeError("model_source must be set for finetune/eval phases")
 
-    src_run_dir, src_run_id_for_yaml = resolve_model_source_dir(model_source, phase=phase)
+    src_run_dir, src_run_id_for_yaml = resolve_model_source_dir(
+        model_source, phase=phase
+    )
     src_cfg = load_source_run_config_yaml(src_run_dir)
 
     ckpt_root = src_run_dir / "checkpoints"
