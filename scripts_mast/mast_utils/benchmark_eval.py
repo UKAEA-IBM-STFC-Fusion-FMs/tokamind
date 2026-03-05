@@ -8,8 +8,8 @@ This module lives in the *scripts_mast* integration layer on purpose:
 - The MAST benchmark repository is the source of truth for the *official*
   evaluation aggregation, via its evaluator helpers:
   window -> signal-within-shot -> task-within-shot -> task -> group
-  with equal-weight means/stds across shots (for signals/tasks) and across task
-  means (for groups).
+  with equal-weight means/stds across shots (for signals/tasks), and group
+  summaries computed as mean(task means) and mean(task stds).
 
 What this module provides
 -------------------------
