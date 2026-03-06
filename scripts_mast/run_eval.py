@@ -9,7 +9,7 @@ This script is intentionally thin:
 - builds eval window data via shared helpers,
 - loads the best checkpoint from model_source.run_dir,
 - runs a single-pass evaluation loop:
-  - benchmark-aligned metrics (windows_metrics.csv + task_metrics.csv)
+  - benchmark-aligned metrics (windows_metrics.csv + shots_metrics.csv + task_metrics.csv)
   - optional MMT-native diagnostics (per-timestamp CSV + traces),
 - writes outputs under the eval run directory (cfg_mmt.paths["run_dir"]).
 
@@ -201,6 +201,7 @@ def main() -> None:
 
     do_eval = bool(
         cfg_compute_metrics.get("per_task", False)
+        or cfg_compute_metrics.get("per_shot", False)
         or cfg_compute_metrics.get("per_window", False)
         or cfg_compute_metrics.get("per_timestamp", False)
         or cfg_traces.get("enable", False)
@@ -228,7 +229,7 @@ def main() -> None:
         logger.info("Task metrics dir: %s", result.get("metrics_task_dir"))
     else:
         logger.info(
-            "[eval] compute_metrics: per_task, per_window, per_timestamp and traces are disabled; skipping evaluation."
+            "[eval] compute_metrics: per_task, per_shot, per_window, per_timestamp and traces are disabled; skipping evaluation."
         )
 
     logger.info("Done.")

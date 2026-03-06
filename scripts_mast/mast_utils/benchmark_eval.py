@@ -17,6 +17,7 @@ One *single-pass* evaluation loop that can produce:
 
 - Task metrics:
     - per-window: ``windows_metrics.csv`` (optional)
+    - per-shot:   ``shots_metrics.csv`` (optional)
     - per-task:   ``task_metrics.csv`` (optional)
     - per-timestamp: ``timestamps_metrics.csv`` (optional)
 
@@ -96,6 +97,7 @@ def evaluate_benchmark_and_diagnostics(
     compute_metrics_cfg : dict
         Supports keys:
           - per_task: bool (benchmark aggregation -> task_metrics.csv)
+          - per_shot: bool (benchmark aggregation -> shots_metrics.csv)
           - per_window: bool (keep windows_metrics.csv)
           - per_timestamp: bool (MMT-native per-timestamp CSV)
     traces_cfg : dict
@@ -111,6 +113,7 @@ def evaluate_benchmark_and_diagnostics(
     cfg_traces = traces_cfg or {}
 
     per_task = bool(cfg.get("per_task", False))
+    per_shot = bool(cfg.get("per_shot", False))
     per_window = bool(cfg.get("per_window", False))
     per_timestamp = bool(cfg.get("per_timestamp", False))
 
@@ -123,7 +126,7 @@ def evaluate_benchmark_and_diagnostics(
     metrics_task_dir = metrics_root_dir / task_name
     traces_dir = run_dir / "traces"
 
-    need_benchmark_metrics = bool(per_task or per_window)
+    need_benchmark_metrics = bool(per_task or per_shot or per_window)
     need_metrics_task_dir = bool(need_benchmark_metrics or per_timestamp)
     if need_metrics_task_dir:
         metrics_task_dir.mkdir(parents=True, exist_ok=True)
@@ -345,6 +348,7 @@ def evaluate_benchmark_and_diagnostics(
                 output_dir=str(metrics_root_dir),
                 window_metrics_accumulator=accumulator,
                 save_windows_metrics=per_window,
+                save_shot_metrics=per_shot,
                 save_task_metrics=per_task,
             ),
         )

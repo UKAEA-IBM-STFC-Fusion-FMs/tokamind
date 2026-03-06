@@ -394,6 +394,10 @@ Top-level location: `eval:`
 - Type: `bool`
 - Description: writes task-level benchmark metrics.
 
+### `eval.compute_metrics.per_shot`
+- Type: `bool`
+- Description: writes per-shot benchmark metrics.
+
 ### `eval.compute_metrics.per_window`
 - Type: `bool`
 - Description: writes per-window benchmark metrics.

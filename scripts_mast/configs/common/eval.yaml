@@ -54,6 +54,7 @@ eval:
 
   compute_metrics:
     per_task: true
+    per_shot: true
     per_window: false
     per_timestamp: false
 

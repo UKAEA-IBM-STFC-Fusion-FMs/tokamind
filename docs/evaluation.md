@@ -30,7 +30,6 @@ Eval writes to:
 ```text
 runs/<model_id>/eval/
   eval.yaml
-  benchmark/
   metrics/
   traces/
 ```
@@ -61,13 +60,17 @@ Behavior:
 eval:
   compute_metrics:
     per_task: true
+    per_shot: false
     per_window: false
     per_timestamp: false
 ```
 
 Outputs:
-- benchmark-level files in `benchmark/`
-- optional per-timestamp csv in `metrics/`
+- benchmark-level files in `metrics/<task>/`:
+  - `task_metrics.csv` (if `per_task: true`)
+  - `shots_metrics.csv` (if `per_shot: true`)
+  - `windows_metrics.csv` (if `per_window: true`)
+- optional per-timestamp csv in `metrics/<task>/timestamps_metrics.csv` (if `per_timestamp: true`)
 
 ## What Is a Trace
 A trace is a per-shot diagnostic record that aligns:
