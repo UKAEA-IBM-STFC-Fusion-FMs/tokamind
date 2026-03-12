@@ -34,4 +34,8 @@ embeddings:
       summary-ip:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: linear_vae_config_summary_ip 
+          model_dir: linear_vae_config_summary_ip
+
+    output:
+      equilibrium-psi:
+        encoder_name: identity

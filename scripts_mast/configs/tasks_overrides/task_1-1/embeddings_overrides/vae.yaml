@@ -34,4 +34,50 @@ embeddings:
       summary-ip:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: linear_vae_config_summary_ip 
+          model_dir: linear_vae_config_summary_ip
+
+    output:
+      equilibrium-elongation:
+        encoder_name: identity
+
+      equilibrium-elongation_axis:
+        encoder_name: identity
+
+      equilibrium-triangularity_upper:
+        encoder_name: identity
+
+      equilibrium-triangularity_lower:
+        encoder_name: identity
+
+      equilibrium-x_point_r:
+        encoder_name: identity
+
+      equilibrium-x_point_z:
+        encoder_name: identity
+
+      equilibrium-minor_radius:
+        encoder_name: identity
+
+      equilibrium-magnetic_axis_r:
+        encoder_name: identity
+
+      equilibrium-magnetic_axis_z:
+        encoder_name: identity
+
+      equilibrium-q95:
+        encoder_name: identity
+
+      equilibrium-beta_tor:
+        encoder_name: identity
+
+      equilibrium-beta_pol:
+        encoder_name: identity
+
+      equilibrium-beta_normal:
+        encoder_name: identity
+
+      equilibrium-bvac_rmag:
+        encoder_name: identity
+
+      equilibrium-bphi_rmag:
+        encoder_name: identity
