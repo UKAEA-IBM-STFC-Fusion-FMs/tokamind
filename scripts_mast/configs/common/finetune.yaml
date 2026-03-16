@@ -72,7 +72,7 @@ embeddings:
       thresholds:
         output: 0.999
       max_budget:
-        output: 9216
+        output: null
 
 
 collate:

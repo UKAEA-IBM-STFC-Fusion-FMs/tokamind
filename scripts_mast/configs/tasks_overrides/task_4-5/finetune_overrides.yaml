@@ -15,6 +15,17 @@ preprocess:
   trim_chunks:
     max_chunks: 40
 
+# train:
+#   stages:
+#     - name: ft_full
+#       optimizer:
+#         lr:
+#           token_encoder: 0.0
+#           backbone: 2.5e-4
+#           modality_heads: 5e-4
+#           output_adapters: 2.5e-3
+          
+
 loader:
   batch_size: 256    # <- task specific
 
