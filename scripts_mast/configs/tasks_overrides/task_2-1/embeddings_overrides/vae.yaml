@@ -1,0 +1,110 @@
+embeddings:
+  per_signal_overrides:
+    input:
+      magnetics-flux_loop_flux:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_flux_loop_flux
+
+      magnetics-b_field_pol_probe_ccbv_field:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_b_field_pol_probe_ccbv_field
+
+      magnetics-b_field_pol_probe_obr_field:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_b_field_pol_probe_obr_field
+
+      magnetics-b_field_tor_probe_saddle_voltage:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_b_field_tor_probe_saddle_voltage
+
+      magnetics-b_field_pol_probe_obv_field:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_b_field_pol_probe_obv_field
+
+      pf_active-coil_current:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_coil_current
+
+      summary-ip:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: linear_vae_config_summary_ip
+
+      solenoid_current:
+        encoder_name: vae
+        encoder_kwargs:
+        model_dir: linear_vae_config_solenoid_current
+
+    actuator:
+      coil_voltage:
+      encoder_name: vae
+      encoder_kwargs:
+      model_dir: conv1d_vae_config_coil_voltage
+
+      power_nbi:
+      encoder_name: vae
+      encoder_kwargs:
+      model_dir: conv1d_vae_config_power_nbi
+
+    output:
+      coil_current:
+      encoder_name: identity
+
+      solenoid_current:
+      encoder_name: identity
+      
+      summary_ip:
+      encoder_name: identity
+
+      elongation:
+      encoder_name: identity
+
+      elongation_axis:
+      encoder_name: identity
+
+      triangularity_upper:
+      encoder_name: identity
+
+      triangularity_lower:
+      encoder_name: identity
+
+      x_point_r:
+      encoder_name: identity
+
+      x_point_z:
+      encoder_name: identity
+
+      minor_radius:
+      encoder_name: identity
+
+      magnetic_axis_r:
+      encoder_name: identity
+
+      magnetic_axis_z:
+      encoder_name: identity
+
+      q95:
+      encoder_name: identity
+
+      beta_tor:
+      encoder_name: identity
+
+      beta_pol:
+      encoder_name: identity
+
+      beta_normal:
+      encoder_name: identity
+
+      bvac_rmag:
+      encoder_name: identity
+
+      bphi_rmag:
+      encoder_name: identity
+
+      
