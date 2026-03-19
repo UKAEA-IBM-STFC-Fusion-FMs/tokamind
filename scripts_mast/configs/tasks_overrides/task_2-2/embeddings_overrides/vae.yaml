@@ -31,26 +31,26 @@ embeddings:
         encoder_kwargs:
           model_dir: conv1d_vae_config_coil_current
 
+      pf_active-solenoid_current:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: linear_vae_config_solenoid_current
+
       summary-ip:
         encoder_name: vae
         encoder_kwargs:
           model_dir: linear_vae_config_summary_ip
 
-      solenoid_current:
+    actuator:
+      pf_active-coil_voltage:
         encoder_name: vae
         encoder_kwargs:
-        model_dir: linear_vae_config_solenoid_current
+          model_dir: conv1d_vae_config_coil_voltage
 
-    actuator:
-      coil_voltage:
-      encoder_name: vae
-      encoder_kwargs:
-      model_dir: conv1d_vae_config_coil_voltage
-
-      power_nbi:
-      encoder_name: vae
-      encoder_kwargs:
-      model_dir: conv1d_vae_config_power_nbi
+      summary-power_nbi:
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_power_nbi
 
     output:
       equilibrium-lcfs_r:
