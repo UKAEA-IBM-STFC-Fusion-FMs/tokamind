@@ -7,7 +7,7 @@ Strict expectations (current VAE_fairmast refactor)
 ---------------------------------------------------
 - VAE_fairmast is installed and exposes the python package `vae_pipeline`.
 - Trained VAEs live under:
-    <VAE_fairmast>/src/vae_pipeline/data/trained_VAEs/<MODEL_DIR>/
+    <VAE_fairmast>/src/vae_pipeline/data/VAEs/<MODEL_DIR>/
   containing:
     - exactly one config_*.json
     - exactly one best_*.pt
@@ -16,7 +16,7 @@ MMT YAML usage (per-signal)
 ---------------------------
     encoder_name: vae
     encoder_kwargs:
-      model_dir: conv1d_vae_config_coil_current   # folder name under trained_VAEs/
+      model_dir: conv1d_vae_config_coil_current   # folder name under VAEs/
       device: cuda:0                              # optional, empty/None -> cpu
       use_mu: true                                # optional, default true
 
@@ -86,7 +86,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
 
     Accepted:
       1) A filesystem path to a directory (absolute or relative) that exists.
-      2) A folder name under: <vae_pipeline package>/data/trained_VAEs/<model_dir>
+      2) A folder name under: <vae_pipeline package>/data/VAEs/<model_dir>
 
     This is strict: no other search paths.
 
@@ -125,7 +125,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
 
     # .../vae_pipeline/configs/config_setup.py -> .../vae_pipeline
     vae_pkg_dir = Path(cs_file).resolve().parent.parent
-    trained_root = (vae_pkg_dir / "data" / "trained_VAEs").resolve()
+    trained_root = (vae_pkg_dir / "data" / "VAEs").resolve()
     cand = trained_root / p
 
     if cand.is_dir():
@@ -137,7 +137,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
         "Tried:\n"
         f"  - as a filesystem directory: {p.resolve()}\n"
         f"  - as a trained VAE folder:   {cand}\n\n"
-        "Expected trained VAEs under: <VAE_fairmast>/src/vae_pipeline/data/trained_VAEs/<MODEL_DIR>."
+        "Expected trained VAEs under: <VAE_fairmast>/src/vae_pipeline/data/VAEs/<MODEL_DIR>."
     )
 
 
