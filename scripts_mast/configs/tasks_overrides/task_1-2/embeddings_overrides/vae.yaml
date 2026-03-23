@@ -43,7 +43,12 @@ embeddings:
 
     output:
       equilibrium-lcfs_r:
-        encoder_name: identity
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: linear_vae_config_equilibrium_lcfs_r
+      
 
       equilibrium-lcfs_z:
-        encoder_name: identity
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: linear_vae_config_equilibrium_lcfs_z
