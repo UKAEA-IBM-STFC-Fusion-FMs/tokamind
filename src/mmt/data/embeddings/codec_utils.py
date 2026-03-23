@@ -9,7 +9,7 @@ This module provides:
 The utilities here are intentionally simple and mirror the behaviour of the corresponding codec implementations
 
 VAE support assumes the refactored VAE_fairmast package (`vae_pipeline`) and the trained VAE artifacts
-under: vae_pipeline/data/trained_vaes/<MODEL_DIR>.
+under: vae_pipeline/data/VAEs/<MODEL_DIR>.
 """
 
 from __future__ import annotations
@@ -154,8 +154,10 @@ def compute_embedding_dim_for_encoder(
     ValueError
         If `encoder_name` not in ["identity", "dct3d", "vae"].
         If `dt` not greater than 0.
-        If mismatch in VAE in_channels when `encoder_name="vae"`.
-        If mismatch in VAE seq_len when `encoder_name="vae"`.
+        If VAE `model_type` is unsupported when `encoder_name="vae"`.
+        If VAE `input_shape` is incompatible with the signal shape when `encoder_name="vae"`.
+        If VAE `input_mode` violates strict model-specific rules when `encoder_name="vae"`.
+        If VAE time dimension is incompatible with chunk length when `encoder_name="vae"`.
     KeyError
         If `encoder_kwargs['num_coeffs']` not available for DCT3D rank mode when `encoder_name="dct3d"`.
         If `encoder_kwargs['model_dir']` not available when `encoder_name="vae"`.
@@ -213,24 +215,95 @@ def compute_embedding_dim_for_encoder(
 
         meta = read_vae_model_meta(model_dir=str(encoder_kwargs["model_dir"]))
         latent_dim = int(meta["latent_dim"])
-        in_channels = int(meta["in_channels"])
-        seq_len = int(meta["seq_len"])
+        model_type = str(meta["model_type"])
+        input_shape = tuple(int(v) for v in meta["input_shape"])
+        input_mode = str(meta["input_mode"])
 
-        H, W = infer_hw_from_values_shape(values_shape=values_shape)  # noqa (omit lowercase warning)
-        expected_channels = H * W
+        # Signal-level canonical dimensions:
+        # - values_shape carries non-time dimensions
+        # - n_samples is the chunk time dimension
+        h_sig, w_sig = infer_hw_from_values_shape(values_shape=values_shape)  # noqa (omit lowercase warning)
+        c_sig = int(h_sig * w_sig)
+        t_sig = int(n_samples)
 
-        if expected_channels != in_channels:
+        if model_type == "linear":
+            if len(input_shape) != 2:
+                raise ValueError(
+                    f"VAE linear model expects input_shape=[C,T], got {list(input_shape)} "
+                    f"(model_dir={meta['model_dir']})."
+                )
+            if input_mode not in {"channels", "time"}:
+                raise ValueError(
+                    f"VAE linear model expects input_mode in {{'channels','time'}}, got {input_mode!r} "
+                    f"(model_dir={meta['model_dir']})."
+                )
+            c_model, t_model = int(input_shape[0]), int(input_shape[1])
+            if c_sig != c_model:
+                raise ValueError(
+                    "VAE linear channel mismatch: "
+                    f"signal values_shape={values_shape} -> C={c_sig}, "
+                    f"but model expects C={c_model} (model_dir={meta['model_dir']})."
+                )
+            if t_sig != t_model:
+                raise ValueError(
+                    "VAE linear time mismatch: "
+                    f"chunk_length_sec={chunk_length_sec} with dt={dt} -> T={t_sig}, "
+                    f"but model expects T={t_model} (model_dir={meta['model_dir']})."
+                )
+
+        elif model_type == "conv1d":
+            if len(input_shape) != 2:
+                raise ValueError(
+                    f"VAE conv1d model expects input_shape=[C,T], got {list(input_shape)} "
+                    f"(model_dir={meta['model_dir']})."
+                )
+            if input_mode != "channels":
+                raise ValueError(
+                    f"VAE conv1d model requires input_mode='channels', got {input_mode!r} "
+                    f"(model_dir={meta['model_dir']})."
+                )
+            c_model, t_model = int(input_shape[0]), int(input_shape[1])
+            if c_sig != c_model:
+                raise ValueError(
+                    "VAE conv1d channel mismatch: "
+                    f"signal values_shape={values_shape} -> C={c_sig}, "
+                    f"but model expects C={c_model} (model_dir={meta['model_dir']})."
+                )
+            if t_sig != t_model:
+                raise ValueError(
+                    "VAE conv1d time mismatch: "
+                    f"chunk_length_sec={chunk_length_sec} with dt={dt} -> T={t_sig}, "
+                    f"but model expects T={t_model} (model_dir={meta['model_dir']})."
+                )
+
+        elif model_type == "conv2d":
+            if len(input_shape) != 3:
+                raise ValueError(
+                    f"VAE conv2d model expects input_shape=[H,W,T], got {list(input_shape)} "
+                    f"(model_dir={meta['model_dir']})."
+                )
+            if input_mode != "time":
+                raise ValueError(
+                    f"VAE conv2d model requires input_mode='time', got {input_mode!r} "
+                    f"(model_dir={meta['model_dir']})."
+                )
+            h_model, w_model, t_model = int(input_shape[0]), int(input_shape[1]), int(input_shape[2])
+            if (h_sig, w_sig) != (h_model, w_model):
+                raise ValueError(
+                    "VAE conv2d spatial mismatch: "
+                    f"signal values_shape={values_shape} -> (H,W)=({h_sig},{w_sig}), "
+                    f"but model expects (H,W)=({h_model},{w_model}) (model_dir={meta['model_dir']})."
+                )
+            if t_sig != t_model:
+                raise ValueError(
+                    "VAE conv2d time mismatch: "
+                    f"chunk_length_sec={chunk_length_sec} with dt={dt} -> T={t_sig}, "
+                    f"but model expects T={t_model} (model_dir={meta['model_dir']})."
+                )
+
+        else:
             raise ValueError(
-                "VAE in_channels mismatch: "
-                f"signal values_shape={values_shape} -> C={expected_channels}, "
-                f"but model expects in_channels={in_channels} (model_dir={meta['model_dir']})."
-            )
-
-        if int(n_samples) != int(seq_len):
-            raise ValueError(
-                "VAE seq_len mismatch: "
-                f"chunk_length_sec={chunk_length_sec} with dt={dt} -> T={n_samples}, "
-                f"but model expects T={seq_len} (model_dir={meta['model_dir']})."
+                f"Unsupported VAE model_type={model_type!r} in metadata for model_dir={meta['model_dir']}."
             )
 
         return int(latent_dim)
