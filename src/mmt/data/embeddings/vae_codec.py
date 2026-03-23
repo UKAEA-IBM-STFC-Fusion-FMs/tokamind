@@ -591,7 +591,7 @@ class VAECodec:
                 )
 
             x_thw = np.transpose(x_hwt, (2, 0, 1))  # (T,H,W)
-            return np.asarray(x_thw, dtype=np.float32, copy=False)
+            return np.asarray(x_thw, dtype=np.float32)
 
         # linear and conv1d use canonical (C,T) from the generic helper.
         x_ct = self._to_channel_time(x=x)
@@ -605,7 +605,7 @@ class VAECodec:
             )
 
         if self.model_type == "conv1d":
-            return np.asarray(x_ct, dtype=np.float32, copy=False)
+            return np.asarray(x_ct, dtype=np.float32)
 
         if self.model_type == "linear":
             if self.input_mode == "time":
@@ -616,7 +616,7 @@ class VAECodec:
                 raise RuntimeError(
                     f"Unexpected input_mode={self.input_mode!r} for linear model {self.meta['model_dir'].name!r}."
                 )
-            return np.asarray(x_linear, dtype=np.float32, copy=False)
+            return np.asarray(x_linear, dtype=np.float32)
 
         raise RuntimeError(
             f"Unsupported model_type={self.model_type!r} in _prepare_encode_array for "
@@ -667,7 +667,7 @@ class VAECodec:
                 raise RuntimeError(
                     f"VAE conv1d decode returned shape {tuple(x_np.shape)}; expected (B,C,T) or (C,T)."
                 )
-            return np.asarray(x_ct, dtype=np.float32, copy=False)
+            return np.asarray(x_ct, dtype=np.float32)
 
         if self.model_type == "linear":
             if x_np.ndim == 3:
@@ -697,7 +697,7 @@ class VAECodec:
                 )
 
             x_ct = x_model if self.input_mode == "time" else x_model.T
-            return np.asarray(x_ct, dtype=np.float32, copy=False)
+            return np.asarray(x_ct, dtype=np.float32)
 
         if self.model_type == "conv2d":
             if x_np.ndim == 4:
@@ -722,7 +722,7 @@ class VAECodec:
 
             x_hwt = np.transpose(x_thw, (1, 2, 0))  # (H,W,T)
             x_ct = x_hwt.reshape(h_exp * w_exp, t_exp)
-            return np.asarray(x_ct, dtype=np.float32, copy=False)
+            return np.asarray(x_ct, dtype=np.float32)
 
         raise RuntimeError(
             f"Unsupported model_type={self.model_type!r} in _decode_tensor_to_channel_time for "
