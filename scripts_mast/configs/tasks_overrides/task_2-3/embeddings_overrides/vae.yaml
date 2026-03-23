@@ -50,13 +50,13 @@ embeddings:
       summary-power_nbi:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: conv1d_vae_config_power_nbi
+          model_dir: linear_vae_config_power_nbi
 
     output:
       equilibrium-psi:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: conv1d_vae_config_equilibrium_psi_25ms
+          model_dir: conv2d_vae_config_equilibrium_psi_25ms
         
 
 
