@@ -42,6 +42,7 @@ import torch
 # VAE_fairmast unless encoder_name='vae' is used).
 # ======================================================================================================================
 
+
 # ----------------------------------------------------------------------------------------------------------------------
 def _import_vae_pipeline():
     try:
@@ -71,6 +72,7 @@ def _import_vae_pipeline():
 # ======================================================================================================================
 # Config + path helpers
 # ======================================================================================================================
+
 
 # ----------------------------------------------------------------------------------------------------------------------
 def _read_json(path: Path) -> dict[str, Any]:
@@ -257,13 +259,14 @@ def read_vae_model_meta(model_dir: str | Path) -> dict[str, Any]:
         "model_type": model_type,
         "latent_dim": latent_dim,
         "input_shape": input_shape,
-        "input_mode": input_mode
+        "input_mode": input_mode,
     }
 
 
 # ======================================================================================================================
 # Codec implementation
 # ======================================================================================================================
+
 
 # ======================================================================================================================
 class VAECodec:
@@ -277,11 +280,7 @@ class VAECodec:
 
     # ------------------------------------------------------------------------------------------------------------------
     def __init__(
-        self,
-        *,
-        model_dir: str,
-        device: str | None = None,
-        use_mu: bool = True
+        self, *, model_dir: str, device: str | None = None, use_mu: bool = True
     ) -> None:
         """
         Initialize class attributes.
@@ -352,7 +351,7 @@ class VAECodec:
         # Handle DataParallel prefix
         if any(k.startswith("module.") for k in sd.keys()):
             sd = {
-                k[len("module."):] if k.startswith("module.") else k: v
+                k[len("module.") :] if k.startswith("module.") else k: v
                 for k, v in sd.items()
             }
 
@@ -434,9 +433,7 @@ class VAECodec:
 
     # ------------------------------------------------------------------------------------------------------------------
     @staticmethod
-    def _to_channel_time(
-            x: np.ndarray
-    ) -> np.ndarray:
+    def _to_channel_time(x: np.ndarray) -> np.ndarray:
         """
         Reshape input array into (channel, time) form.
 
@@ -468,16 +465,15 @@ class VAECodec:
             h, w, t = x.shape
             x_ct = x.reshape(h * w, t)  # (H*W, T)
         else:
-            raise ValueError(f"VAECodec supports `x.ndim` in [1,2,3], got shape={x.shape}.")
+            raise ValueError(
+                f"VAECodec supports `x.ndim` in [1,2,3], got shape={x.shape}."
+            )
 
         return x_ct
 
     # ------------------------------------------------------------------------------------------------------------------
     @staticmethod
-    def _reshape_back(
-            x_ct: np.ndarray,
-            original_shape: tuple[int, ...]
-    ) -> np.ndarray:
+    def _reshape_back(x_ct: np.ndarray, original_shape: tuple[int, ...]) -> np.ndarray:
         """
         Reshape a (channel, time) array to its original shape.
 
@@ -524,10 +520,7 @@ class VAECodec:
         raise ValueError(f"Unsupported original_shape={original_shape}.")
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _prepare_encode_array(
-            self,
-            x: np.ndarray
-    ) -> np.ndarray:
+    def _prepare_encode_array(self, x: np.ndarray) -> np.ndarray:
         """
         Convert an input sample to the shape expected by the underlying VAE encoder.
 
@@ -576,7 +569,11 @@ class VAECodec:
                         f"VAECodec conv2d spatial mismatch for model {self.meta['model_dir'].name!r}: "
                         f"expected H*W={hw_exp}, got H*W={h_in * w_in} (input shape {tuple(x.shape)})."
                     )
-                x_hwt = x if (h_in, w_in) == (h_exp, w_exp) else x.reshape(h_exp, w_exp, t_exp)
+                x_hwt = (
+                    x
+                    if (h_in, w_in) == (h_exp, w_exp)
+                    else x.reshape(h_exp, w_exp, t_exp)
+                )
             elif x.ndim == 2:
                 if x.shape != (hw_exp, t_exp):
                     raise ValueError(
@@ -626,10 +623,7 @@ class VAECodec:
         )
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _decode_tensor_to_channel_time(
-            self,
-            x_hat: torch.Tensor
-    ) -> np.ndarray:
+    def _decode_tensor_to_channel_time(self, x_hat: torch.Tensor) -> np.ndarray:
         """
         Convert model decoder output to canonical (C, T) form.
 
@@ -653,7 +647,9 @@ class VAECodec:
         """
 
         if not isinstance(x_hat, torch.Tensor):
-            raise TypeError(f"VAE decode returned {type(x_hat).__name__}, expected torch.Tensor.")
+            raise TypeError(
+                f"VAE decode returned {type(x_hat).__name__}, expected torch.Tensor."
+            )
 
         x_np = x_hat.detach().cpu().numpy().astype(np.float32, copy=False)
 
@@ -689,7 +685,9 @@ class VAECodec:
                 )
 
             c_exp, t_exp = int(self.input_shape[0]), int(self.input_shape[1])
-            expected_linear_shape = (c_exp, t_exp) if self.input_mode == "time" else (t_exp, c_exp)
+            expected_linear_shape = (
+                (c_exp, t_exp) if self.input_mode == "time" else (t_exp, c_exp)
+            )
 
             if tuple(x_model.shape) != tuple(expected_linear_shape):
                 raise RuntimeError(
@@ -735,10 +733,7 @@ class VAECodec:
     # ------------------------------------------------------------------------------------------------------------------
 
     # ------------------------------------------------------------------------------------------------------------------
-    def encode(
-            self,
-            x: np.ndarray
-    ) -> np.ndarray:
+    def encode(self, x: np.ndarray) -> np.ndarray:
         """
         Public encode method for the VAECodec class.
 
@@ -792,11 +787,7 @@ class VAECodec:
         return z
 
     # ------------------------------------------------------------------------------------------------------------------
-    def decode(
-            self,
-            z: np.ndarray,
-            original_shape: tuple[int, ...]
-    ) -> np.ndarray:
+    def decode(self, z: np.ndarray, original_shape: tuple[int, ...]) -> np.ndarray:
         """
         Public decode method for the VAECodec class.
 
@@ -828,7 +819,9 @@ class VAECodec:
             z = np.asarray(z)  # noqa (omit unreachable code warning)
 
         if (z.ndim != 1) or (z.shape[0] != self.latent_dim):
-            raise ValueError(f"VAECodec.decode expects `z.shape` ({self.latent_dim},), got {tuple(z.shape)}.")
+            raise ValueError(
+                f"VAECodec.decode expects `z.shape` ({self.latent_dim},), got {tuple(z.shape)}."
+            )
 
         # IMPORTANT: latent must be float32 too
         z_t = torch.from_numpy(np.asarray(z, dtype=np.float32)).unsqueeze(0)
@@ -851,6 +844,5 @@ class VAECodec:
             )
 
         return self._reshape_back(
-            x_ct=x_ct_np,
-            original_shape=tuple(original_shape)
+            x_ct=x_ct_np, original_shape=tuple(original_shape)
         ).astype(np.float32, copy=False)

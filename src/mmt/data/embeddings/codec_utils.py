@@ -26,9 +26,7 @@ from ..signal_spec import SignalSpecRegistry
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def infer_hw_from_values_shape(
-        values_shape: tuple[int, ...]
-) -> tuple[int, int]:
+def infer_hw_from_values_shape(values_shape: tuple[int, ...]) -> tuple[int, int]:
     """
     Map values_shape (excluding time) to (H, W).
 
@@ -70,10 +68,7 @@ def _prod(shape: tuple[int, ...]) -> int:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def load_coeff_indices(
-        config_dir: Path,
-        rel_path: str
-) -> np.ndarray:
+def load_coeff_indices(config_dir: Path, rel_path: str) -> np.ndarray:
     """
     Load coefficient indices from a .npy file for rank mode DCT3D.
 
@@ -112,7 +107,9 @@ def load_coeff_indices(
 
     indices = np.load(full_path)
     if indices.ndim != 1:
-        raise ValueError(f"Expected 1D array, got shape {indices.shape} from {full_path}.")
+        raise ValueError(
+            f"Expected 1D array, got shape {indices.shape} from {full_path}."
+        )
 
     return indices.astype(np.int32)
 
@@ -124,7 +121,7 @@ def compute_embedding_dim_for_encoder(
     encoder_kwargs: Mapping[str, Any],
     values_shape: tuple[int, ...],
     dt: float,
-    chunk_length_sec: float
+    chunk_length_sec: float,
 ) -> int:
     """
     Compute the encoded dimension for a single chunk of a signal.
@@ -165,7 +162,9 @@ def compute_embedding_dim_for_encoder(
     """
 
     if encoder_name not in ["identity", "dct3d", "vae"]:
-        raise ValueError(f"Unknown encoder_name={encoder_name!r} in compute_embedding_dim_for_encoder.")
+        raise ValueError(
+            f"Unknown encoder_name={encoder_name!r} in compute_embedding_dim_for_encoder."
+        )
 
     if dt <= 0:
         raise ValueError(f"`dt` must be > 0, got {dt}.")
@@ -190,7 +189,9 @@ def compute_embedding_dim_for_encoder(
             # Rank mode: dimension is number of selected coefficients
             num_coeffs = encoder_kwargs.get("num_coeffs")
             if num_coeffs is None:
-                raise KeyError("`encoder_kwargs['num_coeffs']` is required for DCT3D rank mode.")
+                raise KeyError(
+                    "`encoder_kwargs['num_coeffs']` is required for DCT3D rank mode."
+                )
             return int(num_coeffs)
 
         else:  # -> I.e., selection_mode is "spatial"
@@ -211,7 +212,9 @@ def compute_embedding_dim_for_encoder(
     # VAE encoder
     else:  # -> I.e,  encoder_name="vae":
         if "model_dir" not in encoder_kwargs:
-            raise KeyError("`encoder_kwargs['model_dir']` is required when `encoder_name='vae'`.")
+            raise KeyError(
+                "`encoder_kwargs['model_dir']` is required when `encoder_name='vae'`."
+            )
 
         meta = read_vae_model_meta(model_dir=str(encoder_kwargs["model_dir"]))
         latent_dim = int(meta["latent_dim"])
@@ -287,7 +290,11 @@ def compute_embedding_dim_for_encoder(
                     f"VAE conv2d model requires input_mode='time', got {input_mode!r} "
                     f"(model_dir={meta['model_dir']})."
                 )
-            h_model, w_model, t_model = int(input_shape[0]), int(input_shape[1]), int(input_shape[2])
+            h_model, w_model, t_model = (
+                int(input_shape[0]),
+                int(input_shape[1]),
+                int(input_shape[2]),
+            )
             if (h_sig, w_sig) != (h_model, w_model):
                 raise ValueError(
                     "VAE conv2d spatial mismatch: "
@@ -311,8 +318,7 @@ def compute_embedding_dim_for_encoder(
 
 # ----------------------------------------------------------------------------------------------------------------------
 def build_codecs(
-        signal_specs: SignalSpecRegistry,
-        config_dir: Path | None = None
+    signal_specs: SignalSpecRegistry, config_dir: Path | None = None
 ) -> dict[int, Any]:
     """
     Build one codec instance per signal.
@@ -362,7 +368,9 @@ def build_codecs(
                     )
 
                 # Load indices
-                coeff_indices = load_coeff_indices(config_dir=config_dir, rel_path=coeff_indices_path)
+                coeff_indices = load_coeff_indices(
+                    config_dir=config_dir, rel_path=coeff_indices_path
+                )
 
                 # Build codec with loaded indices
                 codec_kw = {
@@ -373,7 +381,7 @@ def build_codecs(
                     "coeff_indices": coeff_indices,
                     "coeff_shape": tuple(kw["coeff_shape"])
                     if "coeff_shape" in kw
-                    else None
+                    else None,
                 }
                 codecs[spec.signal_id] = DCT3DCodec(**codec_kw)
             else:
@@ -389,9 +397,13 @@ def build_codecs(
             allowed = ("model_dir", "device", "use_mu")
             vae_kw = {k: kw[k] for k in allowed if k in kw}
             if "model_dir" not in vae_kw:
-                raise KeyError(f"Missing required encoder_kwargs['model_dir'] for VAE signal {spec.name!r}.")
+                raise KeyError(
+                    f"Missing required encoder_kwargs['model_dir'] for VAE signal {spec.name!r}."
+                )
             codecs[spec.signal_id] = VAECodec(**vae_kw)
         else:
-            raise ValueError(f"Unknown encoder_name={spec.encoder_name!r} for signal {spec.name!r}.")
+            raise ValueError(
+                f"Unknown encoder_name={spec.encoder_name!r} for signal {spec.name!r}."
+            )
 
     return codecs
