@@ -190,12 +190,16 @@ def compute_embedding_dim_for_encoder(
 
         if selection_mode == "rank":
             # Rank mode: dimension is number of selected coefficients
-            num_coeffs = encoder_kwargs.get("num_coeffs")
-            if num_coeffs is None:
+            if "num_coeffs" not in encoder_kwargs:
                 raise KeyError(
                     "`encoder_kwargs['num_coeffs']` is required for DCT3D rank mode."
                 )
-            return int(num_coeffs)
+            num_coeffs = encoder_kwargs["num_coeffs"]
+            if not isinstance(num_coeffs, int) or isinstance(num_coeffs, bool):
+                raise ValueError(
+                    "`encoder_kwargs['num_coeffs']` must be an int for DCT3D rank mode."
+                )
+            return num_coeffs
 
         else:  # -> I.e., selection_mode is "spatial"
             # Spatial mode: dimension is keep_h * keep_w * keep_t (clamped)
@@ -363,7 +367,7 @@ def build_codecs(
                         f"Pass config_dir=Path(run_dir) / 'embeddings' to build_codecs()."
                     )
 
-                coeff_indices_path = kw.get("coeff_indices_path")
+                coeff_indices_path = str(kw.get("coeff_indices_path"))
                 if coeff_indices_path is None:
                     raise KeyError(
                         f"`encoder_kwargs['coeff_indices_path']` required for rank mode "
