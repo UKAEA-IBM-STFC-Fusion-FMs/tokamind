@@ -29,6 +29,7 @@ Notes
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 import json
@@ -117,8 +118,8 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
 
     # Anchor to a real module file (works even if `vae_pipeline` is a namespace package)
     config_setup_mod, _, _ = _import_vae_pipeline()
-    cs_file = getattr(config_setup_mod, "__file__", None)
-    if not cs_file:
+    cs_file_obj: object = getattr(config_setup_mod, "__file__", None)
+    if not isinstance(cs_file_obj, (str, os.PathLike)):
         raise RuntimeError(
             "Could not locate vae_pipeline.configs.config_setup on disk (missing __file__). "
             "Your installation looks like a namespace package without source files. "
@@ -126,7 +127,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
         )
 
     # .../vae_pipeline/configs/config_setup.py -> .../vae_pipeline
-    vae_pkg_dir = Path(cs_file).resolve().parent.parent
+    vae_pkg_dir = Path(cs_file_obj).resolve().parent.parent
     trained_root = (vae_pkg_dir / "data" / "VAEs").resolve()
     cand = trained_root / p
 

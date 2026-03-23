@@ -22,7 +22,10 @@ import numpy as np
 from .dct3d_codec import DCT3DCodec
 from .identity_codec import IdentityCodec
 from .vae_codec import VAECodec, read_vae_model_meta
-from ..signal_spec import SignalSpecRegistry
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from ..signal_spec import SignalSpecRegistry
 
 
 # ----------------------------------------------------------------------------------------------------------------------
