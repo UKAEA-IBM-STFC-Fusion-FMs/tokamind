@@ -50,11 +50,13 @@ embeddings:
       summary-power_nbi:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: conv1d_vae_config_power_nbi
+          model_dir: linear_vae_config_power_nbi
 
     output:
       pf_active-coil_current:
-        encoder_name: identity
+        encoder_name: vae
+        encoder_kwargs:
+          model_dir: conv1d_vae_config_coil_current_25ms
 
       pf_active-solenoid_current:
         encoder_name: vae
