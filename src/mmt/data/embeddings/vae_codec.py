@@ -271,7 +271,7 @@ class VAECodec:
             Target device.
             Optional. Default: None.
         use_mu : bool
-            Whether to use mu. TODO [Tobia]: Add better description. BTW, what is mu?
+            If True, use the encoder mean (mu) as latent code; else sample from (mu, logvar).
             Optional. Default: True.
 
         Returns
@@ -326,16 +326,16 @@ class VAECodec:
 
     # ------------------------------------------------------------------------------------------------------------------
     @staticmethod
-    def _to_ct(
+    def _to_channel_time(
             x: np.ndarray
     ) -> tuple[np.ndarray, tuple[int, ...]]:
         """
-        Reshape input array into (Channel, Time) form. TODO [Tobia]: Does "ct" in "_to_ct" stands for Channel-Time?
+        Reshape input array into (channel, time) form.
 
         Parameters
         ----------
         x : np.ndarray
-            Input array with expected `x.ndim` in [1, 2, 3], to be reshaped into (Channel, Time) form. # TODO [Tobia]: Check this description.
+            Input array with expected `x.ndim` in [1, 2, 3], reshaped into (channel, time) form.
 
         Returns
         -------
@@ -372,12 +372,12 @@ class VAECodec:
             original_shape: tuple[int, ...]
     ) -> np.ndarray:
         """
-        Reshape a (Channel, Time) array to its original shape. # TODO [Tobia]: Check this description.
+        Reshape a (channel, time) array to its original shape.
 
         Parameters
         ----------
         x_ct : np.ndarray
-            Input array in (Channel, Time) form to be reshaped to its original form. # TODO [Tobia]: Check this description.
+            Input array in (channel, time) form to be reshaped to its original form.
         original_shape : tuple[int, ...]
             Original shape of input array `x_ct`.
 
@@ -448,7 +448,7 @@ class VAECodec:
 
         """
 
-        x_ct, _orig_shape = self._to_ct(x=np.asarray(x))
+        x_ct, _orig_shape = self._to_channel_time(x=np.asarray(x))
         c, t = x_ct.shape
 
         if c != self.in_channels:

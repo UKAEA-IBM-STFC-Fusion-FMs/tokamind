@@ -140,7 +140,7 @@ def compute_embedding_dim_for_encoder(
     values_shape : tuple[int, ...]
         Values shape tuple.
     dt : float
-        TODO [Tobia]: Find suitable description for this parameter.
+        Sampling interval in seconds.
     chunk_length_sec : float
         Chunk length in seconds.
 
