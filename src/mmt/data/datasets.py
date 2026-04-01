@@ -1,20 +1,20 @@
-"""mmt.data.window_cached_dataset
+"""
+mmt.data.window_cached_dataset
 
 RAM-backed dataset and helpers for cached *window-level* MMT data.
 
 This module provides:
 
 - WindowCachedDataset:
-    A simple torch.utils.data.Dataset storing pre-tokenised **windows**
-    in memory, ready to be fed directly to MMTCollate.
+    A simple torch.utils.data.Dataset storing pre-tokenized **windows** in memory, ready to be fed directly to
+    MMTCollate.
 
 - materialize_tokenized_split_to_ram():
-    A helper that runs the full model-specific transform chain once per
-    window on top of a *shot-level* dataset adapter and returns a
-    WindowCachedDataset.
+    A helper that runs the full model-specific transform chain once per window on top of a *shot-level* dataset adapter
+    and returns a WindowCachedDataset.
 
-Internally it also defines FlattenedStreamingDataset and a trivial collate
-function used only during the parallel caching step.
+Internally it also defines FlattenedStreamingDataset and a trivial collate function used only during the parallel
+caching step.
 
 The goal is to keep a clean separation between:
 
@@ -25,11 +25,10 @@ while keeping a symmetric, user-friendly API in the train scripts.
 
 Notes on shuffling
 ------------------
-- WindowCachedDataset is a map-style Dataset. When used with a standard
-  DataLoader, shuffling is applied at the *window* level.
-- During caching/materialisation itself, we can optionally shuffle *shots*
-  (the order of indices into the shot-level dataset adapter) to avoid bias
-  when using max_windows caps.
+- WindowCachedDataset is a map-style Dataset. When used with a standard DataLoader, shuffling is applied at the
+  *window* level.
+- During caching/materialization itself, we can optionally shuffle *shots* (the order of indices into the shot-level
+  dataset adapter) to avoid bias when using max_windows caps.
 
 Dtype / memory
 --------------
@@ -38,54 +37,69 @@ We accept only:
   - "float16"
   - "float32"
 
-The dtype cast is applied only to cached *embedding* arrays (token embeddings
-and output embeddings), never to native outputs.
+The dtype cast is applied only to cached *embedding* arrays (token embeddings and output embeddings), never to native
+outputs.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable, List, Optional
+from collections.abc import Iterator
+from typing import Any, Iterable, Optional
 import logging
 import os
 import random
-
 import numpy as np
 import psutil
+
 from torch.utils.data import DataLoader, Dataset, IterableDataset
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 logger = logging.getLogger("mmt.Cache")
 
 # We print the number of total preprocessed windows every _LOG_INTERVAL windows.
 _LOG_INTERVAL = 50000
 
-# ------------------------------------------------------------------
+
+# ======================================================================================================================
 # Small RAM helper
-# ------------------------------------------------------------------
+# ======================================================================================================================
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def get_ram_gb() -> float:
     """Return the current RAM usage of this process in GiB."""
     return psutil.Process(os.getpid()).memory_info().rss / (1024**3)
 
 
-# ------------------------------------------------------------------
+# ======================================================================================================================
 # Dtype helpers (cache only)
-# ------------------------------------------------------------------
+# ======================================================================================================================
 
 
-def _normalize_cache_dtype(dtype: Optional[str]) -> Optional[np.dtype]:
-    """Normalize a user-provided dtype spec.
+# ----------------------------------------------------------------------------------------------------------------------
+def _normalize_cache_dtype(dtype: str | None) -> Optional[np.dtype]:
+    """
+    Normalize a user-provided dtype spec.
 
-    Accepted values
-    ---------------
-    - None
-    - "float16"
-    - "float32"
+
+
+    Parameters
+    ----------
+    dtype : str | None
+        Target dtype. Accepted values: "float16", "float32", None.
 
     Returns
     -------
     np.dtype | None
         The normalized numpy dtype, or None meaning "do not cast".
+
+    Raises
+    ------
+    ValueError
+        If Unsupported cache `dtype` is passed.
+
     """
 
     if dtype is None:
@@ -97,22 +111,36 @@ def _normalize_cache_dtype(dtype: Optional[str]) -> Optional[np.dtype]:
     if s == "float32":
         return np.dtype(np.float32)
 
-    raise ValueError(
-        f"Unsupported cache dtype={dtype!r}. Expected 'float16' or 'float32' (or null)."
-    )
+    raise ValueError(f"Unsupported cache `dtype={dtype!r}`. Expected 'float16', 'float32', or null (None).")
 
 
-def _cast_window_embeddings_inplace(window: Dict[str, Any], *, dtype: np.dtype) -> None:
-    """Cast cached *embedding* arrays in-place.
+# ----------------------------------------------------------------------------------------------------------------------
+def _cast_window_embeddings_inplace(  # NOSONAR - Ignore cognitive complexity
+    window: dict[str, Any], *, dtype: np.dtype
+) -> None:
+    """
+    Cast cached *embedding* arrays in-place.
 
     This intentionally only touches *embeddings*:
-    - token embeddings (window['emb_chunks'])
-    - output embeddings (window['output_emb'])
+    - token embeddings (`window["emb_chunks"]`)
+    - output embeddings (`window["output_emb"]`)
 
-    Native outputs (window['output'] values) are not modified.
+    Native outputs (`window["output"]` values) are not modified.
+
+    Parameters
+    ----------
+    window : dict[str, Any]
+        Window embeddings to be type cast.
+    dtype : np.dtype
+        Target dtype.
+
+    Returns
+    -------
+    None
+
     """
 
-    # Token embeddings (ragged list)
+    # Token embeddings (ragged list).
     emb_chunks = window.get("emb_chunks")
     if isinstance(emb_chunks, list):
         for i, arr in enumerate(emb_chunks):
@@ -120,81 +148,126 @@ def _cast_window_embeddings_inplace(window: Dict[str, Any], *, dtype: np.dtype) 
                 continue
             emb_chunks[i] = np.asarray(arr, dtype=dtype)
 
-    # Output embeddings (dict sid -> embedding)
+    # Output embeddings (dict sid -> embedding).
     out_emb = window.get("output_emb")
     if isinstance(out_emb, dict):
-        for sid, arr in list(out_emb.items()):
+        for sid, arr in out_emb.items():
             if arr is None:
                 continue
             out_emb[sid] = np.asarray(arr, dtype=dtype)
 
-    # (Defensive) legacy fields if present
+    # (Defensive) legacy fields if present.
     emb_out = window.get("embedded_output")
     if isinstance(emb_out, dict):
-        for sid, arr in list(emb_out.items()):
+        for sid, arr in emb_out.items():
             if arr is None:
                 continue
             emb_out[sid] = np.asarray(arr, dtype=dtype)
 
 
-# ------------------------------------------------------------------
-# In-RAM dataset of tokenised windows
-# ------------------------------------------------------------------
+# ======================================================================================================================
+# In-RAM dataset of tokenized windows
+# ======================================================================================================================
 
 
+# ======================================================================================================================
 class WindowCachedDataset(Dataset):
-    """Simple in-RAM dataset of *tokenised windows*."""
+    """
+    Simple in-RAM dataset of *tokenized windows*.
 
-    def __init__(self, windows: Iterable[Dict[str, Any]]) -> None:
-        self._windows: List[Dict[str, Any]] = list(windows)
+    Attributes
+    ----------
+    _windows : Iterable[dict[str, Any]]
+        Tokenized windows.
+
+    Methods
+    -------
+    __len__()
+        Return the size of `self._windows`.
+    __getitem__()
+        Return samples by window index.
+
+    """
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def __init__(self, windows: Iterable[dict[str, Any]]) -> None:
+        """
+        Initialize class attributes.
+
+        Parameters
+        ----------
+        windows : Iterable[dict[str, Any]]
+            Input tokenized windows.
+
+        Returns
+        -------
+        # None  # REMARK: Commented out to avoid type checking errors.
+
+        """
+
+        self._windows: list[dict[str, Any]] = list(windows)
         if len(self._windows) == 0:
             logger.warning(
                 "[WindowCachedDataset] Created with 0 windows. "
                 "Downstream collate / loaders may raise on empty datasets."
             )
 
+    # ------------------------------------------------------------------------------------------------------------------
     def __len__(self) -> int:
+        """Return the size of `self._windows`."""
         return len(self._windows)
 
-    def __getitem__(self, idx: int) -> Dict[str, Any]:
+    # ------------------------------------------------------------------------------------------------------------------
+    def __getitem__(self, idx: int) -> dict[str, Any]:
+        """Return samples by window index."""
         return self._windows[idx]
 
+    # ------------------------------------------------------------------------------------------------------------------
     @classmethod
     def from_streaming(
         cls,
-        streaming_dataset: Any,
+        streaming_dataset: IterableDataset,
         max_windows: int | None = None,
         num_workers_cache: int = 0,
         *,
         shuffle_shots: bool = False,
         seed: int = 0,
-        dtype: Optional[str] = None,
-        split_name: Optional[str] = None,
+        dtype: str | None = None,
+        split_name: str | None = None,
     ) -> "WindowCachedDataset":
-        """Create a WindowCachedDataset from an IterableDataset.
+        """
+        Create a WindowCachedDataset from an IterableDataset.
 
         Parameters
         ----------
-        streaming_dataset:
+        streaming_dataset : IterableDataset
             An IterableDataset that yields windows (e.g., TokaMarkDataset).
-        max_windows:
-            Optional cap on number of windows to cache.
-        num_workers_cache:
+        max_windows : int | None
+            Cap on number of windows to cache.
+            Optional. Default: None.
+        num_workers_cache : int
             Number of DataLoader workers for parallel caching.
-        shuffle_shots:
+            Optional. Default: 0.
+        shuffle_shots : bool
             If True, shuffle windows before caching.
-        seed:
+            Optional. Default: False.
+        seed : int
             Random seed for shuffling (only used if shuffle_shots=True).
-        dtype:
-            Optional dtype for cached embeddings ("float16" or "float32").
-        split_name:
-            Optional split label for logging (e.g., "train", "val", "test").
+            Optional. Default: 0.
+        dtype : str | None
+            dtype for cached embeddings ("float16" or "float32").
+            Optional. Default: None.
+        split_name : str | None
+            Split label for logging (e.g., "train", "val", "test").
+            Optional. Default: None.
 
         Returns
         -------
         WindowCachedDataset
             Materialized in-RAM dataset.
+
         """
+
         return materialize_tokenized_split_to_ram(
             streaming_dataset=streaming_dataset,
             max_windows=max_windows,
@@ -206,32 +279,62 @@ class WindowCachedDataset(Dataset):
         )
 
 
-# ------------------------------------------------------------------
+# ======================================================================================================================
 # Shot-batched wrapper for efficient IPC during parallel caching
-# ------------------------------------------------------------------
+# ======================================================================================================================
 
 
+# ======================================================================================================================
 class _ShotBatchedIterableDataset(IterableDataset):
-    """Wrapper that batches windows by shot to reduce IPC overhead.
+    """
+    Wrapper that batches windows by shot to reduce IPC overhead.
 
-    Instead of yielding individual windows (causing many small pickle operations),
-    this collects all windows from each shot and yields them as a list.
-    This matches the old map-style dataset behavior where each worker returned
-    List[window_dict] per shot, dramatically reducing serialization overhead.
+    Instead of yielding individual windows (causing many small pickle operations), this collects all windows from each
+    shot and yields them as a list. This matches the old map-style dataset behavior where each worker returned
+    list[window_dict] per shot, dramatically reducing serialization overhead.
+
+    Attributes
+    ----------
+    base_iterable : IterableDataset
+        Base iterable dataset.
+
+    Methods
+    -------
+    __iter__()
+        Batch iterator.
+
     """
 
-    def __init__(self, base_iterable: IterableDataset):
+    # ------------------------------------------------------------------------------------------------------------------
+    def __init__(self, base_iterable: IterableDataset) -> None:
+        """
+        Initialize class parameters.
+
+        Parameters
+        ----------
+        base_iterable : IterableDataset
+            Base iterable dataset.
+
+        Returns
+        -------
+        # None  # REMARK: Commented out to avoid type checking errors.
+
+        """
+
         super().__init__()
         self.base_iterable = base_iterable
 
-    def __iter__(self):
+    # ------------------------------------------------------------------------------------------------------------------
+    def __iter__(self) -> Iterator:
+        """Batch iterator."""
+
         current_shot_id = None
         current_batch = []
 
         for window in self.base_iterable:
             shot_id = window.get("shot_id")
 
-            # If shot changed and we have accumulated windows, yield the batch
+            # If shot changed and we have accumulated windows, yield the batch.
             if shot_id != current_shot_id and current_batch:
                 yield current_batch
                 current_batch = []
@@ -239,62 +342,69 @@ class _ShotBatchedIterableDataset(IterableDataset):
             current_shot_id = shot_id
             current_batch.append(window)
 
-        # Yield final batch if any
+        # Yield final batch if any.
         if current_batch:
             yield current_batch
 
 
-# ------------------------------------------------------------------
+# ======================================================================================================================
 # Collate function used for parallel caching
-# ------------------------------------------------------------------
+# ======================================================================================================================
 
 
-def _cache_collate_identity(batch):
+# ----------------------------------------------------------------------------------------------------------------------
+def _cache_collate_identity(batch: list):
     """Identity collate for caching (batch_size=1, just unwrap the single item)."""
     return batch[0]
 
 
-# ------------------------------------------------------------------
+# ======================================================================================================================
 # Main caching helper
-# ------------------------------------------------------------------
+# ======================================================================================================================
 
 
-def materialize_tokenized_split_to_ram(
+# ----------------------------------------------------------------------------------------------------------------------
+def materialize_tokenized_split_to_ram(  # NOSONAR - Ignore cognitive complexity
     *,
-    streaming_dataset: Any,
-    max_windows: Optional[int] = None,
+    streaming_dataset: IterableDataset,
+    max_windows: int | None = None,
     num_workers_cache: int = 0,
     shuffle_shots: bool = False,
     seed: int = 0,
-    dtype: Optional[str] = None,
-    split_name: Optional[str] = None,
+    dtype: str | None = None,
+    split_name: str | None = None,
 ) -> WindowCachedDataset:
-    """Materialise windows from an IterableDataset into a RAM-backed window dataset.
+    """Materialize windows from an IterableDataset into a RAM-backed window dataset.
 
-    This function uses DataLoader with multiple workers to parallelize window
-    processing from an IterableDataset. Each worker processes a subset of shots,
-    and windows are collected into RAM. Shuffling happens after caching.
+    This function uses DataLoader with multiple workers to parallelize window processing from an IterableDataset. Each
+    worker processes a subset of shots, and windows are collected into RAM. Shuffling happens after caching.
 
     Parameters
     ----------
-    streaming_dataset:
-        An IterableDataset that yields windows directly (e.g., TokaMarkDataset).
-        The IterableDataset's __iter__ method handles worker splitting internally.
-    max_windows:
-        Optional cap on number of windows to cache.
-    num_workers_cache:
-        Number of DataLoader workers for parallel processing. Each worker processes
-        a subset of shots. Higher values improve throughput (e.g., 32 workers).
-    shuffle_shots:
+    streaming_dataset : IterableDataset
+        An IterableDataset that yields windows directly (e.g., TokaMarkDataset). The IterableDataset's __iter__ method
+        handles worker splitting internally.
+    max_windows : int | None
+        Cap on number of windows to cache.
+        Optional. Default: None.
+    num_workers_cache : int
+        Number of DataLoader workers for parallel processing. Each worker processes a subset of shots. Higher values
+        improve throughput (e.g., 32 workers).
+        Optional. Default: 0.
+    shuffle_shots : bool
         If True, shuffle windows AFTER caching (uses seed for reproducibility).
-        Note: IterableDataset doesn't support DataLoader shuffle, so shuffling
-        happens post-caching on the materialized list.
-    seed:
+        Note: IterableDataset does not support DataLoader shuffle, so shuffling happens post-caching on the
+        materialized list.
+        Optional. Default: False.
+    seed : int
         Random seed for post-caching shuffle (only used if shuffle_shots=True).
-    dtype:
-        Optional dtype for cached embeddings ("float16" or "float32").
-    split_name:
-        Optional split label for logging (e.g., "train", "val", "test").
+        Optional. Default: 0.
+    dtype : str | None
+        dtype for cached embeddings ("float16" or "float32").
+        Optional. Default: None
+    split_name : str | None
+        Split label for logging (e.g., "train", "val", "test").
+        Optional. Default: None.
 
     Returns
     -------
@@ -308,6 +418,29 @@ def materialize_tokenized_split_to_ram(
     - Load balancing: IterableDataset.__iter__ handles worker splitting internally
     """
 
+    # ..................................................................................................................
+    def _iter_windows() -> Iterable[dict[str, Any]]:
+        # Use DataLoader for parallel iteration if num_workers_cache > 0.
+        if num_workers_cache > 0:
+            # Wrap IterableDataset to batch windows by shot for efficient IPC.
+            batched_dataset = _ShotBatchedIterableDataset(base_iterable=streaming_dataset)
+            loader = DataLoader(
+                dataset=batched_dataset,
+                batch_size=1,
+                num_workers=int(num_workers_cache),
+                collate_fn=_cache_collate_identity,
+                prefetch_factor=1,
+                persistent_workers=False,
+            )
+            # Each batch is a list of windows from one shot.
+            for window_list in loader:
+                for window in window_list:
+                    yield window
+        else:
+            # Single-process: iterate directly.
+            yield from streaming_dataset
+
+    # ..................................................................................................................
     dtype_np = _normalize_cache_dtype(dtype)
     prefix = f"{split_name} | " if split_name else ""
     logger.info(
@@ -319,32 +452,11 @@ def materialize_tokenized_split_to_ram(
         str(dtype) if dtype is not None else "none",
     )
 
-    # Note on shuffling: IterableDataset doesn't support DataLoader shuffling.
+    # Note on shuffling: IterableDataset does not support DataLoader shuffling.
     # Shuffling must be configured in the IterableDataset itself (e.g., shuffle_windows=True).
     # The shuffle_shots parameter here will shuffle the final cached list instead.
 
-    def _iter_windows() -> Iterable[Dict[str, Any]]:
-        # Use DataLoader for parallel iteration if num_workers_cache > 0
-        if num_workers_cache > 0:
-            # Wrap IterableDataset to batch windows by shot for efficient IPC
-            batched_dataset = _ShotBatchedIterableDataset(streaming_dataset)
-            loader = DataLoader(
-                batched_dataset,
-                batch_size=1,
-                num_workers=int(num_workers_cache),
-                collate_fn=_cache_collate_identity,
-                prefetch_factor=1,
-                persistent_workers=False,
-            )
-            # Each batch is a list of windows from one shot
-            for window_list in loader:
-                for window in window_list:
-                    yield window
-        else:
-            # Single-process: iterate directly
-            yield from streaming_dataset
-
-    flat_windows: List[Dict[str, Any]] = []
+    flat_windows: list[dict[str, Any]] = []
 
     for n, w in enumerate(_iter_windows(), start=1):
         if dtype_np is not None:
@@ -362,18 +474,13 @@ def materialize_tokenized_split_to_ram(
                 get_ram_gb(),
             )
 
-    # Shuffle after caching if requested (since IterableDataset doesn't support DataLoader shuffle)
+    # Shuffle after caching if requested (since IterableDataset does not support DataLoader shuffle).
     if shuffle_shots and flat_windows:
-        logger.info(
-            "%sShuffling %d cached windows (seed=%d)",
-            prefix,
-            len(flat_windows),
-            seed,
-        )
+        logger.info("%sShuffling %d cached windows (seed=%d)", prefix, len(flat_windows), seed)
         random.Random(int(seed)).shuffle(flat_windows)
 
     logger.info(
-        "%sMaterialised %d tokenised windows (num_workers_cache=%d, shuffle_shots=%s, dtype=%s, Final RAM: %.3f GB)",
+        "%sMaterialized %d tokenized windows (num_workers_cache=%d, shuffle_shots=%s, dtype=%s, Final RAM: %.3f GB)",
         prefix,
         len(flat_windows),
         int(num_workers_cache),
@@ -382,4 +489,4 @@ def materialize_tokenized_split_to_ram(
         get_ram_gb(),
     )
 
-    return WindowCachedDataset(flat_windows)
+    return WindowCachedDataset(windows=flat_windows)

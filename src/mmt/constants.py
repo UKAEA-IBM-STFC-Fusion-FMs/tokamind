@@ -3,12 +3,17 @@ Shared constants for the MMT token pipeline.
 
 This module defines:
 - integer codes for token roles (context/input, actuator, output),
-- explicit PAD semantics for token-level fields (id, role, modality, position).
+- explicit PAD semantics for token-level fields (ID, role, modality, position).
 
-These values are used consistently across transforms, collation, and model code
-to ensure padding and masking are unambiguous and never collide with real
-signal IDs or semantic roles.
+These values are used consistently across transforms, collation, and model code to ensure padding and masking are
+unambiguous and never collide with real signal IDs or semantic roles.
 """
+
+# Floating-point tolerance for time-based window/chunk comparisons (seconds)
+TIME_FLOAT_TOL = 1e-12
+
+# Small epsilon added to denominators / used as a floor to avoid exact zero (numerical stability)
+FLOAT_STABILITY_EPS = 1e-8
 
 # Token roles
 ROLE_CONTEXT = 0

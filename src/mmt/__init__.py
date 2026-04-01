@@ -1,8 +1,8 @@
 """
 MMT (Multi-Modal Transformer) core library.
 
-This package provides the dataset-agnostic core functionality for training,
-evaluating, and deploying multi-modal transformer models.
+This package provides the dataset-agnostic core functionality for training, evaluating, and deploying multi-modal
+transformer models.
 
 Key subpackages
 ---------------

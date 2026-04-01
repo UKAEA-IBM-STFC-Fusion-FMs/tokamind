@@ -1,8 +1,7 @@
 """
 Training utilities for MMT.
 
-This package provides training loops, loss functions, and optimization
-utilities for multi-modal transformer models.
+This package provides training loops, loss functions, and optimization utilities for multi-modal transformer models.
 
 Key modules
 -----------
@@ -13,6 +12,9 @@ Key modules
 """
 
 from .loop import train_finetune
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 __all__ = [
     "train_finetune",

@@ -21,6 +21,9 @@ import logging
 
 from pathlib import Path
 
+from mmt.utils import validate_config, sdpa_math_only_ctx
+from mmt.train import train_finetune
+
 from mast_utils import (
     load_experiment_config,
     load_task_definition,
@@ -32,14 +35,20 @@ from mast_utils import (
     resolve_pretrain_embeddings,
 )
 
-from mmt.utils import validate_config, sdpa_math_only_ctx
-from mmt.train import train_finetune
 
-
+# ----------------------------------------------------------------------------------------------------------------------
 def parse_args_pretrain() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        description="Run pretraining for a given pretrain task."
-    )
+    """
+    Parse arguments for pretraining.
+
+    Returns
+    -------
+    argparse.Namespace
+        Parsed pretraining arguments in argparse.Namespace format.
+
+    """
+
+    parser = argparse.ArgumentParser(description="Run pretraining for a given pretrain task.")
     parser.add_argument(
         "--task",
         type=str,
@@ -68,13 +77,25 @@ def parse_args_pretrain() -> argparse.Namespace:
         "If neither --run-id nor --tag provided, uses task name as run_id.",
     )
     args, _ = parser.parse_known_args()
+
     return args
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def main() -> None:
-    # ------------------------------------------------------------------
+    """
+    Execute main finetuning pipeline.
+
+    Returns
+    -------
+    None
+
+    """
+
+    # ..................................................................................................................
     # Load merged config (common + task + overrides)
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
+
     args = parse_args_pretrain()
     cfg_mmt = load_experiment_config(
         task=args.task,
@@ -83,11 +104,12 @@ def main() -> None:
         run_id=args.run_id,
         tag=args.tag,
     )
-    validate_config(cfg_mmt)
+    validate_config(cfg=cfg_mmt)
 
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
     # Runtime context (device, seed, logging)
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
+
     device, _ = init_run_context(cfg_mmt, phase="pretrain")
 
     cfg_data = cfg_mmt.data
@@ -95,26 +117,23 @@ def main() -> None:
     cfg_train = cfg_mmt.train
 
     # Benchmark task config (with overrides such as subset_of_shots/local)
-    cfg_task = load_task_definition(args.task)
+    cfg_task = load_task_definition(task_key=args.task)
 
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
     # Task metadata + MAST datasets
-    # ------------------------------------------------------------------
-    dict_task_metadata, mast_dataset_train, mast_dataset_val, _mast_test = (
-        build_mast_datasets(
-            cfg_task,
-            cfg_data=cfg_data,
-            phase="pretrain",
-        )
+    # ..................................................................................................................
+
+    dict_task_metadata, mast_dataset_train, mast_dataset_val, _mast_test = build_mast_datasets(
+        cfg_task=cfg_task,
+        cfg_data=cfg_data,
+        phase="pretrain",
     )
 
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
     # Signal specs + embeddings
-    # ------------------------------------------------------------------
-    signals_by_role = build_signals_by_role_from_task_definition(
-        cfg_task,
-        dict_task_metadata,
-    )
+    # ..................................................................................................................
+
+    signals_by_role = build_signals_by_role_from_task_definition(cfg_task=cfg_task, dict_metadata=dict_task_metadata)
 
     run_dir = Path(cfg_mmt.paths["run_dir"])
     signal_specs, codecs = resolve_pretrain_embeddings(
@@ -125,9 +144,10 @@ def main() -> None:
         cfg_task=cfg_task,
     )
 
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
     # Window data
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
+
     logging.getLogger("mmt").info("")
     window_data = build_window_data(
         cfg_mmt=cfg_mmt,
@@ -142,9 +162,10 @@ def main() -> None:
     dataloader_mmt_train = window_data["train"]["loader"]
     dataloader_mmt_val = window_data["val"]["loader"]
 
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
     # Model
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
+
     logging.getLogger("mmt").info("")
     model = build_model_and_optional_warmstart(
         cfg_mmt=cfg_mmt,
@@ -152,9 +173,10 @@ def main() -> None:
         device=device,
     )
 
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
     # Pretrain (using the shared training loop)
-    # ------------------------------------------------------------------
+    # ..................................................................................................................
+
     logging.getLogger("mmt.Train").info("")
     with sdpa_math_only_ctx():
         train_finetune(
@@ -167,5 +189,6 @@ def main() -> None:
         )
 
 
+# ======================================================================================================================
 if __name__ == "__main__":
     main()

@@ -2,8 +2,8 @@
 EmbedChunksTransform
 ====================
 
-Embed chunk-level and window-level output signals using the codecs and
-SignalSpec definitions provided at configuration time.
+Embed chunk-level and window-level output signals using the codecs and SignalSpec definitions provided at configuration
+time.
 
 Expected input window
 ---------------------
@@ -23,7 +23,7 @@ Each chunk_dict must contain (from ChunkWindowsTransform / TrimChunksTransform):
     {
         "signals": { <signal_name>: ndarray or list (or None), ... },
         "chunk_index_in_window": <int>,   # 0,1,2,... within the role span
-        "chunk_index_global": <int>,      # stable slot id on the stride grid
+        "chunk_index_global": <int>,      # stable slot ID on the stride grid
         "pos": <int>,                     # added upstream by TrimChunksTransform
         ...
     }
@@ -37,73 +37,183 @@ This transform:
        window["embedded_output_shapes"]
 4) Drops chunk raw "signals" on the returned copy to reduce memory.
 
-
 Caching (v0)
 ------------
 Cache key (robust, no fallbacks):
 
     (shot_id, role, signal_id, chunk_index_global)
 
-This should produce cache hits for overlapping windows within a shot when
-window_stride_sec == chunk_stride_sec.
+This should produce cache hits for overlapping windows within a shot when window_stride_sec == chunk_stride_sec.
 """
 
 from __future__ import annotations
 
-from typing import Any, Dict, Mapping, Optional, Tuple
+from typing import Any, Optional
+from collections.abc import Mapping
 import logging
 import numpy as np
 
 from mmt.data.signal_spec import SignalSpecRegistry
 
+
+# ----------------------------------------------------------------------------------------------------------------------
+
 logger = logging.getLogger("mmt.EmbedChunks")
 
 
+# ======================================================================================================================
 class EmbedChunksTransform:
     """
-    Embed all chunk-level and output-level signals of a window according to the
-    provided SignalSpecRegistry and codec mapping.
+    Embed all chunk-level and output-level signals of a window according to the provided `SignalSpecRegistry` and codec
+    mapping.
+
+    Attributes
+    ----------
+    signal_specs : SignalSpecRegistry
+        Registry of signal specifications.
+    codecs : Mapping[int, Any]
+        Codec mapping (signal_id -> codec).
+    _cache : dict[tuple[Any, str, int, int], np.ndarray]
+        Supporting variable to cache (shot_id, role, signal_id, chunk_index_global).
+    _last_shot_id : Any
+        Supporting variable to hold the last shot ID.
+
+    Methods
+    -------
+    __call__(window)
+        Call method for the class instances to behave like a function.
+    _get_spec(role, name)
+        Get `SignalSpec` instance associated with a given role/name.
+    _get_codec(sid)
+        Get codec from signal ID.
+
     """
 
-    def __init__(
-        self,
-        signal_specs: SignalSpecRegistry,
-        codecs: Mapping[int, Any],
-    ) -> None:
+    # ------------------------------------------------------------------------------------------------------------------
+    def __init__(self, signal_specs: SignalSpecRegistry, codecs: Mapping[int, Any]) -> None:
+        """
+        Initialize class attributes.
+
+        Parameters
+        ----------
+        signal_specs : SignalSpecRegistry
+            Registry of signal specifications.
+        codecs : Mapping[int, Any]
+            Codec mapping (signal_id -> codec).
+
+        Returns
+        -------
+        # None  # REMARK: Commented out to avoid type checking errors, as this is a callable class.
+
+        """
+
         self.signal_specs = signal_specs
         self.codecs = dict(codecs)
 
         # Deterministic cache:
         # (shot_id, role, signal_id, chunk_index_global) -> embedding
-        self._cache: Dict[Tuple[Any, str, int, int], np.ndarray] = {}
+        self._cache: dict[tuple[Any, str, int, int], np.ndarray] = {}
+
         # We only need within-shot reuse; clear caches when shot_id changes.
         self._last_shot_id: Any = None
 
-    def _get_spec(self, role: str, name: str):
+    # ------------------------------------------------------------------------------------------------------------------
+    def _get_spec(self, role: str, name: str) -> Any:
+        """
+        Get `SignalSpec` instance associated with a given role/name.
+
+        Parameters
+        ----------
+        role : str
+            Target role.
+        name : str
+            Target name.
+
+        Returns
+        -------
+        Any
+            `SignalSpec` instance associated with the passed `role` and `name`.
+
+        Raises
+        ------
+        KeyError
+            If no `SignalSpec` instance found within `self.signal_specs` for passed `role`.
+
+        """
+
         spec = self.signal_specs.get(role, name)
         if spec is None:
-            raise KeyError(f"No SignalSpec found for role={role!r}, name={name!r}")
+            raise KeyError(f"[EmbedChunksTransform] No SignalSpec found for `role={role!r}`, name={name!r}.")
+
         return spec
 
-    def _get_codec(self, sid: int):
+    # ------------------------------------------------------------------------------------------------------------------
+    def _get_codec(self, sid: int) -> Any:
+        """
+        Get codec from signal ID.
+
+        Parameters
+        ----------
+        sid : int
+            Target signal ID.
+
+        Returns
+        -------
+        Any
+            Codec associated with target signal ID.
+
+        Raises
+        ------
+        KeyError
+            If no codec is registered for the target signal ID.
+
+        """
+
         if sid not in self.codecs:
-            raise KeyError(f"No codec registered for signal_id={sid}")
+            raise KeyError(f"[EmbedChunksTransform] No codec registered for `signal_id={sid}`.")
+
         return self.codecs[sid]
 
-    def __call__(self, window: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    # ------------------------------------------------------------------------------------------------------------------
+    def __call__(  # NOSONAR - Ignore cognitive complexity
+        self, window: Optional[dict[str, Any]]
+    ) -> Optional[dict[str, Any]]:
+        """
+        Call method for the class instances to behave like a function.
+
+        Parameters
+        ----------
+        window : Optional[dict[str, Any]]
+            Window on which the transform is applied.
+
+        Returns
+        -------
+        Optional[dict[str, Any]]
+            Extended window with updated/new values for "chunks", "embedded_output", and "embedded_output_shapes" keys.
+
+        Raises
+        ------
+        ValueError
+            If `window` does not define the required key "window_index".
+        KeyError
+            If `window["chunks"]` does not have the required "chunk_index_global" for "input" or "actuator" role.
+
+        """
+
         if window is None:
             return None
 
         shot_id = window.get("shot_id")
         w_idx = window.get("window_index")
         if w_idx is None:
-            raise ValueError("EmbedChunksTransform requires window['window_index']")
+            raise ValueError("[EmbedChunksTransform] `window['window_index']` is required.")
 
-        # ------------------------------------------------------------------
+        # ..............................................................................................................
         # Prevent unbounded cache growth across shots.
-        # The cache key includes shot_id, so cross-shot reuse is impossible;
-        # keeping old entries only wastes RAM during long streaming/caching runs.
-        # ------------------------------------------------------------------
+        # The cache key includes shot_id, so cross-shot reuse is impossible; keeping old entries only wastes RAM during
+        # long streaming/caching runs.
+        # ..............................................................................................................
+
         if shot_id != self._last_shot_id:
             self._cache.clear()
             self._last_shot_id = shot_id
@@ -119,35 +229,36 @@ class EmbedChunksTransform:
 
         out_window = dict(window)
 
-        # ------------------------------------------------------------------
+        # ..............................................................................................................
         # Embed chunk-level signals
-        # ------------------------------------------------------------------
-        new_chunks: Dict[str, Any] = {}
+        # ..............................................................................................................
+
+        new_chunks: dict[str, Any] = {}
         for role in ("input", "actuator"):
             role_chunks = chunks_dict.get(role) or []
             n_chunks_total += len(role_chunks)
 
             new_role_chunks = []
             for ch in role_chunks:
-                ch2: Dict[str, Any] = dict(ch)
+                ch2: dict[str, Any] = dict(ch)  # type: ignore[arg-type]
 
                 if "chunk_index_global" not in ch:
                     raise KeyError(
-                        f"Chunk missing 'chunk_index_global' (role={role}, win={w_idx}, shot={shot_id})"
+                        f"[EmbedChunksTransform] Chunk missing 'chunk_index_global' (role={role}, win={w_idx}, "
+                        f"shot={shot_id})."
                     )
+
                 chunk_g = int(ch["chunk_index_global"])
-
                 signals = ch.get("signals") or {}
-
-                emb_map: Dict[int, np.ndarray] = {}
+                emb_map: dict[int, np.ndarray] = {}
 
                 for name, values in signals.items():
                     if values is None:
                         continue
 
-                    spec = self._get_spec(role, name)
+                    spec = self._get_spec(role=role, name=name)
                     sid = int(spec.signal_id)
-                    codec = self._get_codec(sid)
+                    codec = self._get_codec(sid=sid)
 
                     arr = np.asarray(values)
                     key = (shot_id, role, sid, chunk_g)
@@ -178,13 +289,14 @@ class EmbedChunksTransform:
 
         out_window["chunks"] = new_chunks
 
-        # ------------------------------------------------------------------
+        # ..............................................................................................................
         # Embed output-level signals (not cached in v0)
-        # ------------------------------------------------------------------
+        # ..............................................................................................................
+
         outputs = window.get("output") or {}
 
-        emb_out: Dict[int, np.ndarray] = {}
-        shape_out: Dict[int, Any] = {}
+        emb_out: dict[int, np.ndarray] = {}
+        shape_out: dict[int, Any] = {}
 
         if isinstance(outputs, dict):
             for name, info in outputs.items():
@@ -195,9 +307,9 @@ class EmbedChunksTransform:
                 if values is None:
                     continue
 
-                spec = self._get_spec("output", name)
+                spec = self._get_spec(role="output", name=name)
                 sid = int(spec.signal_id)
-                codec = self._get_codec(sid)
+                codec = self._get_codec(sid=sid)
 
                 arr = np.asarray(values)
                 emb = codec.encode(arr)
@@ -212,12 +324,12 @@ class EmbedChunksTransform:
             out_window["embedded_output"] = emb_out
             out_window["embedded_output_shapes"] = shape_out
 
-        # ------------------------------------------------------------------
+        # ..............................................................................................................
         # Debug summary
-        # ------------------------------------------------------------------
+        # ..............................................................................................................
+
         logger.debug(
-            "win %s (shot %s) | chunks=%d, signal_new_emb=%d, signal_cache_hits=%d, "
-            "out_signals=%d, out_new_emb=%d",
+            "win %s (shot %s) | chunks=%d, signal_new_emb=%d, signal_cache_hits=%d, out_signals=%d, out_new_emb=%d",
             w_idx,
             shot_id,
             n_chunks_total,

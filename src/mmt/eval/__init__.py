@@ -1,8 +1,7 @@
 """
 Evaluation and inference utilities for MMT.
 
-This package provides utilities for model evaluation and inference,
-including forward passes and decoding operations.
+This package provides utilities for model evaluation and inference, including forward passes and decoding operations.
 
 Key modules
 -----------
@@ -11,5 +10,8 @@ Key modules
 """
 
 from .forward import forward_decode_native
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 __all__ = ["forward_decode_native"]

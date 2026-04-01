@@ -1,8 +1,8 @@
 """
 Embedding and codec utilities for MMT.
 
-This package provides codec implementations for compressing and embedding
-time-series signals into lower-dimensional representations.
+This package provides codec implementations for compressing and embedding time-series signals into lower-dimensional
+representations.
 
 Key modules
 -----------

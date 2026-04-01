@@ -9,27 +9,24 @@ The train pipeline is expected to provide:
       Model predictions in coeff space, one (B, K) tensor per output.
 
   • y_true: {output_key -> Tensor(B, K)}
-      Encoded labels in the same coeff space. The embedding transforms are
-      responsible for producing these; we do *not* re-encode in the loss.
+      Encoded labels in the same coeff space. The embedding transforms are responsible for producing these; we
+       do *not* re-encode in the loss.
 
   • output_mask: {output_key -> BoolTensor(B,)}
       Per-output presence mask:
-        - True  → this sample carries a supervised label for that output
-                  (and it was not dropped by collate),
+        - True  → this sample carries a supervised label for that output (and it was not dropped by collate),
         - False → ignore this sample for that output in the loss.
 
   • output_weights: {output_key -> float} (optional)
       Optional per-output scalar weights.
-      If provided and sum(weights) > 0, we compute a weighted average across
-      outputs, normalised by sum(weights). If not provided (or sum=0), we
-      fall back to a simple mean over outputs.
+      If provided and sum(weights) > 0, we compute a weighted average across outputs, normalized by sum(weights). If
+      not provided (or sum=0), we fall back to a simple mean over outputs.
 
 Notes on native vs prediction space
 -----------------------------------
-For orthonormal encoders (e.g. DCT / FPCA) and when using all coefficients,
-the sum of squared errors in coeff space is equal to the sum of squared
-errors in native space. The difference between "MSE over coeffs" and "MSE
-over native points" is just a constant factor:
+For orthonormal encoders (e.g., DCT / FPCA) and when using all coefficients, the sum of squared errors in coeff space
+is equal to the sum of squared errors in native space. The difference between "MSE over coeffs" and "MSE over native
+points" is just a constant factor:
 
     native_MSE ≈ (K / N) * coeff_MSE
 
@@ -37,31 +34,33 @@ where:
   • K = number of coefficients per output,
   • N = number of native points (product of the original shape dims).
 
-In this implementation we **do not** apply this K/N scaling. The loss is
-therefore expressed in "coeff-space MSE" units. If you ever need a loss
-numerically comparable to a native-space MSE (e.g. for cross-model
-comparison in a paper), you can reintroduce a per-output scale factor:
+In this implementation we **do not** apply this K/N scaling. The loss is therefore expressed in "coeff-space MSE"
+units. If you ever need a loss numerically comparable to a native-space MSE (e.g., for cross-model comparison in a
+paper), you can reintroduce a per-output scale factor:
 
     L_o_native ≈ (K / N) * L_o_coeff
 
-using N derived from the original output shape (e.g. via metadata or a
-collate-side computation).
+using N derived from the original output shape (e.g., via metadata or a collate-side computation).
 """
 
 from __future__ import annotations
 
-from typing import Dict, Hashable, Mapping, Optional, Tuple
+from typing import Hashable, Optional
+from collections.abc import Mapping
 
 import torch
 from torch import Tensor
 
+from mmt.constants import FLOAT_STABILITY_EPS
 
-def compute_loss_pred_space(
+
+# ----------------------------------------------------------------------------------------------------------------------
+def compute_loss_pred_space(  # NOSONAR - Ignore cognitive complexity
     preds: Mapping[Hashable, Tensor],
     y_true: Mapping[Hashable, Tensor],
     output_mask: Mapping[Hashable, Tensor],
     output_weights: Optional[Mapping[Hashable, float]] = None,
-) -> Tuple[Tensor, Dict[Hashable, float]]:
+) -> tuple[Tensor, dict[Hashable, float]]:
     """
     Compute masked MSE in prediction space and aggregate across outputs.
 
@@ -71,17 +70,15 @@ def compute_loss_pred_space(
         Mapping from output_key -> prediction tensor of shape (B, K).
 
     y_true:
-        Mapping from output_key -> label tensor of shape (B, K), already
-        in the same coeff/prediction space as preds.
+        Mapping from output_key -> label tensor of shape (B, K), already in the same coeff/prediction space as preds.
 
     output_mask:
-        Mapping from output_key -> BoolTensor(B,), True where that output
-        is supervised (present and not dropped) for that sample.
+        Mapping from output_key -> BoolTensor(B,), True where that output is supervised (present and not dropped) for
+        that sample.
 
     output_weights:
-        Optional mapping from output_key -> scalar weight (>=0). If given
-        and the sum of weights over all supervised outputs in this batch
-        is > 0, we compute:
+        Optional mapping from output_key -> scalar weight (>=0). If given and the sum of weights over all supervised
+        outputs in this batch is > 0, we compute:
 
             loss = sum_o L_o * (w_o / sum_o w_o)
 
@@ -91,13 +88,23 @@ def compute_loss_pred_space(
 
     Returns
     -------
-    loss : Tensor (scalar)
-        Aggregated loss in float32 on the same device as preds (AMP-safe).
+    tuple[Tensor, dict[Hashable, float]]
+        Tuple (loss, logs), with each element as follows:
+        loss : Tensor (scalar)
+            Aggregated loss in float32 on the same device as preds (AMP-safe).
 
-    logs : Dict[output_key, float]
-        Per-output loss values (coeff-space MSE), detached to Python
-        floats for logging.
+        logs : dict[output_key, float]
+            Per-output loss values (coeff-space MSE), detached to Python
+            floats for logging.
+
+    Raises
+    ------
+    RuntimeError
+        Shape mismatch between a `preds` item and the corresponding `y_t` item.
+        If an `output_mask` item is not of type `torch.bool`.
+
     """
+
     if not preds:
         # No predictions → loss = 0 by convention
         return torch.tensor(0.0, dtype=torch.float32), {}
@@ -108,25 +115,20 @@ def compute_loss_pred_space(
 
     per_out_losses: list[Tensor] = []
     per_out_weights: list[float] = []
-    logs: Dict[Hashable, float] = {}
+    logs: dict[Hashable, float] = {}
 
     for out_key, y_pred in preds.items():
-        if out_key not in y_true or out_key not in output_mask:
+        if (out_key not in y_true) or (out_key not in output_mask):
             continue
 
         y_t = y_true[out_key]
         mask = output_mask[out_key]
 
         if y_pred.shape != y_t.shape:
-            raise RuntimeError(
-                f"[{out_key!r}] pred/label shape mismatch: "
-                f"{tuple(y_pred.shape)} vs {tuple(y_t.shape)}"
-            )
+            raise RuntimeError(f"[{out_key!r}] pred/label shape mismatch: {tuple(y_pred.shape)} vs {tuple(y_t.shape)}.")
 
         if mask.dtype != torch.bool:
-            raise RuntimeError(
-                f"[{out_key!r}] output_mask must be bool tensor, got {mask.dtype}."
-            )
+            raise RuntimeError(f"[{out_key!r}] output_mask must be bool tensor, got {mask.dtype}.")
 
         if not bool(mask.any()):
             # No supervised samples for this output in this batch
@@ -139,7 +141,7 @@ def compute_loss_pred_space(
         y_t_f = y_t.to(torch.float32)
         diff = y_pred_f - y_t_f
         per_sample = diff.square().mean(dim=1)
-        L_o = per_sample[mask].mean()
+        L_o = per_sample[mask].mean()  # NOSONAR # noqa - Ignore lowercase warning
 
         # Per-output weight (if provided)
         w_o = 1.0
@@ -158,8 +160,8 @@ def compute_loss_pred_space(
     weights = torch.tensor(per_out_weights, device=device, dtype=torch.float32)
 
     if float(weights.sum()) > 0.0:
-        # Normalised weighted average across outputs
-        loss = (per_out * (weights / (weights.sum() + 1e-8))).sum()
+        # Normalized weighted average across outputs
+        loss = (per_out * (weights / (weights.sum() + FLOAT_STABILITY_EPS))).sum()
     else:
         # Uniform average over outputs
         loss = per_out.mean()

@@ -1,8 +1,7 @@
 """
 General utilities for MMT.
 
-This package provides common utilities for logging, seeding, AMP operations,
-and configuration validation.
+This package provides common utilities for logging, seeding, AMP operations, and configuration validation.
 
 Key modules
 -----------
@@ -16,6 +15,9 @@ from .seed import set_seed
 from .logger import setup_logging
 from .amp_utils import sdpa_math_only_ctx
 from .config import validate_config
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 __all__ = [
     "set_seed",

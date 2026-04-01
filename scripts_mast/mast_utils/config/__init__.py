@@ -1,9 +1,8 @@
 """
 Configuration loading and merging for scripts_mast experiments.
 
-This package provides convention-based YAML configuration assembly for
-pretrain/finetune/eval phases, with support for task-specific overrides,
-CLI parameter injection, and warm-start inheritance.
+This package provides convention-based YAML configuration assembly for pretrain/finetune/eval phases, with support for
+task-specific overrides, CLI parameter injection, and warm-start inheritance.
 
 Key modules
 -----------
@@ -27,5 +26,8 @@ Configs are assembled in this order (later overrides earlier):
 """
 
 from .loader import load_experiment_config
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 __all__ = ["load_experiment_config"]
