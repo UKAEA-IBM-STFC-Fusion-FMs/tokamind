@@ -3,7 +3,7 @@
 TokaMind provides a multi-modal, token-based Transformer pipeline for scientific and industrial signals.
 
 The repository is split into two layers:
-- `src/mmt/`: dataset-agnostic core library (model, codecs, transforms, training loop)
+- `src/mmt/`: dataset-agnostic core library (model, codecs, transforms, training loop) — usable standalone without any external dataset integration (see `src/mmt/examples/` for a self-contained toy example)
 - `scripts_mast/`: FAIR/MAST integration layer (task configs, data wiring, entry scripts)
 
 ## 📝 Description
@@ -26,18 +26,19 @@ TokaMind implements a schema-flexible tokenization pipeline and a modular multi-
 ## 🗂️ Repository Layout
 ```text
 .
-├── src/mmt/                           # Core package
+├── src/mmt/                           # Core package (dataset-agnostic, usable standalone)
 │   ├── data/                          # signal specs, codecs, transforms, datasets
 │   ├── models/                        # transformer model blocks
 │   ├── train/                         # training loop
 │   ├── eval/                          # decode and eval helpers
+│   ├── examples/                      # self-contained toy training example (no FAIR/MAST required)
 │   └── utils/                         # logging, seeds, config validation
 ├── scripts_mast/                      # FAIR/MAST integration
 │   ├── run_pretrain.py
 │   ├── run_finetune.py
 │   ├── run_eval.py
 │   ├── mast_utils/
-│   │   ├── config/                  # config loading modules
+│   │   ├── config/                    # config loading modules
 │   │   └── ...
 │   └── configs/
 ├── docs/                              # project documentation
@@ -74,6 +75,26 @@ cd ../tokamind
 pip install -e .
 # pip install -e ".[dev]"
 ```
+
+### Developer setup (lint + format hooks)
+
+For contributors, install dev dependencies and enable git hooks:
+
+```bash
+cd ../tokamind
+pip install -e ".[dev]"
+pre-commit install
+```
+
+Run hooks on all files (recommended once after setup):
+
+```bash
+pre-commit run --all-files
+```
+
+The pre-commit configuration runs:
+- `ruff check`
+- `ruff format`
 
 ### 3) Install the benchmark/data package
 
@@ -177,4 +198,4 @@ See:
 - [Evaluation](docs/evaluation.md)
 
 ## 📄 License
-MIT (see `pyproject.toml`).
+See [License file](LICENSE.md).

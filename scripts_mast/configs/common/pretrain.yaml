@@ -18,8 +18,9 @@ runtime:
 
 
 data:
-  local: true         # True = uses local dataset, False = HPC / remote
-  subset_of_shots: null   # None / null → uses all shots;
+  local: true   # true = load from local_path (dev/laptop); false = stream from remote HPC store
+  local_path: /rds/project/rds-mOlK9qn0PlQ/fairmast/upload-tmp/level2    # used only when local: true
+  subset_of_shots: null   # None / null → uses all shots
 
   keep_output_native: false
   cache:
@@ -106,7 +107,7 @@ model:
       bucketed:
         enable: false
       manual: {}   # manual always wins
-#        equilibrium-pis: 128
+#        equilibrium-psi: 128
 
 
 train:

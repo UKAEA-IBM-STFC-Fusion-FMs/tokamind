@@ -1,8 +1,7 @@
 """
 Data pipeline utilities for MMT.
 
-This package provides datasets, transforms, embeddings, and data loading
-utilities for multi-modal time-series data.
+This package provides datasets, transforms, embeddings, and data loading utilities for multi-modal time-series data.
 
 Key modules
 -----------
@@ -14,14 +13,16 @@ Key modules
 - embeddings/       : codec utilities for signal compression/embedding
 """
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # Datasets
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
+
 from .datasets import WindowCachedDataset
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # Transforms
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
+
 from .transforms.chunk_windows import ChunkWindowsTransform
 from .transforms.trim_chunks import TrimChunksTransform
 from .transforms.select_valid_windows import SelectValidWindowsTransform
@@ -31,22 +32,22 @@ from .transforms.finalize_window import FinalizeWindowTransform
 from .transforms.tune_ranked_dct3d import TuneRankedDCT3DTransform
 from .transforms.compose import ComposeTransforms
 
-
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # Core utilities
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
+
 from .collate import MMTCollate
 from .data_loaders import initialize_mmt_dataloader
-from .signal_spec import (
-    SignalSpec,
-    build_signal_specs,
-    infer_modality,
-)
+from .signal_spec import SignalSpec, build_signal_specs, infer_modality
 
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
 # Codec utils
-# ------------------------------------------------------------------
+# ----------------------------------------------------------------------------------------------------------------------
+
 from .embeddings.codec_utils import build_codecs
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 __all__ = [
     "WindowCachedDataset",

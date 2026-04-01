@@ -1,9 +1,8 @@
 """
 CLI override injection for pretrain/finetune/eval phases.
 
-This module handles command-line parameter injection into the merged config,
-translating user-facing CLI arguments (--model, --init, --tag, --run_id) into
-the internal config structure.
+This module handles command-line parameter injection into the merged config, translating user-facing CLI arguments
+(--model, --init, --tag, --run_id) into the internal config structure.
 
 Key responsibilities:
 - Validate CLI parameter combinations (e.g., warmstart requires --model)
@@ -15,20 +14,21 @@ Key responsibilities:
 from __future__ import annotations
 
 import logging
+from collections.abc import MutableMapping
+from typing import Any, Literal
 from pathlib import Path
-from typing import Any, Dict
 
 from .ids import generate_finetune_run_id, generate_pretrain_run_id
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 logger = logging.getLogger("mmt.ConfigLoader")
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def inject_cli_overrides_pretrain(
-    merged: Dict[str, Any],
-    *,
-    task: str,
-    run_id: str | None,
-    tag: str | None,
+    merged: MutableMapping[str, Any], *, task: str, run_id: str | None, tag: str | None
 ) -> None:
     """
     Inject CLI overrides for pretrain phase.
@@ -37,77 +37,93 @@ def inject_cli_overrides_pretrain(
 
     Parameters
     ----------
-    merged : Dict[str, Any]
-        Merged config dictionary (modified in-place)
+    merged : MutableMapping[str, Any]
+        Merged config dictionary (modified in-place).
     task : str
-        Task identifier
+        Task identifier.
     run_id : str | None
-        Explicit run identifier, or None for auto-generation
+        Explicit run identifier, or None for auto-generation.
     tag : str | None
-        Optional experiment tag
+        Optional experiment tag.
+
+    Returns
+    -------
+    None
+
+    Notes
+    =====
 
     Side Effects
     ------------
     Modifies merged dict in-place:
     - Sets merged['run_id']
     - Sets merged['cli'] with CLI metadata
+
     """
-    merged["run_id"] = generate_pretrain_run_id(task, run_id, tag)
+
+    merged["run_id"] = generate_pretrain_run_id(task=task, run_id=run_id, tag=tag)
     merged["cli"] = {"run_id": run_id, "tag": tag, "phase": "pretrain"}
 
 
-def inject_cli_overrides_finetune(
-    merged: Dict[str, Any],
+# ----------------------------------------------------------------------------------------------------------------------
+def inject_cli_overrides_finetune(  # NOSONAR - Ignore cognitive complexity
+    merged: MutableMapping[str, Any],
     *,
     model: str | None,
     tag: str | None,
-    init_mode: str | None,
+    init_mode: Literal["warmstart", "scratch"] = "warmstart",
 ) -> None:
     """
     Inject CLI overrides for finetune phase.
 
     Handles both warmstart and scratch initialization modes:
-    - Warmstart: requires --model, sets model_source config
-    - Scratch: ignores --model, sets model_source to None
+    - Warmstart: requires --model, sets model_source config.
+    - Scratch: ignores --model, sets model_source to None.
 
     Parameters
     ----------
-    merged : Dict[str, Any]
-        Merged config dictionary (modified in-place)
+    merged : MutableMapping[str, Any]
+        Merged config dictionary (modified in-place).
     model : str | None
-        Source model for warmstart (run_id or path). Required for warmstart,
-        ignored for scratch.
+        Source model for warmstart (run_id or path). Required for warmstart, ignored for scratch.
     tag : str | None
-        Optional experiment tag
-    init_mode : str | None
-        Initialization mode: "warmstart" (default) or "scratch"
+        Optional experiment tag.
+    init_mode : Literal["warmstart", "scratch"]
+        Finetune initialization mode, either "warmstart" or "scratch".
+        Optional. Default: "warmstart".
+
+    Returns
+    -------
+    None
 
     Raises
     ------
     ValueError
-        If init_mode invalid or warmstart missing --model
+        If `init_mode` not in ['warmstart', 'scratch'].
+        If `init_mode` is 'warmstart' and an invalid value for `model` is used.
     TypeError
-        If model_source config structure invalid
+        If `merged['model_source']` isi not a mapping (dict) or null (None).
+
+    Notes
+    =====
 
     Side Effects
     ------------
     Modifies merged dict in-place:
-    - Sets merged['run_id'] (auto-generated if not in config)
-    - Sets merged['model_source'] (warmstart) or None (scratch)
-    - Sets merged['cli'] with CLI metadata
+    - Sets merged['run_id'] (auto-generated if not in config).
+    - Sets merged['model_source'] (warmstart) or None (scratch).
+    - Sets merged['cli'] with CLI metadata.
 
-    Notes
-    -----
+    Other Notes
+    -----------
     Model source resolution:
-    - If model contains '/' or backslash, treated as path (sets model_path)
-    - Otherwise, treated as run_id (sets run_id, looks in runs/{run_id}/)
+    - If model contains '/' or backslash, treated as path (sets model_path).
+    - Otherwise, treated as run_id (sets run_id, looks in runs/{run_id}/).
+
     """
-    mode = "warmstart" if init_mode is None else str(init_mode).strip().lower()
-    if mode not in ("warmstart", "scratch"):
-        raise ValueError(
-            "Finetune init mode must be one of {'warmstart', 'scratch'} "
-            f"(got {init_mode!r})."
-        )
+
+    if init_mode not in ["warmstart", "scratch"]:
+        raise ValueError(f"Parameter `init_mode` for finetune must be in ['warmstart', 'scratch'], got {init_mode!r}.")
 
     model_norm = None
     if model is not None:
@@ -115,32 +131,30 @@ def inject_cli_overrides_finetune(
         if m:
             model_norm = m
 
-    if mode == "warmstart":
+    if init_mode == "warmstart":
         if model_norm is None:
             raise ValueError(
                 "Finetune init=warmstart requires --model <run_id_or_path>.\n"
-                "Example: python run_finetune.py --task task_1-1 --init warmstart "
-                "--model tokamind_base_v1"
+                "Example: python run_finetune.py --task task_1-1 --init warmstart --model tokamind_base_v1"
             )
-
-        model_is_path = "/" in model_norm or "\\" in model_norm
 
         model_source_cfg = merged.get("model_source")
         if model_source_cfg is None:
             model_source_cfg = {}
             merged["model_source"] = model_source_cfg
-        if not isinstance(model_source_cfg, dict):
-            raise TypeError(
-                "Config key 'model_source' must be a mapping (dict) or null."
-            )
 
+        if not isinstance(model_source_cfg, dict):
+            raise TypeError("Value for `merged['model_source']` must be a mapping (dict) or null (None).")
+
+        model_is_path = ("/" in model_norm) or ("\\" in model_norm)
         if model_is_path:
             model_source_cfg["model_path"] = str(Path(model_norm).resolve())
             model_source_cfg["run_id"] = None
         else:
             model_source_cfg["run_id"] = model_norm
             model_source_cfg["model_path"] = None
-    else:
+
+    else:  # -> I.e., init_mode is "scratch"
         if model_norm is not None:
             logger.warning(
                 "Finetune init=scratch ignores --model=%s (no warm-start will be used).",
@@ -153,69 +167,74 @@ def inject_cli_overrides_finetune(
             task=merged["task"],
             model=model_norm,
             tag=tag,
-            init_mode=mode,
+            init_mode=init_mode,
         )
 
     merged["cli"] = {
-        "init": mode,
+        "init": init_mode,
         "model": model_norm,
         "tag": tag,
         "phase": "finetune",
     }
 
 
-def inject_cli_overrides_eval(
-    merged: Dict[str, Any],
-    *,
-    model: str | None,
-) -> None:
+# ----------------------------------------------------------------------------------------------------------------------
+def inject_cli_overrides_eval(merged: MutableMapping[str, Any], *, model: str) -> None:
     """
     Inject CLI overrides for eval phase.
 
-    Evaluation always requires a source model to evaluate. This function
-    validates --model is provided and sets up model_source config.
+    Evaluation always requires a source model to evaluate. This function validates --model is provided and sets up
+    model_source config.
 
     Parameters
     ----------
-    merged : Dict[str, Any]
-        Merged config dictionary (modified in-place)
-    model : str | None
-        Source model to evaluate (run_id or path). Required.
+    merged : MutableMapping[str, Any]
+        Merged config dictionary (modified in-place).
+    model : str
+        Required source model to evaluate (run_id or path).
+
+    Returns
+    -------
+    None
 
     Raises
     ------
     ValueError
-        If model is None (--model required for eval)
+        If `model` is None (--model required for eval).
     TypeError
-        If model_source config structure invalid
+        If `merged['model_source']` is not a mapping (dict) or null (None).
+
+    Notes
+    =====
 
     Side Effects
     ------------
     Modifies merged dict in-place:
-    - Sets merged['model_source'] with run_id or model_path
-    - Sets merged['cli'] with CLI metadata
+    - Sets merged['model_source'] with run_id or model_path.
+    - Sets merged['cli'] with CLI metadata.
 
-    Notes
-    -----
+    Other Notes
+    -----------
     Model source resolution:
-    - If model contains '/' or backslash, treated as path (sets model_path)
-    - Otherwise, treated as run_id (sets run_id, looks in runs/{run_id}/)
+    - If model contains '/' or backslash, treated as path (sets model_path).
+    - Otherwise, treated as run_id (sets run_id, looks in runs/{run_id}/).
+
     """
+
     if model is None:
         raise ValueError(
             "Eval phase requires --model <run_id_or_path> to specify which model to evaluate.\n"
             "Example: python run_eval.py --task task_1-1 --model ft-task_1-1-ws-base-v1"
         )
 
-    model_is_path = "/" in model or "\\" in model
-
     model_source_cfg = merged.get("model_source")
     if model_source_cfg is None:
         model_source_cfg = {}
         merged["model_source"] = model_source_cfg
     if not isinstance(model_source_cfg, dict):
-        raise TypeError("Config key 'model_source' must be a mapping (dict) or null.")
+        raise TypeError("Value for `merged['model_source']` must be a mapping (dict) or null (None).")
 
+    model_is_path = ("/" in model) or ("\\" in model)
     if model_is_path:
         model_source_cfg["model_path"] = str(Path(model).resolve())
         model_source_cfg["run_id"] = None
@@ -226,15 +245,16 @@ def inject_cli_overrides_eval(
     merged["cli"] = {"model": model, "phase": "eval"}
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def inject_cli_model_overrides(
-    merged: Dict[str, Any],
+    merged: MutableMapping[str, Any],
     *,
-    phase: str,
-    task: str,
+    phase: Literal["pretrain", "finetune", "eval"],
+    task: str | None,
     model: str | None,
     run_id: str | None,
     tag: str | None,
-    finetune_init: str | None,
+    finetune_init: Literal["warmstart", "scratch"] | None,
 ) -> None:
     """
     Inject CLI model selection and run-id/eval-id metadata by phase.
@@ -243,48 +263,62 @@ def inject_cli_model_overrides(
 
     Parameters
     ----------
-    merged : Dict[str, Any]
-        Merged config dictionary (modified in-place)
-    phase : str
-        Training phase: "pretrain", "finetune", or "eval"
-    task : str
-        Task identifier
+    merged : MutableMapping[str, Any]
+        Merged config dictionary (modified in-place).
+    phase : Literal["pretrain", "finetune", "eval"]
+        Training phase, either "pretrain", "finetune", or "eval".
+    task : str | None
+        Task identifier (pretrain only).
     model : str | None
-        Source model (finetune warmstart/eval only)
+        Source model (finetune/warmstart and eval only).
     run_id : str | None
-        Explicit run identifier (pretrain only)
+        Explicit run identifier (pretrain only).
     tag : str | None
-        Optional experiment tag (pretrain/finetune)
-    finetune_init : str | None
-        Finetune initialization mode: "warmstart" or "scratch"
+        Optional experiment tag (pretrain and finetune only).
+    finetune_init : Literal["warmstart", "scratch"] | None
+        Finetune initialization mode, either "warmstart" or "scratch", ignored if `phase` is not "finetune".
 
     Raises
     ------
     ValueError
-        If phase unsupported or phase-specific validation fails
+        If `task` is None for phase "pretrain".
+        If `finetune_init` is None for phase "finetune".
+        If `model` is None for phase "eval".
+        If `phase` not in ["pretrain", "finetune", "eval"].
+
+    Notes
+    =====
 
     Side Effects
     ------------
     Modifies merged dict in-place via phase-specific injection functions.
+
     """
+
     if phase == "pretrain":
+        if task is None:
+            raise ValueError("Argument `task` is required for phase 'pretrain'.")
         inject_cli_overrides_pretrain(
-            merged,
+            merged=merged,
             task=task,
             run_id=run_id,
             tag=tag,
         )
     elif phase == "finetune":
+        if finetune_init is None:
+            raise ValueError("Argument `finetune_init` is required for phase 'finetune'.")
         inject_cli_overrides_finetune(
-            merged,
+            merged=merged,
             model=model,
             tag=tag,
             init_mode=finetune_init,
         )
     elif phase == "eval":
+        if model is None:
+            raise ValueError("Argument `model` is required for phase 'eval'.")
         inject_cli_overrides_eval(
-            merged,
+            merged=merged,
             model=model,
         )
     else:
-        raise ValueError(f"Unsupported phase for CLI override injection: {phase}")
+        raise ValueError(f"Unsupported phase `{phase}` for CLI override injection.")

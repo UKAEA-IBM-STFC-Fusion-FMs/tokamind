@@ -1,8 +1,8 @@
 """
 Data transformation pipeline for MMT.
 
-This package provides composable transform components for processing
-multi-modal time-series data through the MMT pipeline.
+This package provides composable transform components for processing multi-modal time-series data through the MMT
+pipeline.
 
 Key modules
 -----------

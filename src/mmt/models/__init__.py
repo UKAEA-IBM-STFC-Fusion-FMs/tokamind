@@ -1,8 +1,7 @@
 """
 Model architecture for MMT.
 
-This package provides the multi-modal transformer architecture and
-modality-specific components.
+This package provides the multi-modal transformer architecture and modality-specific components.
 
 Key modules
 -----------
@@ -14,5 +13,8 @@ Key modules
 """
 
 from .mmt import MultiModalTransformer
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 __all__ = ["MultiModalTransformer"]

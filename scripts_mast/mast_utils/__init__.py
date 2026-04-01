@@ -1,8 +1,8 @@
 """
 MAST integration utilities (scripts_mast).
 
-This package contains the project-specific glue code that connects the
-dataset-agnostic `mmt/` core library to the MAST benchmark stack.
+This package contains the project-specific glue code that connects the dataset-agnostic `mmt/` core library to the MAST
+benchmark stack.
 
 Key modules
 -----------
@@ -41,6 +41,9 @@ from .embedding_resolution import (
 from .benchmark_eval import evaluate_benchmark_and_diagnostics
 
 from .tune_dct3d import run_dct3d_tuning, load_embeddings_overrides
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 
 __all__ = [
     # Config

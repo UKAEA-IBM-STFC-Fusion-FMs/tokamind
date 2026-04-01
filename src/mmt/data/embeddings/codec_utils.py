@@ -48,6 +48,11 @@ def infer_hw_from_values_shape(values_shape: tuple[int, ...]) -> tuple[int, int]
     tuple[int, int]
         Inferred H/W values from input values shape.
 
+    Raises
+    ------
+    ValueError
+        If unsupported `values_shape.
+
     """
 
     if len(values_shape) == 0:
@@ -58,7 +63,7 @@ def infer_hw_from_values_shape(values_shape: tuple[int, ...]) -> tuple[int, int]
     if len(values_shape) == 2:
         return int(values_shape[0]), int(values_shape[1])
 
-    raise ValueError(f"Unsupported values_shape={values_shape!r} for H/W inference.")
+    raise ValueError(f"Unsupported `values_shape={values_shape!r}` for H/W inference.")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -110,15 +115,13 @@ def load_coeff_indices(config_dir: Path, rel_path: str) -> np.ndarray:
 
     indices = np.load(full_path)
     if indices.ndim != 1:
-        raise ValueError(
-            f"Expected 1D array, got shape {indices.shape} from {full_path}."
-        )
+        raise ValueError(f"Expected 1D array, got shape {indices.shape} from {full_path}.")
 
     return indices.astype(np.int32)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def compute_embedding_dim_for_encoder(
+def compute_embedding_dim_for_encoder(  # NOSONAR - Ignore cognitive complexity
     *,
     encoder_name: Literal["identity", "dct3d", "vae"],
     encoder_kwargs: Mapping[str, Any],
@@ -154,20 +157,26 @@ def compute_embedding_dim_for_encoder(
     ValueError
         If `encoder_name` not in ["identity", "dct3d", "vae"].
         If `dt` not greater than 0.
-        If VAE `model_type` is unsupported when `encoder_name="vae"`.
-        If VAE `input_shape` is incompatible with the signal shape when `encoder_name="vae"`.
-        If VAE `input_mode` violates strict model-specific rules when `encoder_name="vae"`.
-        If VAE time dimension is incompatible with chunk length when `encoder_name="vae"`.
-    KeyError
-        If `encoder_kwargs['num_coeffs']` not available for DCT3D rank mode when `encoder_name="dct3d"`.
-        If `encoder_kwargs['model_dir']` not available when `encoder_name="vae"`.
+        If `encoder_kwargs["num_coeffs"]` is not an int for DCT3D rank mode.
+        If VAE `model_type` is unsupported for VAE encoder (`encoder_name="vae"`).
+        If VAE `linear` model does not get input_shape [C,T].
+        If VAE `linear` model does not satisfy input_mode in ["channels", "time"].
+        If VAE `linear` channel mismatch is detected.
+        If VAE `linear` time mismatch is detected.
+        If VAE `conv1d` model does not get input_shape [C,T],
+        If VAE `conv1d` model does not satisfy input_mode="channels".
+        If VAE `conv1d` channel mismatch is detected.
+        If VAE `conv1d` time mismatch is detected.
+        If VAE `conv2d` model does not get input_shape [H,W,T]
+        If VAE `conv2d` model does not satisfy input_mode="time".
+        If VAE `conv2d` channel mismatch is detected.
+        If VAE `conv2d` time mismatch is detected.
+        If VAE VAE `model_type`not in ["linear", "conv1d", "conv2d"].
 
     """
 
     if encoder_name not in ["identity", "dct3d", "vae"]:
-        raise ValueError(
-            f"Unknown encoder_name={encoder_name!r} in compute_embedding_dim_for_encoder."
-        )
+        raise ValueError(f"Unknown encoder_name={encoder_name!r} in compute_embedding_dim_for_encoder.")
 
     if dt <= 0:
         raise ValueError(f"`dt` must be > 0, got {dt}.")
@@ -191,20 +200,17 @@ def compute_embedding_dim_for_encoder(
         if selection_mode == "rank":
             # Rank mode: dimension is number of selected coefficients
             if "num_coeffs" not in encoder_kwargs:
-                raise KeyError(
-                    "`encoder_kwargs['num_coeffs']` is required for DCT3D rank mode."
-                )
+                raise KeyError("`encoder_kwargs['num_coeffs']` is required for DCT3D rank mode.")
             num_coeffs = encoder_kwargs["num_coeffs"]
-            if not isinstance(num_coeffs, int) or isinstance(num_coeffs, bool):
-                raise ValueError(
-                    "`encoder_kwargs['num_coeffs']` must be an int for DCT3D rank mode."
-                )
+            if (not isinstance(num_coeffs, int)) or isinstance(num_coeffs, bool):
+                raise ValueError("`encoder_kwargs['num_coeffs']` must be an int for DCT3D rank mode.")
+
             return num_coeffs
 
         else:  # -> I.e., selection_mode is "spatial"
             # Spatial mode: dimension is keep_h * keep_w * keep_t (clamped)
-            H, W = infer_hw_from_values_shape(values_shape=values_shape)  # noqa (omit lowercase warning)
-            T = n_samples  # noqa (omit lowercase warning)
+            H, W = infer_hw_from_values_shape(values_shape=values_shape)  # noqa - Ignore lowercase warning
+            T = n_samples  # noqa - Ignore lowercase warning
 
             keep_h = int(encoder_kwargs.get("keep_h", H))
             keep_w = int(encoder_kwargs.get("keep_w", W))
@@ -219,9 +225,7 @@ def compute_embedding_dim_for_encoder(
     # VAE encoder
     else:  # -> I.e,  encoder_name="vae":
         if "model_dir" not in encoder_kwargs:
-            raise KeyError(
-                "`encoder_kwargs['model_dir']` is required when `encoder_name='vae'`."
-            )
+            raise KeyError("`encoder_kwargs['model_dir']` is required when VAE encoder (`encoder_name='vae')`.")
 
         meta = read_vae_model_meta(model_dir=str(encoder_kwargs["model_dir"]))
         latent_dim = int(meta["latent_dim"])
@@ -232,31 +236,34 @@ def compute_embedding_dim_for_encoder(
         # Signal-level canonical dimensions:
         # - values_shape carries non-time dimensions
         # - n_samples is the chunk time dimension
-        h_sig, w_sig = infer_hw_from_values_shape(values_shape=values_shape)  # noqa (omit lowercase warning)
+        h_sig, w_sig = infer_hw_from_values_shape(values_shape=values_shape)  # noqa - Ignore lowercase warning
         c_sig = int(h_sig * w_sig)
         t_sig = int(n_samples)
 
         if model_type == "linear":
             if len(input_shape) != 2:
                 raise ValueError(
-                    f"VAE linear model expects input_shape=[C,T], got {list(input_shape)} "
+                    f"VAE `linear` model expects input_shape=[C,T], got {list(input_shape)} "
                     f"(model_dir={meta['model_dir']})."
                 )
+
             if input_mode not in {"channels", "time"}:
                 raise ValueError(
-                    f"VAE linear model expects input_mode in {{'channels','time'}}, got {input_mode!r} "
+                    f"VAE `linear` model expects input_mode in ['channels','time'], got {input_mode!r} "
                     f"(model_dir={meta['model_dir']})."
                 )
+
             c_model, t_model = int(input_shape[0]), int(input_shape[1])
             if c_sig != c_model:
                 raise ValueError(
-                    "VAE linear channel mismatch: "
+                    "VAE `linear` channel mismatch: "
                     f"signal values_shape={values_shape} -> C={c_sig}, "
                     f"but model expects C={c_model} (model_dir={meta['model_dir']})."
                 )
+
             if t_sig != t_model:
                 raise ValueError(
-                    "VAE linear time mismatch: "
+                    "VAE `linear` time mismatch: "
                     f"chunk_length_sec={chunk_length_sec} with dt={dt} -> T={t_sig}, "
                     f"but model expects T={t_model} (model_dir={meta['model_dir']})."
                 )
@@ -264,24 +271,27 @@ def compute_embedding_dim_for_encoder(
         elif model_type == "conv1d":
             if len(input_shape) != 2:
                 raise ValueError(
-                    f"VAE conv1d model expects input_shape=[C,T], got {list(input_shape)} "
+                    f"VAE `conv1d` model expects input_shape=[C,T], got {list(input_shape)} "
                     f"(model_dir={meta['model_dir']})."
                 )
+
             if input_mode != "channels":
                 raise ValueError(
-                    f"VAE conv1d model requires input_mode='channels', got {input_mode!r} "
+                    f"VAE `conv1d` model requires input_mode='channels', got {input_mode!r} "
                     f"(model_dir={meta['model_dir']})."
                 )
+
             c_model, t_model = int(input_shape[0]), int(input_shape[1])
             if c_sig != c_model:
                 raise ValueError(
-                    "VAE conv1d channel mismatch: "
+                    "VAE `conv1d` channel mismatch: "
                     f"signal values_shape={values_shape} -> C={c_sig}, "
                     f"but model expects C={c_model} (model_dir={meta['model_dir']})."
                 )
+
             if t_sig != t_model:
                 raise ValueError(
-                    "VAE conv1d time mismatch: "
+                    "VAE `conv1d` time mismatch: "
                     f"chunk_length_sec={chunk_length_sec} with dt={dt} -> T={t_sig}, "
                     f"but model expects T={t_model} (model_dir={meta['model_dir']})."
                 )
@@ -289,14 +299,16 @@ def compute_embedding_dim_for_encoder(
         elif model_type == "conv2d":
             if len(input_shape) != 3:
                 raise ValueError(
-                    f"VAE conv2d model expects input_shape=[H,W,T], got {list(input_shape)} "
+                    f"VAE `conv2d` model expects input_shape=[H,W,T], got {list(input_shape)} "
                     f"(model_dir={meta['model_dir']})."
                 )
+
             if input_mode != "time":
                 raise ValueError(
-                    f"VAE conv2d model requires input_mode='time', got {input_mode!r} "
+                    f"VAE `conv2d` model requires input_mode='time', got {input_mode!r} "
                     f"(model_dir={meta['model_dir']})."
                 )
+
             h_model, w_model, t_model = (
                 int(input_shape[0]),
                 int(input_shape[1]),
@@ -304,13 +316,14 @@ def compute_embedding_dim_for_encoder(
             )
             if (h_sig, w_sig) != (h_model, w_model):
                 raise ValueError(
-                    "VAE conv2d spatial mismatch: "
+                    "VAE `conv2d` spatial mismatch: "
                     f"signal values_shape={values_shape} -> (H,W)=({h_sig},{w_sig}), "
                     f"but model expects (H,W)=({h_model},{w_model}) (model_dir={meta['model_dir']})."
                 )
+
             if t_sig != t_model:
                 raise ValueError(
-                    "VAE conv2d time mismatch: "
+                    "VAE `conv2d` time mismatch: "
                     f"chunk_length_sec={chunk_length_sec} with dt={dt} -> T={t_sig}, "
                     f"but model expects T={t_model} (model_dir={meta['model_dir']})."
                 )
@@ -324,7 +337,7 @@ def compute_embedding_dim_for_encoder(
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def build_codecs(
+def build_codecs(  # NOSONAR - Ignore cognitive complexity
     signal_specs: SignalSpecRegistry, config_dir: Path | None = None
 ) -> dict[int, Any]:
     """
@@ -349,7 +362,11 @@ def build_codecs(
     Raises
     ------
     ValueError
-        If config_dir is None but a signal requires rank mode.
+        If `config_dir` is not available for DCT3D rank mode.
+        If `encoder_name` attribute of an item in `signal_specs.specs` is not in ["dct3d", "identity", "vae"].
+    KeyError
+        If `encoder_kwargs["coeff_indices_path"]` is not available for DCT3D rank mode.
+        If `encoder_kwargs["model_dir"]` is not available for a given VAE signal.
 
     """
 
@@ -367,17 +384,15 @@ def build_codecs(
                         f"Pass config_dir=Path(run_dir) / 'embeddings' to build_codecs()."
                     )
 
-                coeff_indices_path = str(kw.get("coeff_indices_path"))
+                coeff_indices_path = kw.get("coeff_indices_path")
                 if coeff_indices_path is None:
                     raise KeyError(
-                        f"`encoder_kwargs['coeff_indices_path']` required for rank mode "
+                        f"`encoder_kwargs['coeff_indices_path']` required for DCT3D rank mode "
                         f"(signal {spec.role}:{spec.name})."
                     )
 
                 # Load indices
-                coeff_indices = load_coeff_indices(
-                    config_dir=config_dir, rel_path=coeff_indices_path
-                )
+                coeff_indices = load_coeff_indices(config_dir=config_dir, rel_path=str(coeff_indices_path))
 
                 # Build codec with loaded indices
                 codec_kw = {
@@ -386,9 +401,7 @@ def build_codecs(
                     "keep_t": kw.get("keep_t", 1),
                     "selection_mode": "rank",
                     "coeff_indices": coeff_indices,
-                    "coeff_shape": tuple(kw["coeff_shape"])
-                    if "coeff_shape" in kw
-                    else None,
+                    "coeff_shape": tuple(kw["coeff_shape"]) if "coeff_shape" in kw else None,
                 }
                 codecs[spec.signal_id] = DCT3DCodec(**codec_kw)
             else:
@@ -397,6 +410,7 @@ def build_codecs(
 
         elif spec.encoder_name == "identity":
             codecs[spec.signal_id] = IdentityCodec()
+
         elif spec.encoder_name == "vae":
             # Config dicts are deep-merged; when switching encoder_name from dct3d→vae,
             # DCT3D-specific kwargs (keep_h/keep_w/keep_t) may remain in encoder_kwargs.
@@ -404,13 +418,11 @@ def build_codecs(
             allowed = ("model_dir", "device", "use_mu")
             vae_kw = {k: kw[k] for k in allowed if k in kw}
             if "model_dir" not in vae_kw:
-                raise KeyError(
-                    f"Missing required encoder_kwargs['model_dir'] for VAE signal {spec.name!r}."
-                )
+                raise KeyError(f"Missing required `encoder_kwargs['model_dir']` for VAE signal {spec.name!r}.")
+
             codecs[spec.signal_id] = VAECodec(**vae_kw)
+
         else:
-            raise ValueError(
-                f"Unknown encoder_name={spec.encoder_name!r} for signal {spec.name!r}."
-            )
+            raise ValueError(f"Unknown encoder_name={spec.encoder_name!r} for signal {spec.name!r}.")
 
     return codecs

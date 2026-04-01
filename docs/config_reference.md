@@ -28,7 +28,12 @@ This page documents active configuration keys used by the entry scripts.
 ## Data
 ### `data.local`
 - Type: `bool`
-- Description: selects local benchmark data mode.
+- Description: `true` = load from `data.local_path` (dev/laptop); `false` = stream from remote HPC store.
+
+### `data.local_path`
+- Type: `str | null`
+- Used in: pretrain, finetune, eval
+- Description: base path to the local Zarr dataset. Passed as `store_manager_settings.base_local_zarr_path` to `initialize_MAST_dataset`. Ignored when `data.local` is `false`.
 
 ### `data.subset_of_shots`
 - Type: `int | null`

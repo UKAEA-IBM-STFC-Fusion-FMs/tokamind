@@ -4,7 +4,7 @@ Logging utilities for the multi-modal-transformer project.
 This module provides a small helper to set up a logger that writes to both:
 
   - stdout (so you see logs in the console),
-  - an optional log file under a given output directory (e.g. runs/.../out.log).
+  - an optional log file under a given output directory (e.g., runs/.../out.log).
 
 Typical usage in a script:
 
@@ -23,19 +23,22 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-
 import logging as py_logging
 
 
+# ======================================================================================================================
 class _BlankLineFormatter(py_logging.Formatter):
     """Formatter that emits true blank lines when message is empty."""
 
+    # ------------------------------------------------------------------------------------------------------------------
     def format(self, record: py_logging.LogRecord) -> str:
+        """Format the specified `record`."""
         if record.getMessage() == "":
             return ""
-        return super().format(record)
+        return super().format(record=record)
 
 
+# ----------------------------------------------------------------------------------------------------------------------
 def setup_logging(
     run_dir: Path,
     *,
@@ -50,25 +53,32 @@ def setup_logging(
 
     Parameters
     ----------
-    run_dir :
-        Directory where the log file should be created. The directory will be
-        created if it does not exist.
-    logger_name :
-        Name of the logger to create/retrieve. Using different names lets you
-        separate logs from different entrypoints, if needed.
-    level :
-        Logging level as a string, e.g. "INFO", "DEBUG", "WARNING".
-    log_to_file :
+    run_dir : Path
+        Directory where the log file should be created. The directory will be created if it does not exist.
+    logger_name : str
+        Name of the logger to create/retrieve. Using different names lets you separate logs from different entrypoints,
+        if needed.
+        Optional. Default: "mmt"
+    level : str
+        Logging level as a string, e.g., "INFO", "DEBUG", "WARNING".
+        Optional. Default: "INFO".
+    log_to_file : bool
         If True, add a FileHandler pointing to `output_dir / filename`.
-    filename :
+        Optional. Default: True.
+    filename : str | None
         Name of the log file. If None, file logging is disabled.
-    console:
-        True to print logs
+        Optional. Default: "out.log".
+    console : bool
+        True to print logs.
+        Optional. Default: True.
+
     Returns
     -------
-    logger :
+    logger : py_logging.Logger
         Configured logger instance.
+
     """
+
     logger = py_logging.getLogger(logger_name)
 
     # If the logger already has handlers, assume we've configured it before.
@@ -78,7 +88,7 @@ def setup_logging(
     level_value = getattr(py_logging, level.upper(), py_logging.INFO)
     logger.setLevel(level_value)
 
-    # Common formatter for all handlers
+    # Common formatter for all handlers.
     formatter = _BlankLineFormatter(
         fmt="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
         datefmt="%Y-%m-%d %H:%M:%S",
@@ -87,20 +97,20 @@ def setup_logging(
     # Console handler
     if console:
         console_handler = py_logging.StreamHandler(stream=sys.stdout)
-        console_handler.setFormatter(formatter)
-        logger.addHandler(console_handler)
+        console_handler.setFormatter(fmt=formatter)
+        logger.addHandler(hdlr=console_handler)
 
-    # Optional file handler
-    if log_to_file and filename is not None:
+    # Optional file handler.
+    if log_to_file and (filename is not None):
         output_dir = Path(run_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         file_path = output_dir / filename
 
-        file_handler = py_logging.FileHandler(file_path, mode="a")
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        file_handler = py_logging.FileHandler(filename=file_path, mode="a")
+        file_handler.setFormatter(fmt=formatter)
+        logger.addHandler(hdlr=file_handler)
 
-    # Do not propagate to the root logger to avoid duplicate logs
+    # Do not propagate to the root logger to avoid duplicate logs.
     logger.propagate = False
 
     return logger

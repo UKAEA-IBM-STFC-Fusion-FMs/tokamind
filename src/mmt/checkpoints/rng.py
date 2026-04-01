@@ -1,28 +1,39 @@
 """
 Random number generator (RNG) state utilities.
 
-This module provides helpers to capture and restore RNG states for
-Python, NumPy, and PyTorch (CPU and CUDA when available), enabling
-reproducible checkpoint save, resume, and warm-start workflows.
+This module provides helpers to capture and restore RNG states for Python, NumPy, and PyTorch (CPU and CUDA when
+available), enabling reproducible checkpoint save, resume, and warm-start workflows.
 """
 
 from __future__ import annotations
+
 import random
 import time
-from typing import Any, Dict
-
+from collections.abc import Mapping
+from typing import Any
 import numpy as np
+
 import torch
 
 
-# ------------------------------------------------------------------
-# RNG
-# ------------------------------------------------------------------
+# ======================================================================================================================
+# Random number generation (RNG)
+# ======================================================================================================================
 
 
-def capture_rng_state() -> Dict[str, Any]:
-    """Capture Python, NumPy, and Torch RNG states (incl. CUDA if available)."""
-    state: Dict[str, Any] = {
+# ----------------------------------------------------------------------------------------------------------------------
+def capture_rng_state() -> dict[str, Any]:
+    """
+    Capture Python, NumPy, and Torch RNG states (incl. CUDA if available).
+
+    Returns
+    -------
+    dict[str, Any]
+        Dictionary with captured random states.
+
+    """
+
+    state: dict[str, Any] = {
         "py": random.getstate(),
         "np": np.random.get_state(),
         "torch_cpu": torch.get_rng_state(),
@@ -30,14 +41,26 @@ def capture_rng_state() -> Dict[str, Any]:
     }
     if torch.cuda.is_available():
         state["torch_cuda"] = torch.cuda.get_rng_state_all()
+
     return state
 
 
-def restore_rng_state(state: Dict[str, Any]) -> None:
+# ----------------------------------------------------------------------------------------------------------------------
+def restore_rng_state(state: Mapping[str, Any]) -> None:
     """
-    Restore RNG states if present (best-effort).
-    Errors during restore are ignored, but only expected ones.
+    Restore RNG states if present (best-effort). Errors during restore are ignored, but only expected ones.
+
+    Parameters
+    ----------
+    state : Mapping[str, Any]
+        Mapping (dict) with states in ["py", "np", "torch_cpu", "torch_cuda"] to be restored.
+
+    Returns
+    -------
+    None
+
     """
+
     if not isinstance(state, dict):
         return
 

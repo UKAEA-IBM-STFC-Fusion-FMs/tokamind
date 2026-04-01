@@ -45,7 +45,9 @@ import torch
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _import_vae_pipeline():
+def _import_vae_pipeline() -> tuple[Any, Any, Any]:
+    """Import VAE-related packages, raising ImportError if packages not found."""
+
     try:
         # Import the module object too (for locating the package on disk)
         import vae_pipeline.configs.config_setup as config_setup_mod
@@ -145,7 +147,9 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def read_vae_model_meta(model_dir: str | Path) -> dict[str, Any]:
+def read_vae_model_meta(  # NOSONAR - Ignore cognitive complexity
+    model_dir: str | Path,
+) -> dict[str, Any]:
     """
     Read minimal metadata needed by MMT from a trained VAE folder.
 
@@ -180,12 +184,19 @@ def read_vae_model_meta(model_dir: str | Path) -> dict[str, Any]:
     Raises
     ------
     FileNotFoundError
-        If required mmt_info.json file not found in VAE model directory `model_dir`.
-        If checkpoint pattern does not match 1 file in VAE model directory `model_dir`.
-        If checkpoint file not found in VAE model directory `model_dir`.
+        If required `mmt_info.json` file not found in VAE model directory `model_dir`.
+        If checkpoint file not found.
+    RuntimeError
+        If `config_*.json` does not match exactly 1 file.
+        If checkpoint pattern does not match exactly 1 file.
     KeyError
-        If mmt_info.json file in VAE model directory `model_dir` does not have a required key in "latent_dim",
+        If `mmt_info.json` file in VAE model directory `model_dir` does not have a required key in ["latent_dim",
         "model_type", "input_shape", "input_mode", "checkpoint"].
+    ValueError
+        If `mmt_info.json` has invalid input_shape for model_type in ["linear", "conv1d"]. Expected length 2,
+        shape [C,T].
+        If `mmt_info.json` has invalid input_shape for model_type "conv2d". Expected length 3, shape [H,W,T].
+        If `mmt_info.json` has unsupported model_type not in ["linear", "conv1d", "conv2d"].
 
     """
 
@@ -194,14 +205,14 @@ def read_vae_model_meta(model_dir: str | Path) -> dict[str, Any]:
     info_path = md / "mmt_info.json"
     if not info_path.is_file():
         raise FileNotFoundError(
-            f"Missing required mmt_info.json in VAE model directory: {md}\n"
+            f"Missing required `mmt_info.json` in VAE model directory: {md}\n"
             "Create it with keys: model_type, latent_dim, input_shape, input_mode, checkpoint."
         )
     info = _read_json(path=info_path)
 
     for k in ["model_type", "latent_dim", "input_shape", "input_mode", "checkpoint"]:
         if k not in info:
-            raise KeyError(f"mmt_info.json missing required key {k!r}: {info_path}.")
+            raise KeyError(f"`mmt_info.json` missing required key {k!r}: {info_path}.")
 
     model_type = str(info["model_type"])
     latent_dim = int(info["latent_dim"])
@@ -213,25 +224,25 @@ def read_vae_model_meta(model_dir: str | Path) -> dict[str, Any]:
     if model_type in {"linear", "conv1d"}:
         if len(input_shape) != 2:
             raise ValueError(
-                f"mmt_info.json has invalid input_shape for model_type={model_type!r}: "
+                f"`mmt_info.json` has invalid input_shape for model_type={model_type!r}: "
                 f"expected length 2 [C,T], got {list(input_shape)} ({info_path})."
             )
     elif model_type == "conv2d":
         if len(input_shape) != 3:
             raise ValueError(
-                "mmt_info.json has invalid input_shape for model_type='conv2d': "
+                "`mmt_info.json` has invalid input_shape for model_type='conv2d': "
                 f"expected length 3 [H,W,T], got {list(input_shape)} ({info_path})."
             )
     else:
         raise ValueError(
-            f"mmt_info.json has unsupported model_type={model_type!r} in {info_path}. "
+            f"`mmt_info.json` has unsupported model_type={model_type!r} in {info_path}. "
             "Expected one of {'linear', 'conv1d', 'conv2d'}."
         )
 
     cfg_files = sorted(md.glob("config_*.json"))
     if len(cfg_files) != 1:
-        raise FileNotFoundError(
-            f"Expected exactly 1 config_*.json in {md}, found {len(cfg_files)}: "
+        raise RuntimeError(
+            f"Expected exactly 1 `config_*.json` in {md}, found {len(cfg_files)}: "
             + ", ".join([p.name for p in cfg_files])
         )
     config_path = cfg_files[0]
@@ -241,17 +252,17 @@ def read_vae_model_meta(model_dir: str | Path) -> dict[str, Any]:
     if has_glob:
         matches = sorted(md.glob(checkpoint_spec))
         if len(matches) != 1:
-            raise FileNotFoundError(
+            raise RuntimeError(
                 f"Checkpoint pattern {checkpoint_spec!r} in {info_path} must match exactly 1 file in {md}, "
                 f"matched {len(matches)}: " + ", ".join([p.name for p in matches])
             )
+
         checkpoint_path = matches[0]
+
     else:
         checkpoint_path = md / checkpoint_spec
         if not checkpoint_path.is_file():
-            raise FileNotFoundError(
-                f"Checkpoint file {checkpoint_spec!r} from {info_path} not found in {md}."
-            )
+            raise FileNotFoundError(f"Checkpoint file {checkpoint_spec!r} from {info_path} not found in {md}.")
 
     return {
         "model_dir": md,
@@ -277,12 +288,49 @@ class VAECodec:
     encode(x) -> (latent_dim,) float32
     decode(z, original_shape) -> float32 array of original_shape
 
+    Attributes
+    ----------
+    meta = read_vae_model_meta(model_dir=model_dir)
+    model_type : str
+        Model type, expected to be in ["linear", "conv1d", "conv2d"].
+    latent_dim : int
+        Latent dimension (shape).
+    input_shape : tuple
+        Input shape of the target model type.
+    input_mode : str
+        Input mode, expected to be in ["channels", "time"].
+    expected_channels : int
+        Expected number of channels.
+    expected_time_steps : int
+        Expected number of time steps.
+    device : torch.device
+        Target device.
+    use_mu : bool
+        If True, use the encoder mean (mu) as latent code; else sample from (mu, logvar).
+    model : Any
+        Loaded VAE model.
+
+    Methods
+    -------
+    _validate_model_layout_contract(self)
+        Validate the strict model/input contract defined by `mmt_info.json`.
+    _to_channel_time(x)
+        Reshape input array into (channel, time) form.
+    _reshape_back(x_ct, original_shape)
+        Reshape a (channel, time) array to its original shape.
+    _prepare_encode_array(x)
+        Convert an input sample to the shape expected by the underlying VAE encoder.
+    _decode_tensor_to_channel_time(x_hat)
+        Convert model decoder output to canonical (C, T) form.
+    encode(x)
+        Public encode method for the VAECodec class.
+    decode(z, original_shape)
+        Public decode method for the VAECodec class.
+
     """
 
     # ------------------------------------------------------------------------------------------------------------------
-    def __init__(
-        self, *, model_dir: str, device: str | None = None, use_mu: bool = True
-    ) -> None:
+    def __init__(self, *, model_dir: str, device: str | None = None, use_mu: bool = True) -> None:
         """
         Initialize class attributes.
 
@@ -304,7 +352,8 @@ class VAECodec:
         Raises
         ------
         RuntimeError
-            If unsupported checkpoint format for the loaded model checkpoint.
+            If unsupported checkpoint format detected in metadata for `self.meta["model_dir"]`.
+            If unsupported checkpoint format detected at `self.meta["checkpoint_path"]`.
 
         """
 
@@ -327,7 +376,7 @@ class VAECodec:
         else:
             # read_vae_model_meta() already validates model_type; keep this defensive guard local.
             raise RuntimeError(
-                f"Unsupported model_type={self.model_type!r} in metadata for {self.meta['model_dir']}."
+                f"[VAECodec] Unsupported model_type={self.model_type!r} in metadata for {self.meta['model_dir']}."
             )
 
         dev = device if (device is not None and str(device).strip() != "") else "cpu"
@@ -335,7 +384,7 @@ class VAECodec:
         self.use_mu = bool(use_mu)
 
         # Lazy import VAE_fairmast symbols
-        _, get_settings, beta_VAE = _import_vae_pipeline()
+        _, get_settings, beta_VAE = _import_vae_pipeline()  # NOSONAR # noqa - Ignore lowercase warning
 
         settings = get_settings(str(self.meta["config_path"]))
         self.model = beta_VAE(settings)
@@ -343,18 +392,17 @@ class VAECodec:
         ckpt = torch.load(self.meta["checkpoint_path"], map_location=self.device)
         if (not isinstance(ckpt, dict)) or ("model_state_dict" not in ckpt):
             raise RuntimeError(
-                f"Unsupported checkpoint format at {self.meta['checkpoint_path']}. "
+                f"[VAECodec] Unsupported checkpoint format at {self.meta['checkpoint_path']}. "
                 "Expected a dict containing key 'model_state_dict'."
             )
 
         sd = ckpt["model_state_dict"]
 
         # Handle DataParallel prefix
-        if any(k.startswith("module.") for k in sd.keys()):
-            sd = {
-                k[len("module.") :] if k.startswith("module.") else k: v
-                for k, v in sd.items()
-            }
+        prefix = "module."
+        len_prefix = len(prefix)
+        if any(k.startswith(prefix) for k in sd.keys()):
+            sd = {k[len_prefix:] if k.startswith(prefix) else k: v for k, v in sd.items()}
 
         self.model.load_state_dict(sd, strict=True)
         self.model.to(self.device)
@@ -365,71 +413,88 @@ class VAECodec:
     # ------------------------------------------------------------------------------------------------------------------
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _validate_model_layout_contract(self) -> None:
+    def _validate_model_layout_contract(  # NOSONAR - Ignore cognitive complexity
+        self,
+    ) -> None:
         """
-        Validate the strict model/input contract defined by mmt_info.json.
+        Validate the strict model/input contract defined by `mmt_info.json`.
 
         This codec enforces a single convention:
-        - linear  : input_shape=[C,T], input_mode in {"channels", "time"}
+        - linear  : input_shape=[C,T], input_mode in ["channels", "time"]
         - conv1d  : input_shape=[C,T], input_mode == "channels"
         - conv2d  : input_shape=[H,W,T], input_mode == "time" (time mapped to Conv2d channels)
+
+        Returns
+        -------
+        None
 
         Raises
         ------
         ValueError
-            If model_type/input_shape/input_mode combination does not follow the strict contract.
-            If any input_shape dimension is not strictly positive.
+            If not all `self.input_shape` dimensions are > 0.
+            If `linear` model does not satisfy `self.input_shape=[C,T]`.
+            If `linear` model does not satisfy `self.input_mode` in ["channels", "time"].
+            If `conv1d` model does not satisfy `self.input_shape=[C,T]`.
+            If `conv1d` model does not satisfy `self.input_mode="channels".
+            If `conv2d` model does not satisfy `self.input_shape=[H,W,T]`.
+            If `conv2d` model does not satisfy `self.input_mode="time"`.
+            If `self.model_type`not in ["linear", "conv1d", "conv2d"].
 
         """
 
         if any(int(d) <= 0 for d in self.input_shape):
             raise ValueError(
-                f"All input_shape dimensions must be > 0, got {list(self.input_shape)} "
+                f"[VAECodec] All input_shape dimensions must be > 0, got {list(self.input_shape)} "
                 f"(model_dir={self.meta['model_dir']})."
             )
 
         if self.model_type == "linear":
             if len(self.input_shape) != 2:
                 raise ValueError(
-                    f"linear model requires input_shape=[C,T], got {list(self.input_shape)} "
+                    f"[VAECodec] `linear` model requires input_shape=[C,T], got {list(self.input_shape)} "
                     f"(model_dir={self.meta['model_dir']})."
                 )
+
             if self.input_mode not in {"channels", "time"}:
                 raise ValueError(
-                    f"linear model requires input_mode in {{'channels','time'}}, got {self.input_mode!r} "
+                    f"[VAECodec] `linear` model requires input_mode in ['channels','time'], got {self.input_mode!r} "
                     f"(model_dir={self.meta['model_dir']})."
                 )
+
             return
 
         if self.model_type == "conv1d":
             if len(self.input_shape) != 2:
                 raise ValueError(
-                    f"conv1d model requires input_shape=[C,T], got {list(self.input_shape)} "
+                    f"`conv1d` model requires input_shape=[C,T], got {list(self.input_shape)} "
                     f"(model_dir={self.meta['model_dir']})."
                 )
+
             if self.input_mode != "channels":
                 raise ValueError(
-                    f"conv1d model requires input_mode='channels', got {self.input_mode!r} "
+                    f"[VAECodec] `conv1d` model requires input_mode='channels', got {self.input_mode!r} "
                     f"(model_dir={self.meta['model_dir']})."
                 )
+
             return
 
         if self.model_type == "conv2d":
             if len(self.input_shape) != 3:
                 raise ValueError(
-                    f"conv2d model requires input_shape=[H,W,T], got {list(self.input_shape)} "
+                    f"`conv2d` model requires input_shape=[H,W,T], got {list(self.input_shape)} "
                     f"(model_dir={self.meta['model_dir']})."
                 )
+
             if self.input_mode != "time":
                 raise ValueError(
-                    f"conv2d model requires input_mode='time', got {self.input_mode!r} "
+                    f"`conv2d` model requires input_mode='time', got {self.input_mode!r} "
                     f"(model_dir={self.meta['model_dir']})."
                 )
+
             return
 
         raise ValueError(
-            f"Unsupported model_type={self.model_type!r}; expected one of "
-            "{'linear', 'conv1d', 'conv2d'}."
+            f"[VAECodec] Unsupported model_type={self.model_type!r}; expected one of {{'linear', 'conv1d', 'conv2d'}}."
         )
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -451,12 +516,12 @@ class VAECodec:
         Raises
         ------
         ValueError
-            If `x.ndim` not in in [1,2,3]."
+            If `x.ndim` not in [1,2,3]."
 
         """
 
         if not isinstance(x, np.ndarray):
-            x = np.asarray(x)  # noqa (omit unreachable code warning)
+            x = np.asarray(x)  # noqa - Ignore unreachable code warning
 
         if x.ndim == 1:
             x_ct = x.reshape(1, x.shape[0])  # (1, T)
@@ -466,9 +531,7 @@ class VAECodec:
             h, w, t = x.shape
             x_ct = x.reshape(h * w, t)  # (H*W, T)
         else:
-            raise ValueError(
-                f"VAECodec supports `x.ndim` in [1,2,3], got shape={x.shape}."
-            )
+            raise ValueError(f"[VAECodec] VAECodec supports `x.ndim` in [1,2,3], got shape={x.shape}.")
 
         return x_ct
 
@@ -502,8 +565,8 @@ class VAECodec:
         if len(original_shape) == 1:
             if x_ct.shape[0] != 1:
                 raise ValueError(
-                    f"Cannot reshape reconstruction {x_ct.shape} to original_shape={original_shape}: expected 1 "
-                    f"channel."
+                    f"[VAECodec] Cannot reshape reconstruction {x_ct.shape} to original_shape={original_shape}: "
+                    f"expected 1 channel."
                 )
             return x_ct.reshape(original_shape)
 
@@ -514,14 +577,16 @@ class VAECodec:
             h, w, t = original_shape
             if x_ct.shape != (h * w, t):
                 raise ValueError(
-                    f"Reconstruction shape {x_ct.shape} incompatible with original_shape={original_shape}."
+                    f"[VAECodec] Reconstruction shape {x_ct.shape} incompatible with original_shape={original_shape}."
                 )
             return x_ct.reshape(original_shape)
 
-        raise ValueError(f"Unsupported original_shape={original_shape}.")
+        raise ValueError(f"[VAECodec] Unsupported original_shape={original_shape}.")
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _prepare_encode_array(self, x: np.ndarray) -> np.ndarray:
+    def _prepare_encode_array(  # NOSONAR - Ignore cognitive complexity
+        self, x: np.ndarray
+    ) -> np.ndarray:
         """
         Convert an input sample to the shape expected by the underlying VAE encoder.
 
@@ -544,16 +609,21 @@ class VAECodec:
         Raises
         ------
         ValueError
-            If input sample shape is incompatible with model_type/input_shape/input_mode.
-        RuntimeError
-            If model_type/input_mode is internally inconsistent.
+            If `conv2d` length mismatch is detected for specified model.
+            If `conv2d` spatial mismatch is detected for specified model.
+            If `conv2d` input shape mismatch is detected.
+            If `conv2d` input shape is not (H,W,T), (H*W,T), or (T,) when H=W=1.
+            If input shape mismatch is detected for specified model.
+        ValueError
+            If `self.input_mode` not in ["time", "channels"] for `linear` model.
+            If `self.model_type` not in ["linear", "conv1d", "conv2d"].
 
         """
 
         if not isinstance(x, np.ndarray):
-            x = np.asarray(x)  # noqa (omit unreachable code warning)
+            x = np.asarray(x)  # noqa - Ignore unreachable code warning
 
-        # conv2d expects [H,W,T] in metadata and [T,H,W] at model input (time as channels).
+        # "conv2d" expects [H,W,T] in metadata and [T,H,W] at model input (time as channels).
         if self.model_type == "conv2d":
             h_exp, w_exp, t_exp = (int(v) for v in self.input_shape)
             hw_exp = int(h_exp * w_exp)
@@ -562,44 +632,47 @@ class VAECodec:
                 h_in, w_in, t_in = (int(v) for v in x.shape)
                 if t_in != t_exp:
                     raise ValueError(
-                        f"VAECodec conv2d length mismatch for model {self.meta['model_dir'].name!r}: "
+                        f"[VAECodec] `conv2d` length mismatch for model {self.meta['model_dir'].name!r}: "
                         f"expected T={t_exp}, got T={t_in} (input shape {tuple(x.shape)})."
                     )
+
                 if (h_in * w_in) != hw_exp:
                     raise ValueError(
-                        f"VAECodec conv2d spatial mismatch for model {self.meta['model_dir'].name!r}: "
+                        f"[VAECodec] `conv2d` spatial mismatch for model {self.meta['model_dir'].name!r}: "
                         f"expected H*W={hw_exp}, got H*W={h_in * w_in} (input shape {tuple(x.shape)})."
                     )
-                x_hwt = (
-                    x
-                    if (h_in, w_in) == (h_exp, w_exp)
-                    else x.reshape(h_exp, w_exp, t_exp)
-                )
+
+                x_hwt = x if (h_in, w_in) == (h_exp, w_exp) else x.reshape(h_exp, w_exp, t_exp)
+
             elif x.ndim == 2:
                 if x.shape != (hw_exp, t_exp):
                     raise ValueError(
-                        f"VAECodec conv2d expects (H*W,T)=({hw_exp},{t_exp}) or (H,W,T)=({h_exp},{w_exp},{t_exp}), "
+                        f"[VAECodec] `conv2d` expects (H*W,T)=({hw_exp},{t_exp}) or (H,W,T)=({h_exp},{w_exp},{t_exp}), "
                         f"got shape {tuple(x.shape)}."
                     )
+
                 x_hwt = x.reshape(h_exp, w_exp, t_exp)
+
             elif x.ndim == 1 and hw_exp == 1 and x.shape[0] == t_exp:
                 x_hwt = x.reshape(h_exp, w_exp, t_exp)
+
             else:
                 raise ValueError(
-                    f"VAECodec conv2d supports input shapes (H,W,T), (H*W,T), or (T,) when H=W=1. "
+                    f"[VAECodec] `conv2d` supports input shapes (H,W,T), (H*W,T), or (T,) when H=W=1. "
                     f"Expected [H,W,T]={list(self.input_shape)}, got shape {tuple(x.shape)}."
                 )
 
             x_thw = np.transpose(x_hwt, (2, 0, 1))  # (T,H,W)
+
             return np.asarray(x_thw, dtype=np.float32)
 
-        # linear and conv1d use canonical (C,T) from the generic helper.
+        # "linear" and "conv1d" use canonical (C,T) from the generic helper.
         x_ct = self._to_channel_time(x=x)
         c_exp, t_exp = int(self.input_shape[0]), int(self.input_shape[1])
 
         if x_ct.shape != (c_exp, t_exp):
             raise ValueError(
-                f"VAECodec input shape mismatch for model {self.meta['model_dir'].name!r}: "
+                f"[VAECodec] Input shape mismatch for model {self.meta['model_dir'].name!r}: "
                 f"expected (C,T)=({c_exp},{t_exp}), got (C,T)={tuple(x_ct.shape)} "
                 f"(input shape {tuple(x.shape)})."
             )
@@ -613,18 +686,22 @@ class VAECodec:
             elif self.input_mode == "channels":
                 x_linear = x_ct.T  # first linear sees C
             else:
-                raise RuntimeError(
-                    f"Unexpected input_mode={self.input_mode!r} for linear model {self.meta['model_dir'].name!r}."
+                raise ValueError(
+                    f"[VAECodec] Unexpected input_mode={self.input_mode!r} for `linear` model "
+                    f"{self.meta['model_dir'].name!r}."
                 )
+
             return np.asarray(x_linear, dtype=np.float32)
 
-        raise RuntimeError(
-            f"Unsupported model_type={self.model_type!r} in _prepare_encode_array for "
+        raise ValueError(
+            f"[VAECodec] Unsupported model_type={self.model_type!r} in method `_prepare_encode_array(...)` for "
             f"model {self.meta['model_dir'].name!r}."
         )
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _decode_tensor_to_channel_time(self, x_hat: torch.Tensor) -> np.ndarray:
+    def _decode_tensor_to_channel_time(  # NOSONAR - Ignore cognitive complexity
+        self, x_hat: torch.Tensor
+    ) -> np.ndarray:
         """
         Convert model decoder output to canonical (C, T) form.
 
@@ -641,15 +718,24 @@ class VAECodec:
         Raises
         ------
         TypeError
-            If decoder output is not a torch.Tensor.
+            If `x_hat` not of type torch.Tensor.
         RuntimeError
-            If decoder output shape is incompatible with model_type/input_shape/input_mode.
+            If `conv1d` decode did not get batch size 1.
+            If `conv1d` decode did not get `x_hat` of shape (B,C,T) or (C,T).
+            If `linear` decode did not get batch size 1.
+            If `linear` decode did not get `x_hat` of shape 1D, (B,F), or (B,*,F).
+            If `linear` decode produced invalid shape.
+            If `conv2d` decode did not get batch size 1.
+            If `conv2d` decode did not get `x_hat` of shape (B,T,H,W) or (T,H,W).
+            If `conv2d` decode produced invalid shape.
+        ValueError
+            If `self.model_type` not in ["linear", "conv1d", "conv2d"].
 
         """
 
         if not isinstance(x_hat, torch.Tensor):
-            raise TypeError(
-                f"VAE decode returned {type(x_hat).__name__}, expected torch.Tensor."
+            raise TypeError(  # noqa - Ignore unreachable code warning
+                f"[VAECodec] Decode got `x_hat` of type {type(x_hat).__name__}, expected torch.Tensor."
             )
 
         x_np = x_hat.detach().cpu().numpy().astype(np.float32, copy=False)
@@ -657,24 +743,23 @@ class VAECodec:
         if self.model_type == "conv1d":
             if x_np.ndim == 3:
                 if x_np.shape[0] != 1:
-                    raise RuntimeError(
-                        f"VAE conv1d decode returned batch size {x_np.shape[0]}, expected 1."
-                    )
+                    raise RuntimeError(f"[VAECodec] `conv1d` decode got batch size {x_np.shape[0]}, expected 1.")
+
                 x_ct = x_np[0]
             elif x_np.ndim == 2:
                 x_ct = x_np
             else:
                 raise RuntimeError(
-                    f"VAE conv1d decode returned shape {tuple(x_np.shape)}; expected (B,C,T) or (C,T)."
+                    f"[VAECodec] `conv1d` decode got shape {tuple(x_np.shape)}; expected (B,C,T) or (C,T)."
                 )
+
             return np.asarray(x_ct, dtype=np.float32)
 
         if self.model_type == "linear":
             if x_np.ndim == 3:
                 if x_np.shape[0] != 1:
-                    raise RuntimeError(
-                        f"VAE linear decode returned batch size {x_np.shape[0]}, expected 1."
-                    )
+                    raise RuntimeError(f"[VAECodec] `linear` decode got batch size {x_np.shape[0]}, expected 1.")
+
                 x_model = x_np[0]
             elif x_np.ndim == 2:
                 x_model = x_np
@@ -682,50 +767,48 @@ class VAECodec:
                 x_model = x_np.reshape(1, -1)
             else:
                 raise RuntimeError(
-                    f"VAE linear decode returned shape {tuple(x_np.shape)}; expected 1D, (B,F), or (B,*,F)."
+                    f"[VAECodec] `linear` decode got shape {tuple(x_np.shape)}; expected 1D, (B,F), or (B,*,F)."
                 )
 
             c_exp, t_exp = int(self.input_shape[0]), int(self.input_shape[1])
-            expected_linear_shape = (
-                (c_exp, t_exp) if self.input_mode == "time" else (t_exp, c_exp)
-            )
+            expected_linear_shape = (c_exp, t_exp) if (self.input_mode == "time") else (t_exp, c_exp)
 
             if tuple(x_model.shape) != tuple(expected_linear_shape):
                 raise RuntimeError(
-                    f"VAE linear decode produced shape {tuple(x_model.shape)} but expected "
+                    f"[VAECodec] `linear` decode produced shape {tuple(x_model.shape)} but expected "
                     f"{tuple(expected_linear_shape)} for input_mode={self.input_mode!r}."
                 )
 
-            x_ct = x_model if self.input_mode == "time" else x_model.T
+            x_ct = x_model if (self.input_mode == "time") else x_model.T
+
             return np.asarray(x_ct, dtype=np.float32)
 
         if self.model_type == "conv2d":
             if x_np.ndim == 4:
                 if x_np.shape[0] != 1:
-                    raise RuntimeError(
-                        f"VAE conv2d decode returned batch size {x_np.shape[0]}, expected 1."
-                    )
+                    raise RuntimeError(f"[VAECodec] `conv2d` decode got batch size {x_np.shape[0]}, expected 1.")
+
                 x_thw = x_np[0]
             elif x_np.ndim == 3:
                 x_thw = x_np
             else:
                 raise RuntimeError(
-                    f"VAE conv2d decode returned shape {tuple(x_np.shape)}; expected (B,T,H,W) or (T,H,W)."
+                    f"[VAECodec] `conv2d` decode got shape {tuple(x_np.shape)}; expected (B,T,H,W) or (T,H,W)."
                 )
 
             h_exp, w_exp, t_exp = (int(v) for v in self.input_shape)
             expected_thw = (t_exp, h_exp, w_exp)
             if tuple(x_thw.shape) != expected_thw:
                 raise RuntimeError(
-                    f"VAE conv2d decode produced shape {tuple(x_thw.shape)} but expected {expected_thw}."
+                    f"[VAECodec] `conv2d` decode produced shape {tuple(x_thw.shape)} but expected {expected_thw}."
                 )
 
             x_hwt = np.transpose(x_thw, (1, 2, 0))  # (H,W,T)
             x_ct = x_hwt.reshape(h_exp * w_exp, t_exp)
             return np.asarray(x_ct, dtype=np.float32)
 
-        raise RuntimeError(
-            f"Unsupported model_type={self.model_type!r} in _decode_tensor_to_channel_time for "
+        raise ValueError(
+            f"[VAECodec] Unsupported model_type={self.model_type!r} in _decode_tensor_to_channel_time for "
             f"model {self.meta['model_dir'].name!r}."
         )
 
@@ -750,18 +833,15 @@ class VAECodec:
 
         Raises
         ------
-        ValueError
-            If VAECodec channel mismatch between `self.expected_channels` and input shape `x.shape`.
-            If VAECodec length mismatch between `self.expected_time_steps` and `x.shape`.
         RuntimeError
-            If VAECodec produced a latent shape different than `self.latent_dim`.
-            If VAECodec produced more than one latent vector for a single sample.
+            If encode produced a latent shape different from `self.latent_dim`.
+            If encode produced more than one latent vector for a single sample.
 
         """
 
         x_model = self._prepare_encode_array(x=np.asarray(x))
 
-        # IMPORTANT: cast to float32 to match model weights/bias dtype
+        # IMPORTANT: cast to float32 to match model weights/bias dtype.
         x_t = torch.from_numpy(np.asarray(x_model, dtype=np.float32)).unsqueeze(0)
         x_t = x_t.to(device=self.device, dtype=torch.float32)
 
@@ -774,15 +854,17 @@ class VAECodec:
         z = np.asarray(z_t.detach().cpu().numpy(), dtype=np.float32)
         if z.shape[-1] != self.latent_dim:
             raise RuntimeError(
-                f"VAECodec produced latent shape {tuple(z_t.shape)}; "
+                f"[VAECodec] Method encode produced latent shape {tuple(z_t.shape)}; "
                 f"expected latent_dim={self.latent_dim}."
             )
+
         leading_dims = tuple(int(d) for d in z.shape[:-1])
         if any(d != 1 for d in leading_dims):
             raise RuntimeError(
-                f"VAECodec produced multiple latent vectors with shape {tuple(z_t.shape)}; "
+                f"[VAECodec] Method encode produced multiple latent vectors with shape {tuple(z_t.shape)}; "
                 "expected exactly one latent vector per sample."
             )
+
         z = z.reshape(self.latent_dim)
 
         return z
@@ -807,31 +889,26 @@ class VAECodec:
         Raises
         ------
         ValueError
-            If `z.shape` is different than `(self.latent_dim,)`.
-        TypeError
-            If decoded array not of type torch.Tensor.
+            If `z.shape` is different from `(self.latent_dim,)`.
         RuntimeError
-            If the shape of the resulting decoded array does not match
-            `(self.expected_channels, self.expected_time_steps)`.
+            If the shape of the decoded array does not match `(self.expected_channels, self.expected_time_steps)`.
 
         """
 
         if not isinstance(z, np.ndarray):
-            z = np.asarray(z)  # noqa (omit unreachable code warning)
+            z = np.asarray(z)  # noqa - Ignore unreachable code warning
 
         if (z.ndim != 1) or (z.shape[0] != self.latent_dim):
-            raise ValueError(
-                f"VAECodec.decode expects `z.shape` ({self.latent_dim},), got {tuple(z.shape)}."
-            )
+            raise ValueError(f"[VAECodec] Method decode expects `z.shape` ({self.latent_dim},), got {tuple(z.shape)}.")
 
-        # IMPORTANT: latent must be float32 too
+        # IMPORTANT: latent must be float32 too.
         z_t = torch.from_numpy(np.asarray(z, dtype=np.float32)).unsqueeze(0)
         z_t = z_t.to(device=self.device, dtype=torch.float32)
 
         with torch.no_grad():
             try:
                 x_hat = self.model.decode(z_t)
-            except Exception:  # noqa (omit broad exception warning)
+            except Exception:  # noqa - Ignore broad exception warning
                 # Some VAE_fairmast variants expect an extra singleton dim: (B, 1, D)
                 x_hat = self.model.decode(z_t.unsqueeze(1))
 
@@ -839,11 +916,8 @@ class VAECodec:
 
         if x_ct_np.shape != (self.expected_channels, self.expected_time_steps):
             raise RuntimeError(
-                "VAE decode produced shape "
-                f"{tuple(x_ct_np.shape)} but expected "
+                f"[VAECodec] Method decode produced shape {tuple(x_ct_np.shape)} but expected "
                 f"({self.expected_channels}, {self.expected_time_steps})."
             )
 
-        return self._reshape_back(
-            x_ct=x_ct_np, original_shape=tuple(original_shape)
-        ).astype(np.float32, copy=False)
+        return self._reshape_back(x_ct=x_ct_np, original_shape=tuple(original_shape)).astype(np.float32, copy=False)
