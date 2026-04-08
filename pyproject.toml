@@ -19,7 +19,7 @@ authors = [
 classifiers = [
   "Programming Language :: Python :: 3",
   "Intended Audience :: Science/Research",
-  "License :: OSI Approved :: MIT License",
+  "License :: OpenMDW",
 #  "Operating System :: OS Independent",
 ]
 
