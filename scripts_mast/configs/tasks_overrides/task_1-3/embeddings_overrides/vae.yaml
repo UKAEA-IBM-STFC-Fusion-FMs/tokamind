@@ -44,5 +44,5 @@ embeddings:
     output:
       equilibrium-psi:
         encoder_name: vae
-      encoder_kwargs:
-        model_dir: conv2d_vae_config_equilibrium_psi_5ms
+        encoder_kwargs:
+          model_dir: conv2d_vae_config_equilibrium_psi_5ms

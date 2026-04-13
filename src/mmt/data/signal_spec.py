@@ -359,7 +359,8 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
 
             length_sec = float(chunk_length_sec)
             if role == "output":
-                length_sec = float(meta.get("sec_length", length_sec))
+                # Output window is taken directly from metadata
+                length_sec = float(meta["length_in_seconds"])
 
             # ..........................................................................................................
             # Compute embedding dimension

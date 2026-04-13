@@ -56,13 +56,10 @@ embeddings:
       equilibrium-lcfs_r:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: linear_vae_config_equilibrium_lcfs_r_25ms
+          model_dir: conv1d_vae_config_equilibrium_lcfs_r_25ms
       
 
       equilibrium-lcfs_z:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: linear_vae_config_equilibrium_lcfs_z_25ms
-
-
-      
+          model_dir: conv1d_vae_config_equilibrium_lcfs_z_25ms

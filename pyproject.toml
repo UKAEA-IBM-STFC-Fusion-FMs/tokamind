@@ -8,9 +8,9 @@ version = "0.1.0"
 description = "Multi-modal transformer for plasma fusion models"
 readme = "README.md"
 requires-python = ">=3.11"
-license-files = ["LICENSE.md"]  # TODO: Update LICENSE.md with the appropiate license
+license-files = ["LICENSE.md"]
 authors = [
-  { name = "XXX" }
+  { name = "IBM Research" }
 ]
 
 #[project.urls]
