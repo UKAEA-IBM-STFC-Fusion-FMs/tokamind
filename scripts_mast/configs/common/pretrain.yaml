@@ -45,7 +45,7 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: 0.01
+    window_stride_sec: 0.005
 
 
 embeddings:
