@@ -23,7 +23,7 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 | TokaMind repository | [UKAEA-IBM-STFC-Fusion-FMs/tokamind](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/tokamind) |
 | TokaMark repository | [UKAEA-IBM-STFC-Fusion-FMs/tokamark](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/tokamark) |
 | VAE-FAIRMAST repository | _coming soon_ |
-| Pretrained models (HuggingFace) | [UKAEA-IBM-STFC](https://huggingface.co/UKAEA-IBM-STFC) |
+| Pretrained models (HuggingFace) | [UKAEA-IBM-STFC/tokamind](https://huggingface.co/UKAEA-IBM-STFC/tokamind) |
 
 ## 📚 Documentation
 - [Configuration Guide](docs/config_guide.md)
@@ -132,8 +132,8 @@ pip install -e .
 
 Pretrained TokaMind checkpoints (trained on MAST data) are available on HuggingFace:
 
-- [tokamind-base](https://huggingface.co/UKAEA-IBM-STFC/tokamind-base)
-- [tokamind-tiny](https://huggingface.co/UKAEA-IBM-STFC/tokamind-tiny)
+- [tokamind-base-v1](https://huggingface.co/UKAEA-IBM-STFC/tokamind/tree/main/tokamind-base-v1)
+- [tokamind-tiny-v1](https://huggingface.co/UKAEA-IBM-STFC/tokamind/tree/main/tokamind-tiny-v1)
 
 The HuggingFace repository includes:
 - Model weights (`checkpoints/best`)

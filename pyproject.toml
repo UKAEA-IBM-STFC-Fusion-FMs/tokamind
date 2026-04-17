@@ -13,14 +13,10 @@ authors = [
   { name = "IBM Research" }
 ]
 
-#[project.urls]
-#"Homepage" = "https://github.com/youruser/multi-modal-transformer"
-
 classifiers = [
   "Programming Language :: Python :: 3",
   "Intended Audience :: Science/Research",
   "License :: OpenMDW",
-#  "Operating System :: OS Independent",
 ]
 
 dependencies = [

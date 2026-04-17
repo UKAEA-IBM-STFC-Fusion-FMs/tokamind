@@ -6,7 +6,7 @@ benchmark stack.
 
 Key modules
 -----------
-- benchmark_imports.py : centralized baseline (MAST_benchmark) imports
+- benchmark_imports.py : centralized baseline (tokamark) imports
 - config/              : convention-based YAML merge into ExperimentConfig
 - task_definition.py   : resolve benchmark/local task definition by task name
 - task_signals.py      : convert task definition -> signals_by_role for MMT core

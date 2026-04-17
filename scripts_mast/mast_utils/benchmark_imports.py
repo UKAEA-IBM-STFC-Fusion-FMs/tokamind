@@ -1,5 +1,5 @@
 """
-Centralized imports from the benchmark package (MAST_benchmark).
+Centralized imports from the benchmark package (tokamark).
 
 Purpose
 -------
@@ -37,11 +37,10 @@ from __future__ import annotations
 # 1) Make the "package not importable" error explicit and readable.
 
 try:
-    import MAST_benchmark  # noqa: F401
+    import tokamark  # noqa: F401
 except ModuleNotFoundError as e:
     raise ModuleNotFoundError(
-        "Benchmark package 'MAST_benchmark' is not importable. "
-        "Install the benchmark package (or ensure it's on PYTHONPATH)."
+        "Benchmark package 'tokamark' is not importable. Install the benchmark package (or ensure it's on PYTHONPATH)."
     ) from e
 
 
@@ -50,19 +49,19 @@ except ModuleNotFoundError as e:
 # (single-file fix).
 
 try:
-    from MAST_benchmark.data import initialize_MAST_dataset, initialize_TokaMark_dataset
-    from MAST_benchmark.tools.TokaMark_dataset import TokaMarkDataset
-    from MAST_benchmark.data_split import get_train_test_val_shots
-    from MAST_benchmark.tasks import get_task_metadata
-    from MAST_benchmark.tasks import get_task_config as benchmark_get_task_config
-    from MAST_benchmark.evaluator import (
+    from tokamark.data import initialize_MAST_dataset, initialize_TokaMark_dataset
+    from tokamark.tools.TokaMark_dataset import TokaMarkDataset
+    from tokamark.data_split import get_train_test_val_shots
+    from tokamark.tasks import get_task_metadata
+    from tokamark.tasks import get_task_config as benchmark_get_task_config
+    from tokamark.evaluator import (
         WindowMetricsAccumulator,
         compute_metrics,
         compute_summary_metrics,
     )
 except ImportError as e:
     raise ImportError(
-        "Failed to import required symbols from benchmark package 'MAST_benchmark'.\n"
+        "Failed to import required symbols from benchmark package 'tokamark'.\n"
         "This likely means the benchmark repo refactored its Python API.\n"
         "Update scripts_mast/mast_utils/benchmark_imports.py to match the new locations/names.\n"
         f"Original error: {type(e).__name__}: {e}"
