@@ -20,7 +20,6 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 |---|---|
 | TokaMind paper | [arXiv:2602.15084](https://arxiv.org/abs/2602.15084) |
 | TokaMark paper | [arXiv:2602.10132](https://arxiv.org/abs/2602.10132) |
-| TokaMind repository | [UKAEA-IBM-STFC-Fusion-FMs/tokamind](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/tokamind) |
 | TokaMark repository | [UKAEA-IBM-STFC-Fusion-FMs/tokamark](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/tokamark) |
 | VAE-FAIRMAST repository | _coming soon_ |
 | Pretrained models (HuggingFace) | [UKAEA-IBM-STFC/tokamind](https://huggingface.co/UKAEA-IBM-STFC/tokamind) |
