@@ -24,8 +24,8 @@ run_id: null
 
 
 data:
-  local: true   # true = load from local_path (dev/laptop); false = stream from remote HPC store
-  local_path: /rds/project/rds-mOlK9qn0PlQ/fairmast/upload-tmp/level2    # used only when local: true
+  local: false  # true = load from local_path (dev/laptop); false = stream from remote HPC store
+  local_path:   # used only when local: true
   subset_of_shots: null   # None / null → uses all shots
 
   keep_output_native: false
