@@ -15,12 +15,16 @@ training stage lists by stage name.
 from __future__ import annotations
 
 import copy
+import logging
 import yaml
 from collections.abc import Mapping
 from typing import Any, Literal
 from pathlib import Path
 
 from mmt.utils.paths import REPO_ROOT
+
+
+logger = logging.getLogger("mmt.ConfigLoader")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -210,5 +214,13 @@ def load_and_merge_base_configs(
                 f"  {embeddings_overrides_path}"
             )
         merged = deep_merge(base=merged, override=load_yaml(path=embeddings_overrides_path))
+
+    # Optional local overrides (gitignored, never committed).
+    # Create scripts_mast/configs/local_overrides.yaml to override any config value
+    # for machine-specific settings (e.g. local data paths on a laptop or HPC cluster).
+    local_overrides_path = configs_root_path / "local_overrides.yaml"
+    if local_overrides_path.is_file():
+        logger.info(f"Applying local overrides from {local_overrides_path}")
+        merged = deep_merge(base=merged, override=load_yaml(path=local_overrides_path))
 
     return merged

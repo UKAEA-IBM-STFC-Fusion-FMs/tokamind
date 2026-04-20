@@ -52,3 +52,6 @@ history/
 
 # Local files
 local/
+
+# Machine-specific config overrides (never commit)
+scripts_mast/configs/local_overrides.yaml
