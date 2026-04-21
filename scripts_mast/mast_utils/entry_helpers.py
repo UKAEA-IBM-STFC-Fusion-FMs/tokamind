@@ -286,7 +286,7 @@ def build_window_data(  # NOSONAR - Ignore cognitive complexity
             test_mode=(phase == "eval"),
             shuffle_windows=shuffle_at_iterable_level,
             shuffle_buffer_size=512,
-            verbose=(split_name == "train"),
+            verbose=(debug_mode and split_name == "train"),
         )
 
         if window_iterable is None:
