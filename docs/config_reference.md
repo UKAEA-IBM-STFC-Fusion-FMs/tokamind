@@ -35,6 +35,15 @@ This page documents active configuration keys used by the entry scripts.
 - Used in: pretrain, finetune, eval
 - Description: base path to the local Zarr dataset. Passed as `store_manager_settings.base_local_zarr_path` to `initialize_MAST_dataset`. Ignored when `data.local` is `false`.
 
+### `data.split`
+- Type: `"random" | "temporal"`
+- Used in: pretrain, finetune (must not be set in eval)
+- Default: `random` (null or missing values also default to `random`)
+- Description: selects which set of split artifacts to use (shot CSV, signal stats, outlier metadata).
+  - `random`: shots randomly partitioned into train/val/test.
+  - `temporal`: shots partitioned by campaign/discharge time.
+  - In finetune warmstart and eval, the split is inherited from the source run; setting it explicitly in eval raises an error.
+
 ### `data.subset_of_shots`
 - Type: `int | null`
 - Description: limits number of shots for faster runs.
@@ -448,3 +457,4 @@ Per task under `scripts_mast/configs/tasks_overrides/<task>/`:
 3. Finetune/eval include `--model` on CLI.
 4. Eval keeps `data.keep_output_native: true`.
 5. Finetune with `embeddings.mode=config` sets all `tune_embeddings.roles` to `false`.
+6. `data.split` is set in pretrain/finetune configs; do not set it in eval configs.

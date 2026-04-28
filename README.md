@@ -199,6 +199,10 @@ Base files:
 - `scripts_mast/configs/common/finetune.yaml`
 - `scripts_mast/configs/common/eval.yaml`
 
+Key data config knobs:
+- `data.split`: `random` (default) or `temporal` — selects the shot split strategy for pretrain/finetune.
+- `data.subset_of_shots`: limits shot count for faster runs.
+
 Task files:
 - `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` (optional)
 - `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`

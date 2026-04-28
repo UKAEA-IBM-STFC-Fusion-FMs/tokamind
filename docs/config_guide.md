@@ -96,6 +96,7 @@ When a source model is used, the loader resolves and stores:
 ### Pretrain
 - Uses `model` and `preprocess` directly from merged config.
 - Builds embeddings according to profile + runtime tuning settings.
+- `data.split` sets the split strategy (`random` or `temporal`, default `random`).
 
 ### Finetune
 - Uses explicit model semantics from `common/finetune.yaml`:
@@ -105,15 +106,18 @@ When a source model is used, the loader resolves and stores:
 - If `--init scratch`:
   - `model = deep_merge(model_scratch, finetune_model_overrides)`
   - `preprocess.chunk` and `preprocess.trim_chunks` are used from merged finetune config.
+  - `data.split` is used directly from config.
 - If `--init warmstart`:
   - `model = deep_merge(source_model, finetune_model_overrides, warmstart.model_overrides)`
   - `preprocess.chunk` and `preprocess.trim_chunks` are inherited from source run config.
+  - `data.split` is inherited from source run. If the finetune config specifies a different split, a warning is logged and the source split is enforced.
 - Embeddings are resolved by `embeddings.mode`:
   - `source`: stage only task-used source DCT3D artifacts into current run, then inherit and/or retune by role
   - `config`: ignore source embedding artifacts and use merged config directly
 
 ### Eval
-- Inherits `model`, `embeddings`, `preprocess.chunk`, and `preprocess.trim_chunks` from source run config.
+- Inherits `model`, `embeddings`, `preprocess.chunk`, `preprocess.trim_chunks`, and `data.split` from source run config.
+- `data.split` must not be set in the eval config — it is always source-authoritative.
 - Uses source run embedding artifacts for codec construction.
 - Applies eval-only controls from merged `eval.*` settings (drops, metrics, traces, amp).
 

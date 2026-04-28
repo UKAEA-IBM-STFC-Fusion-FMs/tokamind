@@ -31,6 +31,8 @@ The shared entry helpers use:
 ### 2) SelectValidWindowsTransform
 - filters invalid windows by configured thresholds
 - supports temporal subsampling via `window_stride_sec`
+- `accept_nan=True` (default): only all-NaN/empty signals are masked as invalid; partial-NaN signals pass through with NaN intact for downstream imputation
+- `accept_nan=False`: any NaN in a signal masks it as invalid (strict mode, pre-sparse-branch behavior)
 
 ### 3) TrimChunksTransform
 - keeps at most `max_chunks`
@@ -40,6 +42,8 @@ The shared entry helpers use:
 - applies per-signal codecs from `signal_specs`
 - uses codec map built by `build_codecs`
 - outputs fixed-width embedding vectors per signal/chunk
+- zero-fills NaN values on a local array copy immediately before `codec.encode()` (codecs require finite inputs)
+- for output signals: imputation is applied to a local copy only; original `window["output"][name]["values"]` is never modified, preserving NaN locations for benchmark-comparable eval metrics
 
 ### 5) BuildTokensTransform
 - converts embedded chunks into token fields

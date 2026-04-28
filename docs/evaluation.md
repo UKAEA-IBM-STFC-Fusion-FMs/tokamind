@@ -39,6 +39,7 @@ runs/<model_id>/eval/
 - same model spec as source run
 - same embedding spec as source run
 - same chunking/trim behavior as source run
+- same data split as source run (`data.split` is inherited automatically; do not set it in eval config)
 
 ## Forced Drop Ablations
 Configure deterministic drops in `eval.drop`:
@@ -107,3 +108,8 @@ data:
 ```
 
 This is needed to decode and score outputs in native space.
+
+## Sparse Evaluation
+The TokaMark evaluator computes metrics using `nanmean`, which correctly ignores NaN values in ground truth. This enables benchmark-comparable sparse evaluation even when signals have missing timesteps or channels.
+
+For this to work correctly, the pipeline preserves NaN values in `window["output"]` through to the evaluator — they are never overwritten. The zero-fill imputation applied in `EmbedChunksTransform` operates only on a temporary local copy used for DCT encoding and does not affect the ground truth values used for scoring.
