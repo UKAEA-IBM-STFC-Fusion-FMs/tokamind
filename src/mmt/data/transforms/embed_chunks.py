@@ -37,6 +37,16 @@ This transform:
        window["embedded_output_shapes"]
 4) Drops chunk raw "signals" on the returned copy to reduce memory.
 
+NaN imputation
+--------------
+Codecs (e.g. DCT3D) require finite inputs. Any NaN values that survive SelectValidWindowsTransform (partial-NaN
+signals allowed by `accept_nan=True`) are zero-filled on a **local copy** immediately before encoding. Zero equals
+the signal mean in standardized space, making this the least-biased imputation for standardized data.
+
+For output signals, imputation is applied only to the local copy used for encoding. The original values in
+``window["output"][name]["values"]`` are **never modified**, preserving NaN locations for benchmark-comparable
+evaluation metrics (e.g. nanmean in the tokamark evaluator).
+
 Caching (v0)
 ------------
 Cache key (robust, no fallbacks):
@@ -267,6 +277,8 @@ class EmbedChunksTransform:
                         emb = self._cache[key]
                         n_signal_cache_hits += 1
                     else:
+                        if not np.isfinite(arr).all():
+                            arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
                         emb = codec.encode(arr)
                         self._cache[key] = emb
                         n_signal_emb_new += 1
@@ -312,6 +324,9 @@ class EmbedChunksTransform:
                 codec = self._get_codec(sid=sid)
 
                 arr = np.asarray(values)
+                # Impute on a local copy only — native values in window["output"] are preserved for eval metrics.
+                if not np.isfinite(arr).all():
+                    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
                 emb = codec.encode(arr)
 
                 emb_out[sid] = emb

@@ -13,7 +13,7 @@ Expected pipeline position
     ChunkWindowsTransform
         → SelectValidWindowsTransform
             → TrimChunksTransform
-                → EmbedChunksTransform
+                → EmbedChunksTransform  (imputes NaN locally before codec.encode)
                     → BuildTokensTransform
 
 Window subsampling (minimum spacing)
@@ -33,6 +33,9 @@ Validity
   `accept_nan`.
 - Signals: input/actuator signals count as valid if they have at least `min_valid_chunks` valid chunks.
 - Outputs: output signals count as valid if their values are valid (after masking).
+- With `accept_nan=True` (default): only all-NaN/empty signals are masked as invalid; partial-NaN signals pass
+  through with NaN intact and are imputed downstream by EmbedChunksTransform before encoding.
+- With `accept_nan=False`: any NaN in a signal masks it as invalid (strict mode).
 
 Returns
 -------
@@ -83,7 +86,8 @@ class SelectValidWindowsTransform:
     min_valid_outputs : int
         Minimum valid number of outputs.
     accept_nan : bool
-        Whether to accept NaN/inf/empty values.
+        Whether to accept partial-NaN signals as valid. If True, only all-NaN/empty signals are masked; partial-NaN
+        signals pass through for downstream imputation by EmbedChunksTransform. Default: True.
     window_stride_sec : float | None
         Optional window stride in seconds.
     _last_tcut_and_widx_kept_by_shot : dict[Hashable, tuple[Union[float, None], Union[int, None]]]
@@ -109,7 +113,7 @@ class SelectValidWindowsTransform:
         min_valid_inputs_actuators: int = 1,
         min_valid_chunks: int = 1,
         min_valid_outputs: int = 1,
-        accept_nan: bool = False,
+        accept_nan: bool = True,
         window_stride_sec: float | None = None,
     ) -> None:
         """
@@ -127,8 +131,10 @@ class SelectValidWindowsTransform:
             Minimum valid number of outputs.
             Optional. Default: 1.
         accept_nan : bool
-            Whether to accept NaN/inf/empty values.
-            Optional. Default: False.
+            Whether to accept partial-NaN signals as valid. If True (default), only all-NaN/empty signals are masked
+            as invalid; partial-NaN signals pass through with NaN intact for downstream imputation by
+            EmbedChunksTransform before encoding. If False, any NaN masks the signal as invalid (strict mode).
+            Optional. Default: True.
         window_stride_sec : float | None
             Window stride in seconds.
             Optional. Default: None.
