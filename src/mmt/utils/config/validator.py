@@ -113,6 +113,7 @@ def _normalize_null_to_empty_dict(cfg: Mapping[str, Any], path: str) -> None:
 # ======================================================================================================================
 
 ALLOWED_PHASES = {"pretrain", "finetune", "eval"}
+ALLOWED_DATA_SPLITS = {"random", "temporal"}
 
 REQUIRED_COMMON_FIELDS: list[tuple[str, type]] = [("phase", str), ("task", str)]
 
@@ -437,6 +438,50 @@ def _validate_required_run_context(cfg: Mapping[str, Any]) -> None:
     # runtime must be a dict (already checked), but allow empty dict; no further checks here.
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+def _validate_data_split_for_training(cfg: Mapping[str, Any]) -> None:
+    """
+    Validate and normalize cfg.data.split for training phases.
+
+    Rules:
+    - missing / null / empty -> default to "random"
+    - otherwise value must be one of {"random", "temporal"} (case-insensitive)
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    TypeError
+        If `cfg['data']['split']` is not a string.
+    ValueError
+        If `cfg['data']['split']` is not in allowed values.
+
+    """
+
+    data_cfg = cfg.get("data")
+    if not isinstance(data_cfg, dict):
+        raise TypeError("`cfg['data']` must be a mapping (dict).")
+
+    split = data_cfg.get("split", "random")
+    if split is None:
+        data_cfg["split"] = "random"
+        return
+    if not isinstance(split, str):
+        raise TypeError(f"Expected type str at 'data.split', got {type(split).__name__}.")
+
+    split_norm = split.strip().lower()
+    if split_norm == "":
+        data_cfg["split"] = "random"
+        return
+
+    if split_norm not in ALLOWED_DATA_SPLITS:
+        raise ValueError(f"Unsupported data.split={split!r}. Allowed values are: {sorted(ALLOWED_DATA_SPLITS)}.")
+
+    data_cfg["split"] = split_norm
+
+
 # ======================================================================================================================
 # Public API
 # ======================================================================================================================
@@ -521,6 +566,7 @@ def validate_train_config(  # NOSONAR - Ignore cognitive complexity
 
     # Normalize YAML-null dicts that are commonly left empty by users
     _normalize_null_to_empty_dict(cfg=cfg, path="train.loss.output_weights")
+    _validate_data_split_for_training(cfg=cfg)
 
     # Validate required train fields exist
     for path, _t in REQUIRED_TRAIN_FIELDS:
@@ -591,6 +637,12 @@ def validate_eval_config(cfg: Mapping[str, Any]) -> None:
 
     # Eval requires native outputs for metrics/traces.
     data_cfg = cfg.get("data", {}) or {}
+    if "split" in data_cfg:
+        raise ValueError(
+            "For phase='eval', data.split must not be set. "
+            "Split is a training-time setting and eval inherits behavior from the selected source run."
+        )
+
     if not bool(data_cfg.get("keep_output_native", False)):
         raise ValueError(
             "For phase='eval', data.keep_output_native must be True (native outputs are required for metrics and trace "

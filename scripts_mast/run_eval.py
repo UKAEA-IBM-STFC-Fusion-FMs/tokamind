@@ -114,7 +114,10 @@ def main() -> None:
     # ..................................................................................................................
 
     dict_task_metadata, _mast_train, _mast_val, mast_dataset_test = build_mast_datasets(
-        cfg_task=cfg_task, cfg_data=cfg_data, phase="eval"
+        cfg_task=cfg_task,
+        cfg_data=cfg_data,
+        phase="eval",
+        cfg_model_source=cfg_mmt.model_source,
     )
 
     # ..................................................................................................................

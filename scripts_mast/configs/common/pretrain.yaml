@@ -21,6 +21,7 @@ data:
   local: false  # true = load from local_path (dev/laptop); false = stream from remote HPC store
   local_path:   # used only when local: true
   subset_of_shots: null   # None / null → uses all shots
+  split: random  # random | temporal
 
   keep_output_native: false
   cache:

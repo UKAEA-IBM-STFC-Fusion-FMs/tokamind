@@ -133,6 +133,7 @@ def main() -> None:
         cfg_task=cfg_task,
         cfg_data=cfg_data,
         phase="finetune",
+        cfg_model_source=cfg_mmt.raw.get("model_source"),
     )
 
     # ..................................................................................................................

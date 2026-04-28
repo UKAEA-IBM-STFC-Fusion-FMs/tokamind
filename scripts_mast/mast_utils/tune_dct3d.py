@@ -52,6 +52,7 @@ from .benchmark_imports import (
     initialize_TokaMark_dataset,
     get_train_test_val_shots,
 )
+from .tokamark_split import resolve_split_assets
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -118,6 +119,7 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
     max_windows = cfg_tune.get("max_windows", 15000)
     local_flag = cfg_data.get("local", True)
     local_path = cfg_data.get("local_path", None)
+    split_assets = resolve_split_assets(split=cfg_data["split"])
     max_budget_cfg = cfg_objective.get("max_budget", {})
     budget_summary = (
         {r: max_budget_cfg.get(r) for r in roles} if isinstance(max_budget_cfg, Mapping) else max_budget_cfg
@@ -138,7 +140,12 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
     # Dataset: subsample training shots for tuning
     # ..................................................................................................................
 
-    train_shots, _, _ = get_train_test_val_shots(max_index=n_shots, shuffle=True, seed=cfg_mmt.seed)
+    train_shots, _, _ = get_train_test_val_shots(
+        max_index=n_shots,
+        shuffle=True,
+        seed=cfg_mmt.seed,
+        data_splits_file_path=split_assets["data_splits_file_path"],
+    )
 
     store_settings = {"base_local_zarr_path": local_path} if (local_flag and local_path) else None
 
@@ -147,7 +154,10 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
         shots_list=train_shots,
         local_flag=local_flag,
         use_std_scaling=True,
+        stats_metadata_file_path=split_assets["stats_metadata_file_path"],
         return_incomplete_shots=True,
+        remove_outliers=True,
+        outlier_metadata_file=split_assets["outlier_metadata_file"],
         store_manager_settings=store_settings,
         verbose=False,
     )

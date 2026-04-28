@@ -391,6 +391,20 @@ def inherit_from_source_model(  # NOSONAR - Ignore cognitive complexity
             merged["model"] = deep_merge(base=merged["model"], override=common_overrides)
         if ws_model_overrides:
             merged["model"] = deep_merge(base=merged["model"], override=ws_model_overrides)
+
+        source_split = src_cfg["data"]["split"]
+        requested_split = merged["data"]["split"]
+
+        if requested_split != source_split:
+            logger.warning(
+                "Finetune warmstart requested data.split=%r, but source run uses data.split=%r. "
+                "Using source split for consistency.",
+                requested_split,
+                source_split,
+            )
+
+        merged["data"]["split"] = source_split
+        merged["model_source"]["data_split"] = source_split
         # Finetune warmstart: keep preprocess settings from current merged config (common + task overrides), do not
         # force source chunk/trim inheritance.
 
@@ -404,6 +418,7 @@ def inherit_from_source_model(  # NOSONAR - Ignore cognitive complexity
         merged["embeddings"] = copy.deepcopy(src_cfg["embeddings"])
         merged["embeddings_profile"] = src_cfg.get("embeddings_profile", merged.get("embeddings_profile"))
         inherit_preprocess_chunk_trim(merged=merged, src_cfg=src_cfg, allow_override=False)
+        merged["model_source"]["data_split"] = src_cfg["data"]["split"]
 
     merged["model_source"]["run_dir"] = str(src_run_dir)
     if src_run_id_for_yaml:
