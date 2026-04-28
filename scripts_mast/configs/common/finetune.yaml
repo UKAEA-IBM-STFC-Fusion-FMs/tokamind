@@ -189,7 +189,7 @@ model_scratch:
     n_heads: 6
     dim_ff: 768
     dropout: 0.05
-    activation: relu
+    activation: gelu
 
   modality_heads:
     timeseries:
