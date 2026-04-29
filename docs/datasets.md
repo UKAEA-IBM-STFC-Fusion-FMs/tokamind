@@ -46,8 +46,11 @@ All three are resolved together by `tokamark_split.py` to ensure no cross-split 
 ## NaN Handling
 MAST signals can contain NaN values (missing channels, partial dropouts). The pipeline is designed to handle them without dropping windows unnecessarily:
 
-- **At window selection**: `SelectValidWindowsTransform` uses `accept_nan=True` (default). Only signals that are entirely NaN or empty are masked as invalid. Windows with partially-NaN signals pass through.
-- **At encoding**: `EmbedChunksTransform` applies local zero-fill imputation immediately before `codec.encode()`. Zero equals the signal mean in standardized space, making this the least-biased imputation. For output signals, imputation is applied to a temporary local copy only — the original NaN values in `window["output"]` are preserved for benchmark-comparable evaluation metrics.
+- **At window selection**: `SelectValidWindowsTransform` has two independent NaN-tolerance flags:
+  - `accept_nan_inputs_actuators` (default `True`): partial-NaN input/actuator signals pass through with NaN intact for downstream zero-fill imputation.
+  - `accept_nan_outputs` (default `True`): partial-NaN output signals pass through. Set to `False` in finetune/pretrain configs to drop windows with partial-NaN outputs from training, preventing corrupted targets from entering the loss.
+  - In all cases, entirely-NaN or empty signals are always masked as invalid regardless of these flags.
+- **At encoding**: `EmbedChunksTransform` applies local zero-fill imputation immediately before `codec.encode()`. Zero equals the signal mean in standardized space, making this the least-biased imputation. For output signals (in eval, where `accept_nan_outputs=True`), imputation is applied to a temporary local copy only — the original NaN values in `window["output"]` are preserved for benchmark-comparable evaluation metrics.
 
 ## Dataset Types
 ### Streaming window iterable
