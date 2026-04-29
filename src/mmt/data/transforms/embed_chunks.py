@@ -40,7 +40,8 @@ This transform:
 NaN imputation
 --------------
 Codecs (e.g. DCT3D) require finite inputs. Any NaN values that survive SelectValidWindowsTransform (partial-NaN
-signals allowed by `accept_nan=True`) are zero-filled on a **local copy** immediately before encoding. Zero equals
+signals allowed by `accept_nan_inputs_actuators=True` / `accept_nan_outputs=True`) are zero-filled on a **local copy**
+immediately before encoding. Zero equals
 the signal mean in standardized space, making this the least-biased imputation for standardized data.
 
 For output signals, imputation is applied only to the local copy used for encoding. The original values in

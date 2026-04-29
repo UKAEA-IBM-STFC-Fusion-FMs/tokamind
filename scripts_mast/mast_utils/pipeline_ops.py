@@ -199,6 +199,8 @@ def build_default_transform(
                 min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_valid_win["min_valid_chunks"],
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],
+                accept_nan_inputs_actuators=cfg_valid_win.get("accept_nan_inputs_actuators", True),
+                accept_nan_outputs=cfg_valid_win.get("accept_nan_outputs", True),
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(max_chunks=cfg_trim["max_chunks"]),

@@ -31,6 +31,8 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
+    accept_nan_inputs_actuators: true
+    accept_nan_outputs: true
     window_stride_sec: null  # if null we evaluate on all the possible windows
 
 

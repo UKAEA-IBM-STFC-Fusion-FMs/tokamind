@@ -30,12 +30,13 @@ Notes:
 Validity
 --------
 - Chunk-level: input/actuator chunk values are masked (set to None) if invalid (NaN/inf/empty) according to
-  `accept_nan`.
+  `accept_nan_inputs_actuators`.
 - Signals: input/actuator signals count as valid if they have at least `min_valid_chunks` valid chunks.
-- Outputs: output signals count as valid if their values are valid (after masking).
-- With `accept_nan=True` (default): only all-NaN/empty signals are masked as invalid; partial-NaN signals pass
+- Outputs: output signals count as valid if their values are valid (after masking), according to
+  `accept_nan_outputs`.
+- With `accept_nan_* = True` (default): only all-NaN/empty signals are masked as invalid; partial-NaN signals pass
   through with NaN intact and are imputed downstream by EmbedChunksTransform before encoding.
-- With `accept_nan=False`: any NaN in a signal masks it as invalid (strict mode).
+- With `accept_nan_* = False`: any NaN in a signal masks it as invalid (strict mode).
 
 Returns
 -------
@@ -85,9 +86,10 @@ class SelectValidWindowsTransform:
         Minimum valid number of chunks.
     min_valid_outputs : int
         Minimum valid number of outputs.
-    accept_nan : bool
-        Whether to accept partial-NaN signals as valid. If True, only all-NaN/empty signals are masked; partial-NaN
-        signals pass through for downstream imputation by EmbedChunksTransform. Default: True.
+    accept_nan_inputs_actuators : bool
+        Whether to accept partial-NaN input/actuator signals as valid.
+    accept_nan_outputs : bool
+        Whether to accept partial-NaN output signals as valid.
     window_stride_sec : float | None
         Optional window stride in seconds.
     _last_tcut_and_widx_kept_by_shot : dict[Hashable, tuple[Union[float, None], Union[int, None]]]
@@ -95,7 +97,7 @@ class SelectValidWindowsTransform:
 
     Methods
     -------
-    _mask_if_bad(values)
+    _mask_if_bad(values, accept_partial_nan)
         Mask values if considered bad (i.e., if empty values or not finite).
     _is_window_stride_satisfied(shot_id, w_idx, t_cut)
         Return True if the window satisfies the minimum stride spacing since the last kept window for the same shot.
@@ -113,7 +115,8 @@ class SelectValidWindowsTransform:
         min_valid_inputs_actuators: int = 1,
         min_valid_chunks: int = 1,
         min_valid_outputs: int = 1,
-        accept_nan: bool = True,
+        accept_nan_inputs_actuators: bool = True,
+        accept_nan_outputs: bool = True,
         window_stride_sec: float | None = None,
     ) -> None:
         """
@@ -130,10 +133,13 @@ class SelectValidWindowsTransform:
         min_valid_outputs : int
             Minimum valid number of outputs.
             Optional. Default: 1.
-        accept_nan : bool
-            Whether to accept partial-NaN signals as valid. If True (default), only all-NaN/empty signals are masked
-            as invalid; partial-NaN signals pass through with NaN intact for downstream imputation by
-            EmbedChunksTransform before encoding. If False, any NaN masks the signal as invalid (strict mode).
+        accept_nan_inputs_actuators : bool
+            Whether to accept partial-NaN input/actuator signals as valid. If True (default), only all-NaN/empty
+            signals are masked as invalid. If False, any NaN masks the signal as invalid (strict mode).
+            Optional. Default: True.
+        accept_nan_outputs : bool
+            Whether to accept partial-NaN output signals as valid. If True (default), only all-NaN/empty signals are
+            masked as invalid. If False, any NaN masks the signal as invalid (strict mode).
             Optional. Default: True.
         window_stride_sec : float | None
             Window stride in seconds.
@@ -149,7 +155,8 @@ class SelectValidWindowsTransform:
         self.min_valid_chunks = int(min_valid_chunks)
         self.min_valid_outputs = int(min_valid_outputs)
 
-        self.accept_nan = bool(accept_nan)
+        self.accept_nan_inputs_actuators = bool(accept_nan_inputs_actuators)
+        self.accept_nan_outputs = bool(accept_nan_outputs)
         self.window_stride_sec = float(window_stride_sec) if (window_stride_sec is not None) else None
         if (self.window_stride_sec is not None) and (self.window_stride_sec <= 0):
             raise ValueError("[SelectValidWindowsTransform] `window_stride_sec` must be > 0.")
@@ -162,7 +169,7 @@ class SelectValidWindowsTransform:
     # ------------------------------------------------------------------------------------------------------------------
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _mask_if_bad(self, values: Any) -> tuple[bool, Union[np.ndarray, None]]:
+    def _mask_if_bad(self, values: Any, *, accept_partial_nan: bool) -> tuple[bool, Union[np.ndarray, None]]:
         """
         Mask values if considered bad (i.e., if empty values or not finite).
 
@@ -177,7 +184,7 @@ class SelectValidWindowsTransform:
             Returns a tuple (mask: bool, cleaned: ndarray|None) where:
             - mask=True means treat as invalid → set cleaned to None
             - mask=False means treat as valid → set cleaned to `values`
-            - REMARK: `self.accept_nan` controls whether partial NaNs are allowed
+            - REMARK: `accept_partial_nan` controls whether partial NaNs are allowed
 
         """
 
@@ -193,7 +200,7 @@ class SelectValidWindowsTransform:
             return True, None
 
         if not finite.all():
-            if not self.accept_nan:
+            if not accept_partial_nan:
                 return True, None
 
             return False, arr
@@ -363,7 +370,10 @@ class SelectValidWindowsTransform:
 
                 sigs2: dict[str, Any] = {}
                 for name, val in sigs.items():
-                    mask, cleaned = self._mask_if_bad(values=val)
+                    mask, cleaned = self._mask_if_bad(
+                        values=val,
+                        accept_partial_nan=self.accept_nan_inputs_actuators,
+                    )
                     if mask:
                         sigs2[name] = None
                     else:
@@ -399,14 +409,20 @@ class SelectValidWindowsTransform:
 
         for name, entry in output.items():
             if not isinstance(entry, dict):
-                mask, cleaned = self._mask_if_bad(values=entry)
+                mask, cleaned = self._mask_if_bad(
+                    values=entry,
+                    accept_partial_nan=self.accept_nan_outputs,
+                )
                 output2[name] = {"values": None if mask else cleaned}
                 if not mask:
                     n_outputs_valid += 1
                 continue
 
             entry2 = dict(entry)
-            mask, cleaned = self._mask_if_bad(values=entry.get("values"))
+            mask, cleaned = self._mask_if_bad(
+                values=entry.get("values"),
+                accept_partial_nan=self.accept_nan_outputs,
+            )
             entry2["values"] = None if mask else cleaned
             output2[name] = entry2
             if not mask:

@@ -633,7 +633,7 @@ def validate_eval_config(cfg: Mapping[str, Any]) -> None:
 
     """
 
-    _validate_loader(cfg)
+    _validate_loader(cfg=cfg)
 
     # Eval requires native outputs for metrics/traces.
     data_cfg = cfg.get("data", {}) or {}
