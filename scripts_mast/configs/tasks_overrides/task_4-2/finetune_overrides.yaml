@@ -11,6 +11,7 @@
 preprocess:
   valid_windows:
     window_stride_sec: 0.02
+    accept_nan_outputs: false  # soft X-ray cameras have structural missing channels; zero-imputation corrupts training targets
 
   trim_chunks:
     max_chunks: 40

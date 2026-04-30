@@ -47,7 +47,7 @@ preprocess:
     min_valid_outputs: 1
     min_valid_chunks: 1
     accept_nan_inputs_actuators: true
-    accept_nan_outputs: false
+    accept_nan_outputs: true
     window_stride_sec: 0.01
 
 
