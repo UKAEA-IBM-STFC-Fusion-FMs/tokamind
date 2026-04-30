@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, Union
+from typing import Any, Literal, Union, cast
 
 import torch
 
@@ -155,7 +155,7 @@ def build_mast_datasets(
     split_assets = resolve_split_assets(split=split_name)
 
     # Task metadata
-    dict_task_metadata = dict(get_task_metadata(config_task=cfg_task, verbose=False))
+    dict_task_metadata = cast(dict[str, Any], dict(get_task_metadata(config_task=cfg_task, verbose=False)))
     apply_signal_stats_override(
         dict_task_metadata=dict_task_metadata,
         stats_metadata_file_path=split_assets["stats_metadata_file_path"],
