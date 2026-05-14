@@ -155,7 +155,6 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
         local_flag=local_flag,
         use_std_scaling=True,
         stats_metadata_file_path=split_assets["stats_metadata_file_path"],
-        return_incomplete_shots=True,
         remove_outliers=True,
         outlier_metadata_file=split_assets["outlier_metadata_file"],
         store_manager_settings=store_settings,
