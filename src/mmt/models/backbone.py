@@ -12,6 +12,8 @@ from __future__ import annotations
 import torch
 import torch.nn as nn
 
+from mmt.models.activations import WaveletActivation
+
 
 # ======================================================================================================================
 class Backbone(nn.Module):
@@ -40,7 +42,7 @@ class Backbone(nn.Module):
         dim_ff: int,
         n_layers: int,
         dropout: float,
-        activation: str = "relu",
+        activation: str | nn.Module = "relu",
     ) -> None:
         """
         Initialize class parameters.
@@ -58,8 +60,9 @@ class Backbone(nn.Module):
             Number of layers.
         dropout : float
             The dropout value, to be passed to the `nn.TransformerEncoderLayer` constructor.
-        activation : str
+        activation : str | nn.Module
             The activation function, to be passed to the `nn.TransformerEncoderLayer` constructor.
+            Supported strings: "relu", "gelu", "wavelet".
             Optional. Default: "relu".
 
         Returns
@@ -69,13 +72,16 @@ class Backbone(nn.Module):
         """
 
         super().__init__()
+
+        _activation: str | nn.Module = WaveletActivation() if activation == "wavelet" else activation
+
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=n_heads,
             dim_feedforward=dim_ff,
             dropout=dropout,
             batch_first=True,
-            activation=activation,  # Explicit. Default "relu".
+            activation=_activation,
         )
 
         # NOTE:

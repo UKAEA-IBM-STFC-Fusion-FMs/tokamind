@@ -309,7 +309,8 @@ Top-level location in runtime config snapshot: `model:`
 
 ### `model.backbone.activation`
 - Type: `str`
-- Description: feed-forward activation name.
+- Supported values: `relu`, `gelu`, `wavelet`
+- Description: feed-forward activation name. `wavelet` uses the learnable sin/cos activation from PINNsFormer (arxiv:2307.11833).
 
 ### `model.modality_heads`
 - Type: mapping
