@@ -22,6 +22,7 @@ from pathlib import Path
 
 from mmt.utils import validate_config, sdpa_math_only_ctx
 from mmt.train import train_finetune
+from mmt.data import build_decoders
 
 from mast_utils import (
     load_experiment_config,
@@ -151,6 +152,8 @@ def main() -> None:
         cfg_task=cfg_task,
     )
 
+    output_decoders = build_decoders(registry=signal_specs, codecs=codecs, role="output")
+
     # ..................................................................................................................
     # Window data
     # ..................................................................................................................
@@ -189,6 +192,7 @@ def main() -> None:
             run_dir=cfg_mmt.paths["run_dir"],
             train_cfg=cfg_train,
             loader_cfg=cfg_loader,
+            output_decoders=output_decoders,
         )
 
 

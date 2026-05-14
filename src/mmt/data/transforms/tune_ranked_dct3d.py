@@ -99,8 +99,8 @@ from collections.abc import Mapping
 import logging
 import numpy as np
 
+from mmt.data.embeddings.dct3d import DCT3DCodec
 from mmt.data.signal_spec import SignalSpecRegistry
-from mmt.data.embeddings.dct3d_codec import DCT3DCodec
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -432,9 +432,8 @@ class TuneRankedDCT3DTransform:
 
         # Accumulate per-coefficient energy: coeff_energy[role][name][(H,W,T)] = (sum_energy, count).
         # sum_energy is a 1D array of shape (H*W*T,) containing sum of c_i² across windows.
-        self.coeff_energy: dict[str, dict[str, dict[tuple[int, int, int], tuple[np.ndarray, int]]]] = defaultdict(
-            lambda: defaultdict(dict)
-        )  # type: ignore[assignment]
+        # coeff_energy[role][name][(H,W,T)] = (sum_energy_array, window_count)
+        self.coeff_energy: dict[str, Any] = defaultdict(lambda: defaultdict(dict))
 
         # Representative shape per signal
         self.rep_shape: dict[tuple[str, str], tuple[int, ...]] = {}
@@ -1043,7 +1042,7 @@ class TuneRankedDCT3DTransform:
         cumsum_energy = np.cumsum(mean_energy[sorted_indices])
         explained_ratio = cumsum_energy / total_energy
 
-        meets_target = np.nonzero(explained_ratio >= target_energy)[0]
+        meets_target = np.flatnonzero(explained_ratio >= target_energy)
         if len(meets_target) > 0:
             k_target = int(meets_target[0]) + 1  # +1 because index is 0-based
         else:

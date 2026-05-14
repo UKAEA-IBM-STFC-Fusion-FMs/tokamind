@@ -23,7 +23,6 @@ data:
   subset_of_shots: null   # None / null → uses all shots
   split: random  # random | temporal
 
-  keep_output_native: false
   cache:
     enable: true
     dtype: float16          # or float32
@@ -131,6 +130,12 @@ train:
   loss:
     output_weights: {}
 #      summary-ip: 1.2
+
+    terms:
+      - type: embed_mse
+        weight: 1.0
+#      - type: native_sparse_mse   # data.keep_output_native is set automatically when this term is present
+#        weight: 0.5
 
   optimizer:
     use_adamw: true

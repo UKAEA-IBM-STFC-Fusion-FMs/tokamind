@@ -96,6 +96,12 @@ class SignalSpec:
         Unique integer identifier **per (role, name)**. This ID is used in the token pipeline and metadata arrays.
     embedding_dim : int
         Dimension of the codec output for a single chunk.
+    values_shape : tuple[int, ...]
+        Spatial shape of the signal values, without the time axis (e.g. ``()`` for scalar timeseries,
+        ``(C,)`` for a profile, ``(H, W)`` for a video frame). Matches the shape of
+        ``window['output'][name]['values']`` as stored in the dataset.
+    native_shape : tuple[int, int, int]
+        Canonical 3-D shape ``(H, W, T)`` used internally by codecs. Derived from ``values_shape`` and ``dt``.
 
     Notes
     -----
@@ -111,6 +117,8 @@ class SignalSpec:
     encoder_kwargs: dict[str, Any]
     signal_id: int
     embedding_dim: int
+    values_shape: tuple[int, ...]
+    native_shape: tuple[int, int, int]
 
     # ------------------------------------------------------------------------------------------------------------------
     @property
@@ -390,6 +398,8 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
                 encoder_kwargs=encoder_kwargs,
                 signal_id=next_id,
                 embedding_dim=int(embedding_dim),
+                values_shape=values_shape,
+                native_shape=native_shape,
             )
             specs.append(spec)
             next_id += 1
@@ -464,10 +474,9 @@ def _log_signal_spec_summary(
             encoder_kwargs = spec.encoder_kwargs if isinstance(spec.encoder_kwargs, dict) else {}
             native_shape = "-"
             if native_shape_by_key is not None:
-                native_shape_by_key = cast(dict, native_shape_by_key)
-                ns = native_shape_by_key.get((spec.role, spec.name))
+                ns = cast(dict, native_shape_by_key).get((spec.role, spec.name))
                 if ns is not None:
-                    native_shape = str(tuple(ns))
+                    native_shape = str(tuple(ns))  # type: ignore[arg-type]
             logger.info(
                 "  id=%d | name=%s | modality=%s | encoder=%s | native_shape=%s | encoded_dim=%d | expl_energy=%s",
                 int(spec.signal_id),

@@ -92,7 +92,7 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
     dataloader: DataLoader,
     device: torch.device,
     stats: Mapping[str, Mapping[str, float]],
-    codecs: Mapping[int, Any],
+    decoders: Mapping[str, Any],
     id_to_name: Mapping[int, str],
     run_dir: Path,
     task_name: str,
@@ -110,8 +110,13 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
         Standard evaluation dataloader input.
     device : torch.device
         Standard evaluation device input.
-    stats, codecs, id_to_name : Mapping
-        Output decoding / de-standardization inputs (native-space evaluation).
+    stats : Mapping[str, Mapping[str, float]]
+        Per-signal stats dict with ``"mean"`` and ``"std"`` keys.
+    decoders : Mapping[str, TorchDecoder]
+        Pre-built per-signal ``TorchDecoder`` instances keyed by signal name,
+        as returned by ``build_decoders()``.
+    id_to_name : Mapping[int, str]
+        Mapping from signal_id to signal name.
     run_dir : Path
         Eval run directory (`runs/<train_run>/<eval_id>/`).
     task_name : str
@@ -199,7 +204,7 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                 model=model,
                 device=device,
                 stats=stats,
-                codecs=codecs,
+                decoders=decoders,
                 id_to_name=id_to_name,
                 amp_enabled=amp_enabled,
             )

@@ -16,7 +16,6 @@ data:
   local_path:   # used only when local: true
   subset_of_shots: null   # None / null → uses all shots
 
-  keep_output_native: true
   cache:
     enable: false
     dtype: float16          # or float32; default behavior if omitted is “no cast”

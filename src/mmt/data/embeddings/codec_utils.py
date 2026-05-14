@@ -4,9 +4,8 @@ Codec utilities for the embedding pipeline.
 This module provides:
 - small shape helpers (e.g., inferring (H, W) from non-time value shapes),
 - a lightweight embedding-dimension estimator for a given encoder + signal shape,
-- a factory to build per-signal codec instances from the SignalSpec registry.
-
-The utilities here are intentionally simple and mirror the behaviour of the corresponding codec implementations
+- a factory to build per-signal codec instances from the SignalSpec registry,
+- a factory to build per-signal differentiable TorchDecoder instances for training and eval.
 
 VAE support assumes the refactored VAE_fairmast package (`vae_pipeline`) and the trained VAE artifacts
 under: vae_pipeline/data/VAEs/<MODEL_DIR>.
@@ -15,17 +14,27 @@ under: vae_pipeline/data/VAEs/<MODEL_DIR>.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 from collections.abc import Mapping
 import numpy as np
 
-from .dct3d_codec import DCT3DCodec
-from .identity_codec import IdentityCodec
-from .vae_codec import VAECodec, read_vae_model_meta
-from typing import TYPE_CHECKING
+from .torch_decoder import TorchDecoder
+from .dct3d import DCT3DCodec
+from .identity import IdentityCodec
+from .vae import VAECodec, read_vae_model_meta
 
 if TYPE_CHECKING:
     from ..signal_spec import SignalSpecRegistry
+
+__all__ = [
+    "TorchDecoder",
+    "build_torch_decoder",
+    "build_codecs",
+    "build_decoders",
+    "compute_embedding_dim_for_encoder",
+    "load_coeff_indices",
+    "infer_hw_from_values_shape",
+]
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -34,8 +43,8 @@ def infer_hw_from_values_shape(values_shape: tuple[int, ...]) -> tuple[int, int]
     Map values_shape (excluding time) to (H, W).
 
     Conventions:
-      - () or (1,)     -> (1, 1)
-      - (C,) with C>1  -> (C, 1)
+      - ( ) or (1, )     -> (1, 1)
+      - (C, ) with C>1  -> (C, 1)
       - (H, W)         -> (H, W)
 
     Parameters
@@ -426,3 +435,110 @@ def build_codecs(  # NOSONAR - Ignore cognitive complexity
             raise ValueError(f"Unknown encoder_name={spec.encoder_name!r} for signal {spec.name!r}.")
 
     return codecs
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def build_torch_decoder(
+    codec: Any,
+    original_shape: tuple[int, ...],
+) -> TorchDecoder:
+    """
+    Build a differentiable :class:`~mmt.data.embeddings.base.TorchDecoder` for the given codec.
+
+    The decoder is an ``nn.Module`` — call ``.to(device)`` on it (or on a parent module that
+    contains it) to move any registered buffers (e.g., the DCT3D basis matrix) to the correct
+    device before training.
+
+    Parameters
+    ----------
+    codec : DCT3DCodec | IdentityCodec | VAECodec
+        Fully initialised encoder instance.
+    original_shape : tuple[int, ...]
+        Native signal shape (without batch dimension), e.g. ``(T, )``, ``(C, T)``,
+        ``(H, W, T)``. Used by DCT3D and Identity decoders; ignored for VAE (shape
+        is inferred from the model's ``mmt_info.json``).
+
+    Returns
+    -------
+    TorchDecoder
+        Decoder instance ready for use in training losses and eval.
+
+    Raises
+    ------
+    NotImplementedError
+        If no TorchDecoder is registered for the given codec type.
+
+    """
+
+    # Lazy imports avoid circular dependencies at module load time
+    from .dct3d import DCT3DTorchDecoder
+    from .identity import IdentityTorchDecoder
+    from .vae import VAETorchDecoder
+
+    if isinstance(codec, DCT3DCodec):
+        return DCT3DTorchDecoder(codec=codec, original_shape=original_shape)
+
+    if isinstance(codec, IdentityCodec):
+        return IdentityTorchDecoder(original_shape=original_shape)
+
+    if isinstance(codec, VAECodec):
+        return VAETorchDecoder(vae_codec=codec)
+
+    raise NotImplementedError(
+        f"No TorchDecoder registered for codec type {type(codec).__name__!r}. "
+        "Implement a TorchDecoder subclass and register it in build_torch_decoder()."
+    )
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def build_decoders(
+    registry: "SignalSpecRegistry",
+    codecs: dict[int, Any],
+    role: str = "output",
+) -> dict[int, TorchDecoder]:
+    """
+    Build a TorchDecoder for every signal of ``role`` in the registry.
+
+    The ``original_shape`` passed to each decoder is ``spec.values_shape + (n_samples,)``,
+    which matches the shape of the collated batch tensor (``output_native[signal_id]``).
+    This is ``(T,)`` for scalar timeseries, ``(C, T)`` for profiles, and ``(H, W, T)`` for
+    video — not the canonical ``(H, W, T)`` form stored in ``spec.native_shape``.
+
+    Parameters
+    ----------
+    registry : SignalSpecRegistry
+        Registry produced by ``build_signal_specs()``.
+    codecs : dict[int, Any]
+        Per-signal codec instances keyed by ``signal_id``, as returned by ``build_codecs()``.
+    role : str
+        Which role to build decoders for.  Defaults to ``"output"``.
+
+    Returns
+    -------
+    dict[int, TorchDecoder]
+        Mapping of ``signal_id → TorchDecoder`` for all specs of the given role.
+
+    Raises
+    ------
+    KeyError
+        If a codec is missing for a spec in the registry.
+    NotImplementedError
+        If no TorchDecoder is registered for a codec type (propagated from
+        :func:`build_torch_decoder`).
+
+    """
+
+    decoders: dict[int, TorchDecoder] = {}
+    for spec in registry.specs_for_role(role):
+        if spec.signal_id not in codecs:
+            raise KeyError(
+                f"No codec found for signal_id={spec.signal_id} (name={spec.name!r}, role={spec.role!r}). "
+                "Ensure build_codecs() was called for the same registry."
+            )
+        n_samples = spec.native_shape[2]
+        original_shape = spec.values_shape + (n_samples,)
+        decoders[spec.signal_id] = build_torch_decoder(
+            codec=codecs[spec.signal_id],
+            original_shape=original_shape,
+        )
+    return decoders

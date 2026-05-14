@@ -55,13 +55,14 @@ import logging
 import math
 import os
 from collections.abc import Mapping
-from typing import Any, cast
+from typing import Any, Optional, cast
 
 import torch
 from torch.utils.data import DataLoader
 
 from mmt.models.mmt import MultiModalTransformer
 from mmt.train.loop_utils import backbone_lr, log_train_setup, run_one_epoch
+from mmt.train.losses import build_loss_aggregator
 from mmt.train.scheduler import build_optimizer_and_scheduler, apply_stage_freeze_policy
 from mmt.checkpoints import save_best, save_latest, resume_from_latest
 from mmt.utils.amp_utils import get_amp_config
@@ -86,6 +87,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     run_dir: str,
     train_cfg: Mapping[str, Any],
     loader_cfg: Mapping[str, Any],
+    output_decoders: Optional[dict] = None,
 ) -> dict[str, Any]:
     """
     Finetune the MMT model using the (already-validated) train configuration.
@@ -104,6 +106,11 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
         The validated train configuration.
     loader_cfg : Mapping[str, Any]
         The validated loader configuration.
+    output_decoders : dict[int, TorchDecoder] | None
+        Pre-built TorchDecoder instances keyed by signal_id, required when any loss
+        term in ``train_cfg["loss"]["terms"]`` has ``requires_decode=True`` (e.g.
+        ``native_sparse_mse``).  Pass the result of ``build_decoders()`` from
+        ``codec_utils``.  Optional, defaults to None.
 
     Returns
     -------
@@ -135,11 +142,10 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     early_patience = int(train_cfg["early_stop"]["patience"])
     early_delta = float(train_cfg["early_stop"]["delta"])
 
-    output_weights = train_cfg["loss"]["output_weights"] or {}
     # NOTE: config defines loss weights by *signal name*; model preds are keyed by signal_id (int).
     # Resolve name -> signal_id once here (same convention used for output adapters).
-    _ow_cfg = output_weights
-    output_weights = {}
+    _ow_cfg: dict = train_cfg["loss"].get("output_weights") or {}
+    output_weights_by_id: dict[int, float] = {}
     if isinstance(_ow_cfg, dict) and _ow_cfg:
         name_to_sid = {spec.name: spec.signal_id for spec in getattr(model, "output_specs", [])}
         unknown = [k for k in _ow_cfg.keys() if (str(k) not in name_to_sid)]
@@ -149,10 +155,16 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 f"Expected output signal names among: {sorted(name_to_sid.keys())}."
             )
         for name, w in _ow_cfg.items():
-            output_weights[int(name_to_sid[str(name)])] = float(w)
+            output_weights_by_id[int(name_to_sid[str(name)])] = float(w)
 
         # Overwrite train_cfg for consistent logging downstream.
-        train_cfg["loss"]["output_weights"] = output_weights
+        train_cfg["loss"]["output_weights"] = output_weights_by_id
+
+    loss_aggregator = build_loss_aggregator(
+        loss_cfg=train_cfg["loss"],
+        output_weights_by_id=output_weights_by_id if output_weights_by_id else None,
+        decoders=output_decoders,
+    )
 
     use_adamw = train_cfg["optimizer"]["use_adamw"]
 
@@ -180,6 +192,10 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     device, amp_enabled, amp_dtype = get_amp_config(model=model, enable=amp_enabled)
     use_scaler = (device.type == "cuda") and amp_enabled and (amp_dtype == torch.float16)
     scaler = torch.amp.GradScaler(device="cuda", enabled=use_scaler)
+
+    if output_decoders:
+        for _d in output_decoders.values():
+            _d.to(device).eval()
 
     logger.info("AMP enabled=%s dtype=%s scaler=%s", amp_enabled, amp_dtype, use_scaler)
 
@@ -352,7 +368,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 scaler=scaler,
                 device=device,
                 amp_enabled=amp_enabled,
-                output_weights=output_weights,
+                loss_aggregator=loss_aggregator,
                 grad_accum_steps=grad_accum_steps,
                 train=True,
                 global_step=global_step,
@@ -369,7 +385,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 scaler=None,
                 device=device,
                 amp_enabled=amp_enabled,
-                output_weights=output_weights,
+                loss_aggregator=loss_aggregator,
                 grad_accum_steps=1,
                 train=False,
                 global_step=global_step,

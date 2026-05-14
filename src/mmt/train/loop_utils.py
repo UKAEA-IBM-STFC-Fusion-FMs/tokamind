@@ -22,16 +22,19 @@ import logging
 import math
 import time
 from collections.abc import Mapping, MutableMapping
-from typing import Any, Hashable, Optional
+from typing import TYPE_CHECKING, Any, Hashable, Optional
 
 import torch
-from torch import Tensor, dtype as torch_dtype
+from torch import Tensor
+
+if TYPE_CHECKING:
+    from torch import dtype as torch_dtype
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.amp.grad_scaler import GradScaler
 
 from mmt.utils.amp_utils import amp_ctx_for_model
-from .losses import compute_loss_pred_space
+from .losses import LossAggregator
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -239,13 +242,18 @@ def log_train_setup(
     logger.info("Params       : total=%d, trainable=%d", n_params, n_trainable)
     logger.info("Train loader : %d batches/epoch", train_loader_len)
 
-    # Loss weights (do not change across stages)
+    # Loss config (does not change across stages)
     loss_cfg = train_cfg.get("loss", {})
-    output_weights = loss_cfg.get("output_weights")
-    if isinstance(output_weights, dict) and output_weights:
-        logger.info("Loss weights : %r", output_weights)
+    terms = loss_cfg.get("terms", [])
+    if terms:
+        for t in terms:
+            logger.info("Loss term    : type=%s weight=%s", t.get("type"), t.get("weight", 1.0))
     else:
-        logger.info("Loss weights : (uniform across outputs)")
+        output_weights = loss_cfg.get("output_weights")
+        if isinstance(output_weights, dict) and output_weights:
+            logger.info("Loss weights : %r", output_weights)
+        else:
+            logger.info("Loss weights : (uniform across outputs)")
 
     logger.info("Stages:")
     for s in stages:
@@ -279,7 +287,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     *,
     device: torch.device,
     amp_enabled: bool,
-    output_weights: Mapping[Hashable, float],
+    loss_aggregator: LossAggregator,
     grad_accum_steps: int,
     train: bool,
     global_step: int,
@@ -335,21 +343,13 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
             batch = move_batch_to_device(batch, device)
             t1 = time.perf_counter()
 
-            output_mask = batch["output_mask"]
-
             # ----------------------- FORWARD -----------------------
             with amp_ctx_for_model(model, enable=amp_enabled):
                 out = model(batch)
                 preds = out.get("pred", {})
 
-            # Compute loss outside autocast. The loss function itself forces
-            # float32 computation for AMP stability.
-            loss_t, loss_logs = compute_loss_pred_space(
-                preds=preds,
-                y_true=batch["output_emb"],
-                output_mask=output_mask,
-                output_weights=output_weights,
-            )
+            # Compute loss outside autocast. The loss functions force float32 for AMP stability.
+            loss_t, loss_logs = loss_aggregator.compute(preds=preds, batch=batch)
 
             # Optional: per-output loss logging (enable with logger level DEBUG).
             if loss_logs and logger.isEnabledFor(logging.DEBUG):

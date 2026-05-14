@@ -44,7 +44,7 @@ from .signal_spec import SignalSpec, build_signal_specs, infer_modality
 # Codec utils
 # ----------------------------------------------------------------------------------------------------------------------
 
-from .embeddings.codec_utils import build_codecs
+from .embeddings.codec_utils import build_codecs, build_decoders
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -65,4 +65,5 @@ __all__ = [
     "build_signal_specs",
     "infer_modality",
     "build_codecs",
+    "build_decoders",
 ]

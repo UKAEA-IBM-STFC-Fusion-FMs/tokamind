@@ -26,6 +26,7 @@ from pathlib import Path
 
 from mmt.utils import validate_config, sdpa_math_only_ctx
 from mmt.checkpoints import load_best_weights
+from mmt.data import build_decoders
 
 from mast_utils import (
     load_experiment_config,
@@ -209,7 +210,10 @@ def main() -> None:
     output_specs = [spec for spec in signal_specs.specs_for_role("output") if spec.name not in drop_outputs_set]
     id_to_name = {spec.signal_id: spec.name for spec in output_specs}
 
-    output_codecs = {spec.name: codecs[spec.signal_id] for spec in output_specs if spec.signal_id in codecs}
+    _id_decoders = build_decoders(registry=signal_specs, codecs=codecs, role="output")
+    output_decoders = {
+        spec.name: _id_decoders[spec.signal_id] for spec in output_specs if spec.signal_id in _id_decoders
+    }
 
     output_stats = {spec.name: signal_stats[spec.name] for spec in output_specs if spec.name in signal_stats}
 
@@ -229,7 +233,7 @@ def main() -> None:
                 dataloader=eval_loader,
                 device=device,
                 stats=output_stats,
-                codecs=output_codecs,
+                decoders=output_decoders,
                 id_to_name=id_to_name,
                 run_dir=run_dir,
                 task_name=args.task,

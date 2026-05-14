@@ -278,7 +278,7 @@ class EmbedChunksTransform:
                         emb = self._cache[key]
                         n_signal_cache_hits += 1
                     else:
-                        if not np.isfinite(arr).all():
+                        if getattr(codec, "requires_finite_input", True) and not np.isfinite(arr).all():
                             arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
                         emb = codec.encode(arr)
                         self._cache[key] = emb
@@ -326,7 +326,7 @@ class EmbedChunksTransform:
 
                 arr = np.asarray(values)
                 # Impute on a local copy only — native values in window["output"] are preserved for eval metrics.
-                if not np.isfinite(arr).all():
+                if getattr(codec, "requires_finite_input", True) and not np.isfinite(arr).all():
                     arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
                 emb = codec.encode(arr)
 
