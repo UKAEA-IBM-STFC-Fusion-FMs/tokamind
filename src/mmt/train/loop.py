@@ -54,6 +54,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import re
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -427,12 +428,23 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 f"no_improve={no_improve_str}"
             )
 
-            # Per-term breakdown (only when multiple terms are active)
+            # Per-term breakdown (only when multiple terms are active).
+            # Shows raw per-term losses + percentage of the raw sum, so the scale of each term
+            # is visible and the percentages directly show relative gradient pull.
+            # Example: EmbedMSELoss=0.517 (84%)  NativeSparseMSELoss=0.099 (16%)
             if len(train_term_logs) > 1:
-                train_terms_str = "  ".join(f"{k}={v:.6f}" for k, v in sorted(train_term_logs.items()))
-                val_terms_str = "  ".join(f"{k}={v:.6f}" for k, v in sorted(val_term_logs.items()))
-                logger.info("  terms train: %s", train_terms_str)
-                logger.info("  terms val:   %s", val_terms_str)
+
+                def _fmt_term_logs(d: dict) -> str:
+                    raw_sum = sum(d.values())
+                    parts = []
+                    for k, v in sorted(d.items()):
+                        name = re.sub(r"_\d+/total$", "", k)
+                        pct = 100.0 * v / raw_sum if raw_sum > 0.0 else 0.0
+                        parts.append(f"{name}={v:.6f} ({pct:.0f}%)")
+                    return "  ".join(parts)
+
+                logger.info("  terms train: %s", _fmt_term_logs(train_term_logs))
+                logger.info("  terms val:   %s", _fmt_term_logs(val_term_logs))
 
             bb_lr = backbone_lr(optimizer=optimizer)
 
