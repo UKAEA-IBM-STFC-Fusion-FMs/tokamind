@@ -62,6 +62,8 @@ embeddings:
   # source: copy source run embeddings; roles=true re-tunes that role.
   # config: ignore source embeddings and use the selected emb_profile as-is.
 
+  impute_na: true
+
   tune_embeddings:
     roles:
       input: false

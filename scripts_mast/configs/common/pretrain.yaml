@@ -51,6 +51,8 @@ preprocess:
 
 
 embeddings:
+  impute_na: true
+
   tune_embeddings:
     roles:
       input: true

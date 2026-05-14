@@ -7,6 +7,13 @@
 #   scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml
 
 embeddings:
+  # When true (default), NaN values in signal arrays are zero-filled before encoding.
+  # Zero equals the signal mean in standardized space, making this the least-biased imputation.
+  # Set to false only when ALL codecs in use can handle NaN inputs natively (e.g. a future
+  # NaN-aware VAE). If false and any codec has requires_finite_input=True, an error is raised
+  # at pipeline construction time.
+  impute_na: true
+
   defaults:
     input:
       timeseries:

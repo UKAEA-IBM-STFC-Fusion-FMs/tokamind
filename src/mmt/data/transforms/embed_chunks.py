@@ -39,10 +39,15 @@ This transform:
 
 NaN imputation
 --------------
-Codecs (e.g. DCT3D) require finite inputs. Any NaN values that survive SelectValidWindowsTransform (partial-NaN
-signals allowed by `accept_nan_inputs_actuators=True` / `accept_nan_outputs=True`) are zero-filled on a **local copy**
-immediately before encoding. Zero equals
-the signal mean in standardized space, making this the least-biased imputation for standardized data.
+Controlled by the ``impute_na`` flag (from ``embeddings.impute_na`` in config, default ``True``).
+
+When ``True``: any NaN values that survive SelectValidWindowsTransform (partial-NaN signals allowed by
+``accept_nan_inputs_actuators=True`` / ``accept_nan_outputs=True``) are zero-filled on a **local copy** immediately
+before encoding. Zero equals the signal mean in standardized space, making this the least-biased imputation for
+standardized data.
+
+When ``False``: no imputation is performed. This is only valid if ALL codecs in use can handle NaN inputs natively.
+If any codec has ``requires_finite_input=True`` and ``impute_na=False``, an error is raised at construction time.
 
 For output signals, imputation is applied only to the local copy used for encoding. The original values in
 ``window["output"][name]["values"]`` are **never modified**, preserving NaN locations for benchmark-comparable
@@ -84,6 +89,8 @@ class EmbedChunksTransform:
         Registry of signal specifications.
     codecs : Mapping[int, Any]
         Codec mapping (signal_id -> codec).
+    impute_na : bool
+        Whether to zero-fill NaN values before encoding (see ``embeddings.impute_na`` in config).
     _cache : dict[tuple[Any, str, int, int], np.ndarray]
         Supporting variable to cache (shot_id, role, signal_id, chunk_index_global).
     _last_shot_id : Any
@@ -101,7 +108,12 @@ class EmbedChunksTransform:
     """
 
     # ------------------------------------------------------------------------------------------------------------------
-    def __init__(self, signal_specs: SignalSpecRegistry, codecs: Mapping[int, Any]) -> None:
+    def __init__(
+        self,
+        signal_specs: SignalSpecRegistry,
+        codecs: Mapping[int, Any],
+        impute_na: bool = True,
+    ) -> None:
         """
         Initialize class attributes.
 
@@ -111,15 +123,32 @@ class EmbedChunksTransform:
             Registry of signal specifications.
         codecs : Mapping[int, Any]
             Codec mapping (signal_id -> codec).
+        impute_na : bool
+            Whether to zero-fill NaN values before encoding. Defaults to ``True``.
+            Set to ``False`` only when ALL codecs can handle NaN inputs natively.
 
         Returns
         -------
         # None  # REMARK: Commented out to avoid type checking errors, as this is a callable class.
 
+        Raises
+        ------
+        ValueError
+            If ``impute_na=False`` and any codec has ``requires_finite_input=True``.
+
         """
+
+        if not impute_na:
+            bad = [sid for sid, c in codecs.items() if getattr(c, "requires_finite_input", True)]
+            if bad:
+                raise ValueError(
+                    f"impute_na=False but codec(s) for signal_id={bad} have requires_finite_input=True. "
+                    "Either set impute_na=True or use a codec that can handle NaN inputs natively."
+                )
 
         self.signal_specs = signal_specs
         self.codecs = dict(codecs)
+        self.impute_na = impute_na
 
         # Deterministic cache:
         # (shot_id, role, signal_id, chunk_index_global) -> embedding
@@ -278,7 +307,7 @@ class EmbedChunksTransform:
                         emb = self._cache[key]
                         n_signal_cache_hits += 1
                     else:
-                        if getattr(codec, "requires_finite_input", True) and not np.isfinite(arr).all():
+                        if self.impute_na and not np.isfinite(arr).all():
                             arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
                         emb = codec.encode(arr)
                         self._cache[key] = emb
@@ -326,7 +355,7 @@ class EmbedChunksTransform:
 
                 arr = np.asarray(values)
                 # Impute on a local copy only — native values in window["output"] are preserved for eval metrics.
-                if getattr(codec, "requires_finite_input", True) and not np.isfinite(arr).all():
+                if self.impute_na and not np.isfinite(arr).all():
                     arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
                 emb = codec.encode(arr)
 

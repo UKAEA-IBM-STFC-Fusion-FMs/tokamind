@@ -1,4 +1,5 @@
 embeddings:
+  impute_na: true
   per_signal_overrides:
     input:
       magnetics-flux_loop_flux:
