@@ -167,7 +167,9 @@ class NativeSparseMSELoss(BaseLoss):
             logs[out_key] = float(L_o.detach().cpu())
 
         if not per_out_losses:
-            return torch.zeros((), device=device, dtype=torch.float32), logs
+            # ref.sum() * 0.0 is zero but stays in the computation graph, so backward()
+            # does not crash when native_sparse_mse is the only active loss term.
+            return ref.sum() * 0.0, logs
 
         per_out = torch.stack(per_out_losses)
         weights = torch.tensor(per_out_weights, device=device, dtype=torch.float32)

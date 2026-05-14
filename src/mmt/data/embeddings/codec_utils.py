@@ -454,9 +454,11 @@ def build_torch_decoder(
     codec : DCT3DCodec | IdentityCodec | VAECodec
         Fully initialised encoder instance.
     original_shape : tuple[int, ...]
-        Native signal shape (without batch dimension), e.g. ``(T, )``, ``(C, T)``,
-        ``(H, W, T)``. Used by DCT3D and Identity decoders; ignored for VAE (shape
-        is inferred from the model's ``mmt_info.json``).
+        Per-sample output shape (without batch dimension), e.g. ``(T,)``, ``(C, T)``,
+        ``(H, W, T)``. Must match the per-sample shape of ``output_native`` in the
+        collated batch. Passed to all decoder types; for VAE it is used to reshape
+        the raw decoder output to this contract (handling singleton dims such as
+        ``(1, T)`` → ``(T,)`` for scalar timeseries).
 
     Returns
     -------
@@ -482,7 +484,7 @@ def build_torch_decoder(
         return IdentityTorchDecoder(original_shape=original_shape)
 
     if isinstance(codec, VAECodec):
-        return VAETorchDecoder(vae_codec=codec)
+        return VAETorchDecoder(vae_codec=codec, original_shape=original_shape)
 
     raise NotImplementedError(
         f"No TorchDecoder registered for codec type {type(codec).__name__!r}. "

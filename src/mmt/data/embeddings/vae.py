@@ -642,14 +642,21 @@ class VAETorchDecoder(TorchDecoder):
     parameters frozen (``requires_grad_(False)``). Gradients flow *through* the decoder
     to the embedding prediction ``z`` but do not update the pretrained weights.
 
-    Output shape is ``(B, *input_shape)`` where ``input_shape`` is the native signal shape
-    declared in ``mmt_info.json``: ``(C, T)`` for linear/conv1d or ``(H, W, T)`` for conv2d.
+    Output shape is ``(B, *original_shape)`` where ``original_shape`` is the per-sample shape
+    of ``output_native`` in the collated batch (e.g. ``(T,)`` for scalar timeseries, ``(C, T)``
+    for profiles). The raw decoder output from the VAE model is reshaped to this contract after
+    decoding, so singleton spatial dims present in the VAE's internal ``input_shape`` (e.g.
+    ``(1, T)``) are correctly squeezed away.
 
     Parameters
     ----------
     vae_codec : VAECodec
         Fully initialised encoder instance. Its ``model``, ``model_type``,
         ``input_mode``, and ``input_shape`` are used to configure the decoder.
+    original_shape : tuple[int, ...] | None
+        Expected per-sample output shape (without batch dimension). When provided, the
+        decoder's output is reshaped to ``(B, *original_shape)`` after decoding. When
+        ``None``, the raw shape from ``_reshape_to_native`` is returned as-is.
 
     Notes
     -----
@@ -660,7 +667,7 @@ class VAETorchDecoder(TorchDecoder):
     """
 
     # ------------------------------------------------------------------------------------------------------------------
-    def __init__(self, vae_codec: VAECodec) -> None:
+    def __init__(self, vae_codec: VAECodec, original_shape: tuple[int, ...] | None = None) -> None:
         super().__init__()
 
         # Freeze: gradients flow through ops, not into pretrained weights
@@ -672,6 +679,7 @@ class VAETorchDecoder(TorchDecoder):
         self._input_mode: str = vae_codec.input_mode
         self._input_shape: tuple[int, ...] = tuple(vae_codec.input_shape)
         self._native_shape: tuple[int, ...] = tuple(vae_codec.input_shape)
+        self._output_shape: tuple[int, ...] | None = tuple(original_shape) if original_shape is not None else None
 
     # ------------------------------------------------------------------------------------------------------------------
     def forward(self, z: Tensor) -> Tensor:
@@ -698,7 +706,12 @@ class VAETorchDecoder(TorchDecoder):
         except Exception:  # noqa - Some VAE variants expect (B, 1, D)
             x_hat = self._vae_model.decode(z.unsqueeze(1))
 
-        return self._reshape_to_native(x_hat, B)
+        x_hat = self._reshape_to_native(x_hat, B)
+
+        if self._output_shape is not None:
+            x_hat = x_hat.reshape(B, *self._output_shape)
+
+        return x_hat
 
     # ------------------------------------------------------------------------------------------------------------------
     def _reshape_to_native(self, x_hat: Tensor, B: int) -> Tensor:  # NOSONAR - Ignore cognitive complexity
