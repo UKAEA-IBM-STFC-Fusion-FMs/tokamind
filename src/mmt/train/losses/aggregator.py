@@ -15,7 +15,6 @@ The ``build_loss_aggregator`` factory supports the following term types:
 
 from __future__ import annotations
 
-import math
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any, Hashable
 
@@ -92,8 +91,10 @@ class LossAggregator:
         ref = next(iter(preds.values()))
         device = ref.device
 
+        w_sum = sum(w for _, w in self._terms)
+        n_terms = len(self._terms)
+
         term_losses: list[Tensor] = []
-        term_weights: list[float] = []
         logs: dict[str, Any] = {}
 
         for i, (term, weight) in enumerate(self._terms):
@@ -105,26 +106,19 @@ class LossAggregator:
             )
 
             term_name = type(term).__name__
-            key_prefix = f"{term_name}_{i}" if len(self._terms) > 1 else term_name
+            key_prefix = f"{term_name}_{i}" if n_terms > 1 else term_name
 
-            if not math.isfinite(float(term_loss.detach().cpu())):
-                logs[f"{key_prefix}/total"] = float("nan")
-            else:
-                logs[f"{key_prefix}/total"] = float(term_loss.detach().cpu())
+            raw = float(term_loss.detach().cpu())
+            # Weighted contribution: w_i * L_i / Σw_j — gradient share after term weights.
+            logs[f"{key_prefix}/weighted"] = (raw * weight / w_sum) if w_sum > 0.0 else (raw / n_terms)
             for out_key, out_val in term_logs.items():
                 logs[f"{key_prefix}/{out_key}"] = out_val
 
             term_losses.append(term_loss)
-            term_weights.append(weight)
 
         stacked = torch.stack(term_losses)
-        weights_t = torch.tensor(term_weights, device=device, dtype=torch.float32)
-
-        w_sum = float(weights_t.sum())
-        if w_sum > 0.0:
-            total = (stacked * weights_t).sum() / w_sum
-        else:
-            total = stacked.mean()
+        weights_t = torch.tensor([w for _, w in self._terms], device=device, dtype=torch.float32)
+        total = (stacked * weights_t).sum() / w_sum if w_sum > 0.0 else stacked.mean()
 
         logs["total"] = float(total.detach().cpu())
 

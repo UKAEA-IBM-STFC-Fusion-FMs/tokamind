@@ -434,7 +434,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
 
             running_loss += float(loss_t.detach().cpu())
             for k, v in loss_logs.items():
-                if k.endswith("/total") and math.isfinite(v):
+                if k.endswith("/weighted") and math.isfinite(v):
                     running_term_logs[k] = running_term_logs.get(k, 0.0) + v
             n_batches += 1
 

@@ -428,23 +428,22 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 f"no_improve={no_improve_str}"
             )
 
-            # Per-term breakdown (only when multiple terms are active).
-            # Shows raw per-term losses + percentage of the raw sum, so the scale of each term
-            # is visible and the percentages directly show relative gradient pull.
-            # Example: EmbedMSELoss=0.517 (84%)  NativeSparseMSELoss=0.099 (16%)
+            # Per-term gradient share (only when multiple terms are active).
+            # Each percentage = w_i * L_i / Σ(w_j * L_j): the actual gradient contribution
+            # after applying term weights. 50%/50% means equal gradient pull.
             if len(train_term_logs) > 1:
 
-                def _fmt_term_logs(d: dict) -> str:
-                    raw_sum = sum(d.values())
+                def _fmt_term_pcts(d: dict) -> str:
+                    w_sum = sum(d.values())
                     parts = []
                     for k, v in sorted(d.items()):
-                        name = re.sub(r"_\d+/total$", "", k)
-                        pct = 100.0 * v / raw_sum if raw_sum > 0.0 else 0.0
-                        parts.append(f"{name}={v:.6f} ({pct:.0f}%)")
+                        name = re.sub(r"_\d+/weighted$", "", k)
+                        pct = 100.0 * v / w_sum if w_sum > 0.0 else 0.0
+                        parts.append(f"{name}={pct:.0f}%")
                     return "  ".join(parts)
 
-                logger.info("  terms train: %s", _fmt_term_logs(train_term_logs))
-                logger.info("  terms val:   %s", _fmt_term_logs(val_term_logs))
+                logger.info("  terms train: %s", _fmt_term_pcts(train_term_logs))
+                logger.info("  terms val:   %s", _fmt_term_pcts(val_term_logs))
 
             bb_lr = backbone_lr(optimizer=optimizer)
 
