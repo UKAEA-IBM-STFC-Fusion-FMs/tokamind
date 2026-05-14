@@ -142,10 +142,10 @@ class NativeSparseMSELoss(BaseLoss):
             # NaN positions in y_nat represent missing measurements (sparse signals).
             B = y_pred.shape[0]
             valid = ~torch.isnan(y_nat)  # (B, *native_shape)
-            valid_flat = valid.view(B, -1)  # (B, N)
+            valid_flat = valid.reshape(B, -1)  # (B, N)
 
             # Zero out NaN positions so squaring is safe; they are excluded via n_valid below.
-            diff = (pred_native - y_nat.nan_to_num(0.0)).view(B, -1)  # (B, N)
+            diff = (pred_native - y_nat.nan_to_num(0.0)).reshape(B, -1)  # (B, N)
             sq = diff.square().masked_fill(~valid_flat, 0.0)
             n_valid = valid_flat.float().sum(dim=1).clamp(min=1.0)  # (B,) — clamp avoids 0/0
             per_sample = sq.sum(dim=1) / n_valid  # (B,)

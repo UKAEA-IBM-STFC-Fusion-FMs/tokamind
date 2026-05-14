@@ -499,10 +499,13 @@ def build_decoders(
     """
     Build a TorchDecoder for every signal of ``role`` in the registry.
 
-    The ``original_shape`` passed to each decoder is ``spec.values_shape + (n_samples,)``,
-    which matches the shape of the collated batch tensor (``output_native[signal_id]``).
-    This is ``(T,)`` for scalar timeseries, ``(C, T)`` for profiles, and ``(H, W, T)`` for
-    video — not the canonical ``(H, W, T)`` form stored in ``spec.native_shape``.
+    The ``original_shape`` passed to each decoder matches the per-sample shape of
+    ``output_native[signal_id]`` in the collated batch:
+
+    - timeseries (``modality == "timeseries"``): ``(T,)`` — values stored as 1D, the leading
+      ``C=1`` dimension in ``values_shape`` is dropped.
+    - profile: ``(C, T)`` = ``values_shape + (n_samples,)``
+    - video: ``(H, W, T)`` = ``values_shape + (n_samples,)``
 
     Parameters
     ----------
@@ -536,7 +539,12 @@ def build_decoders(
                 "Ensure build_codecs() was called for the same registry."
             )
         n_samples = spec.native_shape[2]
-        original_shape = spec.values_shape + (n_samples,)
+        # Timeseries values are stored as (T,) in output_native, not (1, T).
+        # Profile and video keep their spatial dims: (C, T) and (H, W, T).
+        if spec.modality == "timeseries":
+            original_shape: tuple[int, ...] = (n_samples,)
+        else:
+            original_shape = spec.values_shape + (n_samples,)
         decoders[spec.signal_id] = build_torch_decoder(
             codec=codecs[spec.signal_id],
             original_shape=original_shape,
