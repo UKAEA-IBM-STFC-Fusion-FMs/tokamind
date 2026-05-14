@@ -43,7 +43,7 @@ Simplified logic (v0)
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Optional
+from typing import Any
 import logging
 import numpy as np
 
@@ -113,7 +113,7 @@ class BuildTokensTransform:
     # ------------------------------------------------------------------------------------------------------------------
     def __call__(  # NOSONAR - Ignore cognitive complexity
         self, window: dict[str, Any] | None
-    ) -> Optional[dict[str, Any]]:
+    ) -> dict[str, Any] | None:
         """
         Call method for the class instances to behave like a function.
 
@@ -124,7 +124,7 @@ class BuildTokensTransform:
 
         Returns
         -------
-        Optional[dict[str, Any]]
+        dict[str, Any] | None
             Dictionary with keys in ["emb_chunks", "pos", "id", "mod", "role", "output_emb"] if `window` is not None,
             otherwise None.
 

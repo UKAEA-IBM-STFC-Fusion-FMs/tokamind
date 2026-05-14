@@ -36,7 +36,7 @@ Design choices
 from __future__ import annotations
 
 import math
-from typing import Optional, Iterable
+from typing import Iterable
 
 import torch
 import torch.nn as nn
@@ -205,7 +205,7 @@ def build_optimizer_and_scheduler(
     total_steps: int,
     warmup_steps: int,
     use_adamw: bool,
-) -> tuple[torch.optim.Optimizer, Optional[torch.optim.lr_scheduler.LambdaLR]]:
+) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LambdaLR | None]:
     """
     Build optimizer and warmup+cosine scheduler.
 

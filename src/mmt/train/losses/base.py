@@ -6,7 +6,7 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from collections.abc import Mapping
-from typing import Hashable, Optional
+from typing import Hashable
 
 from torch import Tensor
 
@@ -58,7 +58,7 @@ class BaseLoss(ABC):
         self,
         preds: Mapping[Hashable, Tensor],
         y_emb: Mapping[Hashable, Tensor],
-        y_native: Optional[Mapping[Hashable, Tensor]],
+        y_native: Mapping[Hashable, Tensor] | None,
         output_mask: Mapping[Hashable, Tensor],
     ) -> tuple[Tensor, dict[Hashable, float]]:
         """

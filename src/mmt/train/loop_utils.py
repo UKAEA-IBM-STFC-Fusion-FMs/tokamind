@@ -22,7 +22,7 @@ import logging
 import math
 import time
 from collections.abc import Mapping, MutableMapping
-from typing import TYPE_CHECKING, Any, Hashable, Optional
+from typing import TYPE_CHECKING, Any, Hashable
 
 import torch
 from torch import Tensor
@@ -208,7 +208,7 @@ def move_batch_to_device(  # NOSONAR - Ignore cognitive complexity
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def backbone_lr(optimizer: torch.optim.Optimizer) -> Optional[float]:
+def backbone_lr(optimizer: torch.optim.Optimizer) -> float | None:
     """Return the current learning rate of the backbone param group (for logging)."""
     for g in optimizer.param_groups:
         if g.get("group_type") == "backbone":
@@ -281,9 +281,9 @@ def log_train_setup(
 def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     model,
     loader,
-    optimizer: Optional[Optimizer],
-    scheduler: Optional[LRScheduler],
-    scaler: Optional[GradScaler],
+    optimizer: Optimizer | None,
+    scheduler: LRScheduler | None,
+    scaler: GradScaler | None,
     *,
     device: torch.device,
     amp_enabled: bool,
@@ -291,8 +291,8 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     grad_accum_steps: int,
     train: bool,
     global_step: int,
-    max_batches: Optional[int] = None,
-    epoch_global: Optional[int] = None,
+    max_batches: int | None = None,
+    epoch_global: int | None = None,
 ) -> tuple[float, dict[str, float], int]:
     """
     Run one epoch over a DataLoader, in either train or eval mode.

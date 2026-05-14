@@ -10,7 +10,7 @@ sparse evaluation convention in TokaMark.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Hashable, Optional
+from typing import Hashable
 
 import torch
 from torch import Tensor
@@ -53,7 +53,7 @@ class NativeSparseMSELoss(BaseLoss):
     def __init__(
         self,
         decoders: dict[Hashable, TorchDecoder],
-        output_weights: Optional[dict[Hashable, float]] = None,
+        output_weights: dict[Hashable, float] | None = None,
     ) -> None:
         if not decoders:
             raise ValueError("NativeSparseMSELoss requires at least one decoder.")
@@ -66,7 +66,7 @@ class NativeSparseMSELoss(BaseLoss):
         self,
         preds: Mapping[Hashable, Tensor],
         y_emb: Mapping[Hashable, Tensor],
-        y_native: Optional[Mapping[Hashable, Tensor]],
+        y_native: Mapping[Hashable, Tensor] | None,
         output_mask: Mapping[Hashable, Tensor],
     ) -> tuple[Tensor, dict[Hashable, float]]:
         """

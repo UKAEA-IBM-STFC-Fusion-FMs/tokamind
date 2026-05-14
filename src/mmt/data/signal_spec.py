@@ -54,7 +54,7 @@ logging, saving results). The registry bridges those worlds consistently across 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, cast
+from typing import Any, cast
 from collections.abc import Mapping
 import logging
 
@@ -229,12 +229,12 @@ class SignalSpecRegistry:
         return list(self._specs)
 
     # ------------------------------------------------------------------------------------------------------------------
-    def get_by_id(self, signal_id: int) -> Optional[SignalSpec]:
+    def get_by_id(self, signal_id: int) -> SignalSpec | None:
         """Return specifications by signal ID key."""
         return self._by_id.get(signal_id)
 
     # ------------------------------------------------------------------------------------------------------------------
-    def get(self, role: str, name: str) -> Optional[SignalSpec]:
+    def get(self, role: str, name: str) -> SignalSpec | None:
         """Return specifications by role-name key."""
         return self._by_role_name.get((role, name))
 

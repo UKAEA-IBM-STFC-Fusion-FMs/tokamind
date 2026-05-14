@@ -47,7 +47,6 @@ Usage
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 import numpy as np
 import torch
@@ -253,8 +252,8 @@ class DCT3DCodec:
     keep_t: int
     dtype: type = np.float32
     selection_mode: str = "spatial"
-    coeff_indices: Optional[np.ndarray] = None
-    coeff_shape: Optional[tuple[int, int, int]] = None
+    coeff_indices: np.ndarray | None = None
+    coeff_shape: tuple[int, int, int] | None = None
     requires_finite_input: bool = True
 
     # ------------------------------------------------------------------------------------------------------------------

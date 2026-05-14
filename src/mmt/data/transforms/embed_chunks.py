@@ -64,7 +64,7 @@ This should produce cache hits for overlapping windows within a shot when window
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 from collections.abc import Mapping
 import logging
 import numpy as np
@@ -216,19 +216,19 @@ class EmbedChunksTransform:
 
     # ------------------------------------------------------------------------------------------------------------------
     def __call__(  # NOSONAR - Ignore cognitive complexity
-        self, window: Optional[dict[str, Any]]
-    ) -> Optional[dict[str, Any]]:
+        self, window: dict[str, Any] | None
+    ) -> dict[str, Any] | None:
         """
         Call method for the class instances to behave like a function.
 
         Parameters
         ----------
-        window : Optional[dict[str, Any]]
+        window : dict[str, Any] | None
             Window on which the transform is applied.
 
         Returns
         -------
-        Optional[dict[str, Any]]
+        dict[str, Any] | None
             Extended window with updated/new values for "chunks", "embedded_output", and "embedded_output_shapes" keys.
 
         Raises

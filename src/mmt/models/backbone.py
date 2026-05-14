@@ -8,7 +8,6 @@ TokenEncoder and task-specific heads.
 
 from __future__ import annotations
 
-from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -93,7 +92,7 @@ class Backbone(nn.Module):
             self.encoder = nn.TransformerEncoder(encoder_layer=encoder_layer, num_layers=n_layers)
 
     # ------------------------------------------------------------------------------------------------------------------
-    def forward(self, x: torch.Tensor, src_key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None) -> torch.Tensor:
         """
         Backbone's forward function.
 
@@ -101,7 +100,7 @@ class Backbone(nn.Module):
         ----------
         x : torch.Tensor
             The sequence to the encoder.
-        src_key_padding_mask : Optional[torch.Tensor]
+        src_key_padding_mask : torch.Tensor | None
             The mask for the `x` keys per batch.
             Optional. Default: None.
 

@@ -18,7 +18,7 @@ The returned batch dict is the standard input format expected by `MultiModalTran
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Optional, Literal
+from typing import Any, Literal
 import logging
 import numpy as np
 import random
@@ -195,7 +195,7 @@ class MMTCollate:
 
         # Optional: output_id -> output_name mapping (used only for output_native).
         # This mapping should be built once at startup from the SignalSpecRegistry.
-        self.output_id_to_name: Optional[dict[int, str]] = None
+        self.output_id_to_name: dict[int, str] | None = None
         if self.keep_output_native:
             m = self.cfg.get("output_id_to_name")
             if m is None:
@@ -487,7 +487,7 @@ class MMTCollate:
 
         for sig_id in sorted(all_target_ids):
             # Find a reference embedding to infer shape + dtype.
-            ref_arr: Optional[np.ndarray] = None
+            ref_arr: np.ndarray | None = None
             for i in range(B):
                 emb = out_dicts[i].get(sig_id)
                 if emb is None:
@@ -549,7 +549,7 @@ class MMTCollate:
                     continue
 
                 # Infer shape from the first present value in this batch.
-                ref_shape: Optional[tuple[int, ...]] = None
+                ref_shape: tuple[int, ...] | None = None
                 for i in range(B):
                     w = flat_windows[i]
                     out_group = w.get("output") or {}

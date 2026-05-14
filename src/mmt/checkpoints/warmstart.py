@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import os
 from collections.abc import Mapping, Callable, Sequence
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -102,7 +102,7 @@ def _format_name_list(names: Sequence[str] | set[str] | list[str], *, max_items:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _extract_token_proj_component(key: str) -> Optional[str]:
+def _extract_token_proj_component(key: str) -> str | None:
     """
     Extract TokenEncoder per-signal projection component from a state_dict key.
 
@@ -119,7 +119,7 @@ def _extract_token_proj_component(key: str) -> Optional[str]:
 
     Returns
     -------
-    Optional[str]
+    str | None
         Extracted token projection component in str format, or None if not possible.
 
     """
@@ -134,7 +134,7 @@ def _extract_token_proj_component(key: str) -> Optional[str]:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _extract_output_adapter_component(key: str) -> Optional[str]:
+def _extract_output_adapter_component(key: str) -> str | None:
     """
     Extract output adapter name from a key in the *output_adapters* state_dict.
 
@@ -149,7 +149,7 @@ def _extract_output_adapter_component(key: str) -> Optional[str]:
 
     Returns
     -------
-    Optional[str]
+    str | None
         Extracted output adapter name in str format, or None if not possible.
 
     """
@@ -258,7 +258,7 @@ def load_parts_from_run_dir(  # NOSONAR - Ignore cognitive complexity
     model: nn.Module,
     run_dir: str,
     *,
-    load_parts: Optional[Mapping[str, bool]] = None,
+    load_parts: Mapping[str, bool] | None = None,
     map_location: Callable | torch.device | str | dict[str, str] | None = "cpu",
 ) -> None:
     """
@@ -287,7 +287,7 @@ def load_parts_from_run_dir(  # NOSONAR - Ignore cognitive complexity
     run_dir : str
         Path to a *previous* run directory.
 
-    load_parts : Optional[Mapping[str, bool]]
+    load_parts : Mapping[str, bool] | None
         Mapping (dict) with optional boolean flags:
             {
               "backbone": True/False,

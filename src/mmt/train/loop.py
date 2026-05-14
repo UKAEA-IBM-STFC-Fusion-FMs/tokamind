@@ -55,7 +55,7 @@ import logging
 import math
 import os
 from collections.abc import Mapping
-from typing import Any, Optional, cast
+from typing import Any, cast
 
 import torch
 from torch.utils.data import DataLoader
@@ -87,7 +87,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     run_dir: str,
     train_cfg: Mapping[str, Any],
     loader_cfg: Mapping[str, Any],
-    output_decoders: Optional[dict] = None,
+    output_decoders: dict | None = None,
 ) -> dict[str, Any]:
     """
     Finetune the MMT model using the (already-validated) train configuration.

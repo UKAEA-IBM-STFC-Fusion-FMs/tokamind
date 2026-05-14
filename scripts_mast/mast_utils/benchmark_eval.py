@@ -41,7 +41,7 @@ import csv
 import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 import numpy as np
 
 import torch
@@ -97,8 +97,8 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
     run_dir: Path,
     task_name: str,
     amp_enabled: bool,
-    compute_metrics_cfg: Optional[Mapping[str, Any]] = None,
-    traces_cfg: Optional[Mapping[str, Any]] = None,
+    compute_metrics_cfg: Mapping[str, Any] | None = None,
+    traces_cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run evaluation once and write configured outputs.
 
@@ -123,13 +123,13 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
         Benchmark task name (e.g., `task_2-1`) used for output folder naming.
     amp_enabled : bool
         Whether to enable AMP in the forward pass.
-    compute_metrics_cfg : Optional[Mapping[str, Any]]
+    compute_metrics_cfg : Mapping[str, Any] | None
         Supports keys:
           - per_task: bool (benchmark aggregation -> task_metrics.csv)
           - per_shot: bool (benchmark aggregation -> shots_metrics.csv)
           - per_window: bool (keep windows_metrics.csv)
           - per_timestamp: bool (MMT-native per-timestamp CSV)
-    traces_cfg : Optional[Mapping[str, Any]]
+    traces_cfg : Mapping[str, Any] | None
         Same structure as in docs/evaluation.md.
 
     Returns

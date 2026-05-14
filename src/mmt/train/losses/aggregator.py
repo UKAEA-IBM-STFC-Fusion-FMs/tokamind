@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any, Hashable, Optional
+from typing import TYPE_CHECKING, Any, Hashable
 
 import torch
 from torch import Tensor
@@ -84,7 +84,7 @@ class LossAggregator:
 
         y_emb: Mapping[Hashable, Tensor] = batch.get("output_emb", {})
         output_mask: Mapping[Hashable, Tensor] = batch.get("output_mask", {})
-        y_native: Optional[Mapping[Hashable, Tensor]] = batch.get("output_native", None)
+        y_native: Mapping[Hashable, Tensor] | None = batch.get("output_native", None)
 
         if not preds:
             return torch.tensor(0.0, dtype=torch.float32), {}
@@ -139,8 +139,8 @@ class LossAggregator:
 # ----------------------------------------------------------------------------------------------------------------------
 def build_loss_aggregator(
     loss_cfg: Mapping[str, Any],
-    output_weights_by_id: Optional[Mapping[Hashable, float]] = None,
-    decoders: Optional[dict[Hashable, TorchDecoder]] = None,
+    output_weights_by_id: Mapping[Hashable, float] | None = None,
+    decoders: dict[Hashable, TorchDecoder] | None = None,
 ) -> LossAggregator:
     """
     Build a ``LossAggregator`` from the ``train.loss`` config block.

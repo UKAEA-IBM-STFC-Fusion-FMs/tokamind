@@ -61,7 +61,7 @@ Notes
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 from collections.abc import Mapping
 import logging
 import numpy as np
@@ -109,7 +109,7 @@ class ChunkWindowsTransform:
         *,
         dict_metadata: Mapping[str, Any],
         chunk_length_sec: float,
-        stride_sec: Optional[float] = None,
+        stride_sec: float | None = None,
     ) -> None:
         """
         Initialize class attributes.
@@ -120,7 +120,7 @@ class ChunkWindowsTransform:
             FAIR MAST metadata dictionary.
         chunk_length_sec : float
             Chunk length in seconds.
-        stride_sec : Optional[float]
+        stride_sec : float | None
             Stride in seconds.
             Optional. Default: None.
 
@@ -280,7 +280,7 @@ class ChunkWindowsTransform:
         self,
         *,
         role: str,
-        group: Optional[Mapping[str, Any]],
+        group: Mapping[str, Any] | None,
         base_global_index: int,
         shot_id: str | int,
         window_idx: str | int,
@@ -292,7 +292,7 @@ class ChunkWindowsTransform:
         ----------
         role : str
             Target rol.
-        group : Optional[Mapping[str, Any]]
+        group : Mapping[str, Any] | None
             Optional group mapping (dict) associated with the provided `role`.
         base_global_index : int
             Best global index.
@@ -391,18 +391,18 @@ class ChunkWindowsTransform:
         return chunks
 
     # ------------------------------------------------------------------------------------------------------------------
-    def __call__(self, window: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    def __call__(self, window: dict[str, Any] | None) -> dict[str, Any] | None:
         """
         Call method for the class instances to behave like a function.
 
         Parameters
         ----------
-        window : Optional[dict[str, Any]]
+        window : dict[str, Any] | None
             Chunk window on which the transform is applied.
 
         Returns
         -------
-        Optional[dict[str, Any]]
+        dict[str, Any] | None
             Chunk window extended with input/actuator chunks for a valid `window`, otherwise None.
 
         Raises

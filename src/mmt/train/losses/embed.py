@@ -5,7 +5,7 @@ Embedding-space MSE loss term.
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Hashable, Optional
+from typing import Hashable
 
 import torch
 from torch import Tensor
@@ -39,7 +39,7 @@ class EmbedMSELoss(BaseLoss):
     requires_destandardize: bool = False
 
     # ------------------------------------------------------------------------------------------------------------------
-    def __init__(self, output_weights: Optional[dict[Hashable, float]] = None) -> None:
+    def __init__(self, output_weights: dict[Hashable, float] | None = None) -> None:
         self._output_weights = output_weights or {}
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -47,7 +47,7 @@ class EmbedMSELoss(BaseLoss):
         self,
         preds: Mapping[Hashable, Tensor],
         y_emb: Mapping[Hashable, Tensor],
-        y_native: Optional[Mapping[Hashable, Tensor]],
+        y_native: Mapping[Hashable, Tensor] | None,
         output_mask: Mapping[Hashable, Tensor],
     ) -> tuple[Tensor, dict[Hashable, float]]:
         """

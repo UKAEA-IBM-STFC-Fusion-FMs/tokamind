@@ -44,7 +44,7 @@ ulimit for open file descriptors can be low.
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset, Dataset
@@ -96,9 +96,9 @@ def initialize_mmt_dataloader(
     shuffle: bool = True,
     drop_last: bool = False,
     verbose: bool = False,
-    seed: Optional[int] = None,
-    pin_memory: Optional[bool] = None,
-) -> Optional[DataLoader]:
+    seed: int | None = None,
+    pin_memory: bool | None = None,
+) -> DataLoader | None:
     """
     Build PyTorch DataLoaders for the MMT pipeline (window-level).
 
@@ -158,7 +158,7 @@ def initialize_mmt_dataloader(
 
     Returns
     -------
-    Optional[DataLoader]
+    DataLoader | None
         None if invalid `dataset`, otherwise Initialized DataLoader instance.
 
     Notes
