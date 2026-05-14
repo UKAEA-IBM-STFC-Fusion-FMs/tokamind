@@ -50,6 +50,11 @@ The shared entry helpers use:
   is never modified, preserving NaN locations for benchmark-comparable eval metrics
 - setting `impute_na: false` is only valid when all codecs in use can handle NaN inputs natively; a
   `ValueError` is raised at pipeline construction if any codec has `requires_finite_input=True`
+- **identity-encoded outputs are not embedded**: if an output signal uses `encoder_name: identity`, the
+  embedding step is skipped entirely for that signal — `window["output_emb"]` will not contain an entry for
+  it. This avoids duplicating large output arrays in memory (the native values kept by `FinalizeWindowTransform`
+  are sufficient for `native_sparse_mse`). As a consequence, `embed_mse` silently ignores identity-encoded
+  outputs; use `native_sparse_mse` for those signals.
 
 ### 5) BuildTokensTransform
 - converts embedded chunks into token fields

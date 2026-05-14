@@ -90,6 +90,19 @@ When multiple terms are present, the total loss is a normalized weighted sum: `t
 - **`native_sparse_mse`** is preferable when output signals have systematic NaN gaps (partial channels, timestep dropouts) and you want the loss to ignore those positions explicitly rather than train through imputed zeros.
 - Both terms can be combined with independent weights for a mixed objective.
 
+### Identity-encoded outputs
+
+When an output signal uses `encoder_name: identity` (e.g. in a `dct3d_native_outputs` embedding profile),
+`EmbedChunksTransform` **skips the embedding step** for that signal and does not store an `output_emb` entry.
+This avoids holding two copies of the same data in memory — particularly important for large spatial outputs
+(Thomson scattering profiles, bolometry) where caching the embedded and native arrays separately would cause
+significant RAM overhead.
+
+Consequences:
+- `native_sparse_mse` works as normal — it reads from `output_native`, which is always present.
+- `embed_mse` silently ignores identity-encoded outputs (no entry in `output_emb` → not supervised by that term).
+- Using `embed_mse` as the sole loss term with identity outputs is a no-op for those outputs; combine with `native_sparse_mse` instead.
+
 ### `keep_output_native` auto-derivation
 `data.keep_output_native` is derived automatically by the config validator — do not set it manually:
 - eval phase → always `true`
@@ -132,6 +145,7 @@ embeddings:
 | `false` | `true` | `embed_mse` | Windows with NaN outputs are dropped; remaining windows are fully observed. Cleanest training signal. |
 | `true` | `true` | `embed_mse` | NaN positions become zeros in the target embedding. Loss trains through imputed positions with no masking. |
 | `true` | `true` | `native_sparse_mse` | NaN positions imputed before encoding, but `output_native` preserves original NaNs. Loss masks imputed positions out at the native level. |
+| `true` | `true` | `native_sparse_mse` + identity output | Embedding step is skipped entirely for identity outputs — no `output_emb` stored, no RAM duplication. `output_native` is the only copy. Loss masks NaN positions as normal. |
 
 ## AMP (Mixed Precision)
 

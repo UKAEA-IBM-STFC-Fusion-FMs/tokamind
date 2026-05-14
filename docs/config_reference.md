@@ -129,6 +129,21 @@ embeddings:
     in standardized space — the least-biased imputation. Output signal native values are never modified.
   - `false`: no imputation. Only valid when all codecs can handle NaN inputs natively. An error is raised at
     pipeline construction if any codec has `requires_finite_input=True` (all current codecs do).
+  - Note: `impute_na` has no effect on identity-encoded output signals — their embedding step is skipped
+    entirely (see `encoder_name: identity` below).
+
+### `encoder_name: identity`
+Setting `encoder_name: identity` for an **output** signal has a special memory-saving behaviour:
+`EmbedChunksTransform` skips the embedding step entirely for that signal — no `output_emb` entry is written
+to the window. This avoids duplicating large output arrays (the native values kept by `FinalizeWindowTransform`
+are the only copy in memory). Use this in combination with `native_sparse_mse`, which reads from
+`output_native` and does not require `output_emb`.
+
+`embed_mse` will silently ignore any output signal that has no `output_emb` entry; it is not an error, but
+those signals are not supervised by that term. For identity outputs, use `native_sparse_mse`.
+
+For **input** and **actuator** signals, `encoder_name: identity` behaves normally (flattens the chunk,
+writes `embeddings` into the chunk dict as usual).
 
 ### `embeddings.per_signal_overrides`
 - Type: mapping

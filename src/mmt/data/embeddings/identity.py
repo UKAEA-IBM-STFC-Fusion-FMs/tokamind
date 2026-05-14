@@ -61,6 +61,7 @@ class IdentityCodec:
 
     out_dtype: type = np.float32
     requires_finite_input: bool = True
+    is_identity: bool = True
 
     # ------------------------------------------------------------------------------------------------------------------
     def encode(self, x: np.ndarray) -> np.ndarray:

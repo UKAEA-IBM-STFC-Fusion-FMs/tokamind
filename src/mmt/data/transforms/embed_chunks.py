@@ -353,6 +353,13 @@ class EmbedChunksTransform:
                 sid = int(spec.signal_id)
                 codec = self._get_codec(sid=sid)
 
+                # Identity-encoded outputs: skip embedding entirely.
+                # The native values kept by FinalizeWindowTransform are sufficient for
+                # native_sparse_mse. Storing output_emb separately would duplicate the
+                # data in memory for every cached window.
+                if getattr(codec, "is_identity", False):
+                    continue
+
                 arr = np.asarray(values)
                 # Impute on a local copy only — native values in window["output"] are preserved for eval metrics.
                 if self.impute_na and not np.isfinite(arr).all():
