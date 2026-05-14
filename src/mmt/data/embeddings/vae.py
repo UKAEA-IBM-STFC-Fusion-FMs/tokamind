@@ -359,7 +359,7 @@ class VAECodec:
             )
 
         dev: str = device if (device is not None and str(device).strip() != "") else "cpu"
-        self.device = torch.device(dev)
+        self.device: torch.device = torch.device(dev)
         self.use_mu = bool(use_mu)
 
         _, get_settings, beta_VAE = _import_vae_pipeline()  # NOSONAR # noqa - Ignore lowercase warning
