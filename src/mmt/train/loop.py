@@ -360,7 +360,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
             epoch_global = total_epochs_run + epoch_in_stage
 
             # ---------------------------- TRAIN ----------------------------
-            train_loss, global_step = run_one_epoch(
+            train_loss, train_term_logs, global_step = run_one_epoch(
                 model=model,
                 loader=train_loader,
                 optimizer=optimizer,
@@ -377,7 +377,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
             )
 
             # ---------------------------- VALIDATION -----------------------
-            val_loss, _ = run_one_epoch(
+            val_loss, val_term_logs, _ = run_one_epoch(
                 model=model,
                 loader=val_loader,
                 optimizer=None,
@@ -427,22 +427,32 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 f"no_improve={no_improve_str}"
             )
 
+            # Per-term breakdown (only when multiple terms are active)
+            if len(train_term_logs) > 1:
+                train_terms_str = "  ".join(f"{k}={v:.6f}" for k, v in sorted(train_term_logs.items()))
+                val_terms_str = "  ".join(f"{k}={v:.6f}" for k, v in sorted(val_term_logs.items()))
+                logger.info("  terms train: %s", train_terms_str)
+                logger.info("  terms val:   %s", val_terms_str)
+
             bb_lr = backbone_lr(optimizer=optimizer)
 
             # ---------------------------- HISTORY UPDATE -------------------
-            history["stages"][name].append(
-                {
-                    "epoch_global": epoch_global,
-                    "epoch_in_stage": epoch_in_stage,
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                    "lr_backbone": bb_lr,
-                    "best_val": best_val,
-                    "global_step": global_step,
-                    "bad_epochs": bad_epochs,
-                    "improved": improved,
-                }
-            )
+            epoch_record: dict = {
+                "epoch_global": epoch_global,
+                "epoch_in_stage": epoch_in_stage,
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+                "lr_backbone": bb_lr,
+                "best_val": best_val,
+                "global_step": global_step,
+                "bad_epochs": bad_epochs,
+                "improved": improved,
+            }
+            for k, v in train_term_logs.items():
+                epoch_record[f"train_{k}"] = v
+            for k, v in val_term_logs.items():
+                epoch_record[f"val_{k}"] = v
+            history["stages"][name].append(epoch_record)
 
             # ---------------------------- LATEST CHECKPOINT ---------------
             save_latest(

@@ -293,7 +293,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     global_step: int,
     max_batches: Optional[int] = None,
     epoch_global: Optional[int] = None,
-) -> tuple[float, int]:
+) -> tuple[float, dict[str, float], int]:
     """
     Run one epoch over a DataLoader, in either train or eval mode.
 
@@ -304,8 +304,10 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
 
     Returns
     -------
-    tuple[float, int]
-        Tuple (avg_loss, global_step).
+    tuple[float, dict[str, float], int]
+        Tuple (avg_loss, avg_term_logs, global_step).
+        ``avg_term_logs`` contains epoch-averaged values for each ``<term>/total`` key produced
+        by ``LossAggregator``. Useful for per-term breakdown when multiple loss terms are active.
 
     Raises
     ------
@@ -326,6 +328,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     model.train(train)
 
     running_loss = 0.0
+    running_term_logs: dict[str, float] = {}
     n_batches = 0
 
     t_before_next = time.perf_counter()
@@ -430,6 +433,9 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                 t4 = time.perf_counter()
 
             running_loss += float(loss_t.detach().cpu())
+            for k, v in loss_logs.items():
+                if k.endswith("/total") and math.isfinite(v):
+                    running_term_logs[k] = running_term_logs.get(k, 0.0) + v
             n_batches += 1
 
             _maybe_log_batch_timing(
@@ -447,5 +453,6 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
             t_before_next = time.perf_counter()
 
     avg_loss = running_loss / max(1, n_batches)
+    avg_term_logs = {k: v / max(1, n_batches) for k, v in running_term_logs.items()}
 
-    return avg_loss, global_step
+    return avg_loss, avg_term_logs, global_step
