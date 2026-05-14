@@ -27,6 +27,7 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 ## 📚 Documentation
 - [Configuration Guide](docs/config_guide.md)
 - [Configuration Reference](docs/config_reference.md)
+- [Training](docs/training.md)
 - [DCT3D Tuning](docs/tuning_dct3d.md)
 - [Checkpointing and Warmstart](docs/checkpointing_and_warmstart.md)
 - [Evaluation](docs/evaluation.md)

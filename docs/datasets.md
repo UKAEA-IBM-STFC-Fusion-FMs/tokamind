@@ -1,6 +1,6 @@
 # Datasets
 
-Related documentation: [Project README](../README.md) | [Transforms](transforms.md) | [Configuration Guide](config_guide.md)
+Related documentation: [Project README](../README.md) | [Transforms](transforms.md) | [Training](training.md) | [Configuration Guide](config_guide.md)
 
 This document describes shot-level and window-level data handling in the project.
 
@@ -50,7 +50,10 @@ MAST signals can contain NaN values (missing channels, partial dropouts). The pi
   - `accept_nan_inputs_actuators` (default `True`): partial-NaN input/actuator signals pass through with NaN intact for downstream zero-fill imputation.
   - `accept_nan_outputs` (default `True`): partial-NaN output signals pass through. Set to `False` in finetune/pretrain configs to drop windows with partial-NaN outputs from training, preventing corrupted targets from entering the loss.
   - In all cases, entirely-NaN or empty signals are always masked as invalid regardless of these flags.
-- **At encoding**: `EmbedChunksTransform` applies local zero-fill imputation immediately before `codec.encode()`. Zero equals the signal mean in standardized space, making this the least-biased imputation. For output signals (in eval, where `accept_nan_outputs=True`), imputation is applied to a temporary local copy only — the original NaN values in `window["output"]` are preserved for benchmark-comparable evaluation metrics.
+- **At encoding**: `EmbedChunksTransform` zero-fills NaN values on a local copy before `codec.encode()`
+  (controlled by `embeddings.impute_na`, default `true`). Original values in `window["output"]` are never
+  modified — NaN locations are preserved for eval metrics and for native-space loss targets. See
+  [Training — NaN Handling](training.md#nan-handling-in-training) for the full interaction with loss choice.
 
 ## Dataset Types
 ### Streaming window iterable

@@ -43,8 +43,13 @@ The shared entry helpers use:
 - applies per-signal codecs from `signal_specs`
 - uses codec map built by `build_codecs`
 - outputs fixed-width embedding vectors per signal/chunk
-- zero-fills NaN values on a local array copy immediately before `codec.encode()` (codecs require finite inputs)
-- for output signals: imputation is applied to a local copy only; original `window["output"][name]["values"]` is never modified, preserving NaN locations for benchmark-comparable eval metrics
+- NaN imputation is controlled by `embeddings.impute_na` (default `true`): when enabled, NaN values are
+  zero-filled on a local array copy immediately before `codec.encode()`. Zero equals the signal mean in
+  standardized space — the least-biased imputation for standardized data
+- for output signals: imputation is applied to a local copy only; original `window["output"][name]["values"]`
+  is never modified, preserving NaN locations for benchmark-comparable eval metrics
+- setting `impute_na: false` is only valid when all codecs in use can handle NaN inputs natively; a
+  `ValueError` is raised at pipeline construction if any codec has `requires_finite_input=True`
 
 ### 5) BuildTokensTransform
 - converts embedded chunks into token fields
@@ -53,7 +58,9 @@ The shared entry helpers use:
 
 ### 6) FinalizeWindowTransform
 - keeps or drops native output payload based on `keep_output_native`
-- this controls whether eval can score/trace in native units
+- `keep_output_native` is **auto-derived** by the config validator — never set manually:
+  - eval phase: always `true`
+  - train phase: `true` iff any `train.loss.terms` entry is a native-space loss (e.g. `native_sparse_mse`)
 
 
 ## Configuration Keys

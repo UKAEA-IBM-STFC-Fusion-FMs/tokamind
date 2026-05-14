@@ -1,6 +1,6 @@
 # Evaluation
 
-Related documentation: [Project README](../README.md) | [Configuration Guide](config_guide.md) | [Checkpointing and Warmstart](checkpointing_and_warmstart.md)
+Related documentation: [Project README](../README.md) | [Configuration Guide](config_guide.md) | [Training](training.md) | [Checkpointing and Warmstart](checkpointing_and_warmstart.md)
 
 Evaluation loads a trained run, runs one pass on the test split, and writes metrics/traces under an eval directory.
 
@@ -101,17 +101,17 @@ Filter behavior:
 - explicit lists: keep only selected outputs/time indexes
 
 ## Required Eval Data Setting
-Eval requires:
-```yaml
-data:
-  keep_output_native: true
-```
-
-This is needed to decode and score outputs in native space.
+`data.keep_output_native` is **auto-derived** by the config validator and does not need to be set manually.
+For eval it is always `true`. For training it is `true` only when the loss requires native-space targets
+(e.g. `native_sparse_mse`).
 
 ## Sparse Evaluation
 The TokaMark evaluator computes metrics using `nanmean`, which correctly ignores NaN values in ground truth. This enables benchmark-comparable sparse evaluation even when signals have missing timesteps or channels.
 
-For this to work correctly, the pipeline preserves NaN values in `window["output"]` through to the evaluator — they are never overwritten. The zero-fill imputation applied in `EmbedChunksTransform` operates only on a temporary local copy used for DCT encoding and does not affect the ground truth values used for scoring.
+For this to work correctly, the pipeline preserves NaN values in `window["output"]` through to the evaluator — they are never overwritten. The zero-fill imputation applied in `EmbedChunksTransform` operates only on a temporary local copy used for encoding and does not affect the ground truth values used for scoring.
 
 During training, `accept_nan_outputs=False` in `SelectValidWindowsTransform` ensures windows with partial-NaN outputs are dropped before reaching the loss. During eval, `accept_nan_outputs=True` allows those windows through so the evaluator can score on the non-NaN positions using `nanmean`.
+
+## Loss Choice and NaN Behavior
+
+See [Training — Loss Configuration](training.md#loss-configuration) and [Training — NaN Handling](training.md#nan-handling-in-training) for the full description of how loss choice interacts with NaN positions in output signals.

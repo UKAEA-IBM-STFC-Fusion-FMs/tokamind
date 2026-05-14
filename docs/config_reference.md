@@ -50,8 +50,10 @@ This page documents active configuration keys used by the entry scripts.
 
 ### `data.keep_output_native`
 - Type: `bool`
-- Description: keeps native output payload for metrics/traces.
-- Requirement: should be `true` for eval.
+- **Auto-derived** — do not set manually. The config validator computes this from `phase` and `train.loss.terms`:
+  - eval phase: always `true`
+  - train phase: `true` iff any loss term is a native-space loss (e.g. `native_sparse_mse`)
+- Controls whether `FinalizeWindowTransform` retains native output arrays in the window dict for metrics/traces.
 
 ### `data.cache.enable`
 - Type: `bool`
@@ -118,6 +120,15 @@ embeddings:
         encoder_name: dct3d
         encoder_kwargs: { keep_h: 1, keep_w: 1, keep_t: 10 }
 ```
+
+### `embeddings.impute_na`
+- Type: `bool`
+- Default: `true`
+- Description: controls NaN imputation in `EmbedChunksTransform` before `codec.encode()`.
+  - `true` (default): NaN values are zero-filled on a local copy before encoding. Zero equals the signal mean
+    in standardized space — the least-biased imputation. Output signal native values are never modified.
+  - `false`: no imputation. Only valid when all codecs can handle NaN inputs natively. An error is raised at
+    pipeline construction if any codec has `requires_finite_input=True` (all current codecs do).
 
 ### `embeddings.per_signal_overrides`
 - Type: mapping
@@ -339,9 +350,34 @@ Top-level location: `train:`
 - Type: `bool`
 - Description: toggles autocast mixed precision.
 
+### `train.loss.terms`
+- Type: `list[{type, weight}]`
+- Default: `[{type: embed_mse, weight: 1.0}]` (applied when `terms` is absent)
+- Description: list of loss terms combined as a normalized weighted sum.
+
+Supported term types:
+
+| Type | Description |
+|---|---|
+| `embed_mse` | MSE in embedding (coefficient) space. No decoding required. With `impute_na: true`, NaN positions are zero-filled before encoding; the loss trains against the embedding of the zero-imputed signal with no explicit NaN awareness. |
+| `native_sparse_mse` | MSE in native standardized space. Decodes predictions back to native space, then explicitly masks out NaN positions from `output_native` before computing the mean. Only observed positions contribute. Requires decoders to be built at startup. |
+
+Example:
+```yaml
+train:
+  loss:
+    terms:
+      - type: embed_mse
+        weight: 1.0
+      - type: native_sparse_mse
+        weight: 0.5
+```
+
+Multiple terms are combined as a normalized weighted sum: `total = sum(w_i * L_i) / sum(w_i)`.
+
 ### `train.loss.output_weights`
 - Type: mapping
-- Description: per-output loss weighting.
+- Description: per-output loss weighting (applied inside each term independently).
 
 ### `train.optimizer.use_adamw`
 - Type: `bool`
