@@ -269,7 +269,7 @@ def resolve_pretrain_embeddings(
 
     """
 
-    cfg_tune_emb = cfg_mmt.embeddings.get("tune_embeddings", {})
+    cfg_tune_emb = cfg_mmt.embeddings.get("tune_embeddings") or {}
     roles_cfg = cfg_tune_emb.get("roles", {})
     roles_to_tune = [r for r in ("input", "actuator", "output") if roles_cfg.get(r, True)]
 
@@ -490,7 +490,7 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
     """
 
     cfg_emb = cfg_mmt.embeddings
-    cfg_tune_emb = cfg_emb.get("tune_embeddings", {})
+    cfg_tune_emb = cfg_emb.get("tune_embeddings") or {}
     roles_cfg = cfg_tune_emb.get("roles", {})
     emb_mode = cfg_emb.get("mode", "source")
 
