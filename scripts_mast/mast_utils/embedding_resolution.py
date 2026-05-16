@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from copy import deepcopy
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,62 @@ from .tune_dct3d import (
 # ----------------------------------------------------------------------------------------------------------------------
 
 logger = logging.getLogger("mmt.EmbeddingResolution")
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _merge_embedding_overrides(embeddings_cfg: dict[str, Any], overrides: Mapping[str, Any]) -> None:
+    """
+    Merge ``per_signal_overrides`` from ``overrides`` into ``embeddings_cfg`` in place.
+
+    For each role present in ``overrides``, the corresponding role dict inside
+    ``embeddings_cfg["per_signal_overrides"]`` is updated with the incoming signal entries. Existing entries for
+    signals not present in ``overrides`` are left unchanged.
+
+    Parameters
+    ----------
+    embeddings_cfg : dict[str, Any]
+        The ``embeddings`` sub-dict that is mutated in place (i.e. ``cfg_mmt.raw["embeddings"]``).
+    overrides : Mapping[str, Any]
+        ``per_signal_overrides`` to merge, keyed by role then signal name.
+
+    """
+
+    embeddings_cfg.setdefault("per_signal_overrides", {})
+    per_signal = embeddings_cfg["per_signal_overrides"]
+
+    for role, sigs in overrides.items():
+        if not isinstance(sigs, Mapping):
+            continue
+        per_signal.setdefault(role, {})
+        per_signal[role].update(sigs)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _profile_embedding_overrides(embeddings_cfg: Mapping[str, Any]) -> dict[str, Any]:
+    """
+    Return a deep copy of the explicit ``per_signal_overrides`` present in the profile YAML.
+
+    Must be called before any DCT3D artifacts are merged into ``embeddings_cfg``, so that the snapshot reflects only
+    the user-authored config choices. The copy is re-applied after all artifact merges via
+    :func:`_merge_embedding_overrides`, ensuring that explicit profile overrides always win over computed defaults.
+
+    Parameters
+    ----------
+    embeddings_cfg : Mapping[str, Any]
+        The ``embeddings`` sub-dict from the resolved experiment config (i.e. ``cfg_mmt.raw["embeddings"]``).
+
+    Returns
+    -------
+    dict[str, Any]
+        Deep copy of ``embeddings_cfg["per_signal_overrides"]``, or an empty dict if the key is absent or not a
+        mapping.
+
+    """
+
+    per_signal = embeddings_cfg.get("per_signal_overrides", {})
+    if not isinstance(per_signal, dict):
+        return {}
+    return deepcopy(per_signal)
 
 
 # ======================================================================================================================
@@ -437,6 +494,8 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
     roles_cfg = cfg_tune_emb.get("roles", {})
     emb_mode = cfg_emb.get("mode", "source")
 
+    original_profile_overrides = _profile_embedding_overrides(cfg_mmt.raw["embeddings"])
+
     # Validate mode
     if emb_mode not in ["source", "config"]:
         raise ValueError(f"embeddings.mode must be 'source' or 'config', got '{emb_mode}'")
@@ -505,10 +564,7 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
 
             # Step 3: Merge inherited overrides into config
             if per_signal_overrides:
-                cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
-                for role, sigs in per_signal_overrides.items():
-                    cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
-                    cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
+                _merge_embedding_overrides(cfg_mmt.raw["embeddings"], per_signal_overrides)
         elif roles_to_inherit:
             logger.info(
                 "Embeddings mode=source without source model: inherited roles %s will use current config defaults.",
@@ -533,19 +589,19 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
                 run_dir=run_dir,
                 roles=roles_to_tune,
             )
-            cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
-            for role, sigs in new_overrides.items():
-                cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
-                cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
+            _merge_embedding_overrides(cfg_mmt.raw["embeddings"], new_overrides)
 
-        # Step 5: Save config snapshot to capture final per_signal_overrides
+        # Step 5: Re-apply explicit profile overrides last so user/config choices win over computed artifacts.
+        _merge_embedding_overrides(cfg_mmt.raw["embeddings"], original_profile_overrides)
+
+        # Step 6: Save config snapshot to capture final per_signal_overrides
         save_config_snapshot(cfg_mmt=cfg_mmt, run_dir=run_dir, logger_inst=logger)
 
     else:  # -> I.e., emb_mode is "config"
         logger.info("")
         logger.info("Embeddings mode=config: using emb_profile config directly (no source artifacts)")
 
-    # Step 6: (Re)build signal_specs with final config
+    # Step 7: (Re)build signal_specs with final config
     logger.info("")
     signal_specs = build_signal_specs(
         embeddings_cfg=cfg_mmt.embeddings,
@@ -554,7 +610,7 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
         chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
     )
 
-    # Step 7: Build codecs — indices live in run_dir/embeddings/
+    # Step 8: Build codecs — indices live in run_dir/embeddings/
     embeddings_dir = run_dir / "embeddings"
     codecs = build_codecs(signal_specs=signal_specs, config_dir=embeddings_dir)
 
@@ -591,6 +647,8 @@ def resolve_eval_embeddings(
 
     """
 
+    original_profile_overrides = _profile_embedding_overrides(cfg_mmt.raw["embeddings"])
+
     # Load per-signal rank-mode overrides from training run
     per_signal_overrides = load_embeddings_overrides(train_run_dir)
 
@@ -601,12 +659,10 @@ def resolve_eval_embeddings(
             train_run_dir / "embeddings",
         )
 
-    # Merge overrides into config
+    # Merge computed artifacts first, then re-apply explicit profile overrides so config choices win.
     if per_signal_overrides:
-        cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
-        for role, sigs in per_signal_overrides.items():
-            cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
-            cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
+        _merge_embedding_overrides(cfg_mmt.raw["embeddings"], per_signal_overrides)
+    _merge_embedding_overrides(cfg_mmt.raw["embeddings"], original_profile_overrides)
 
     # Build signal_specs with loaded config
     logger.info("")
