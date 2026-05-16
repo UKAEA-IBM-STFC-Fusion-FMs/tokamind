@@ -8,7 +8,6 @@ multi-dimensional time-dependent signals, together with its differentiable torch
 The module provides:
     • ``DCT3DCodec``          — numpy encoder (offline use: embedding generation, index tuning)
     • ``DCT3DTorchDecoder``   — differentiable nn.Module decoder (training losses + eval)
-    • ``_build_dct3d_basis``  — precomputes the (D, N) IDCT basis matrix from a codec instance
 
 Encoder design
 --------------
@@ -22,15 +21,10 @@ Encoder design
 
 Decoder design
 --------------
-The inverse DCT is a linear operation: z → IDCT(scatter(z)) = z @ basis, where basis is
-the (D, N) matrix of IDCT basis vectors. This matrix is:
-
-    • Precomputed once at ``DCT3DTorchDecoder`` construction time using the existing
-      numpy DCT helpers, so the torch decoder is always numerically consistent with
-      the offline encoder.
-    • Stored as a ``register_buffer`` with ``persistent=False``: it moves to device
-      with the module but is never written to checkpoints and is recomputed from the
-      codec (and its ``coeff_indices`` loaded from ``runs/<run_id>/embeddings/``) each run.
+The torch decoder mirrors the numpy codec: it scatters the predicted coefficients into
+the full DCT tensor, then applies an orthonormal inverse DCT along the three native
+axes using ``torch.fft``. This avoids materialising a huge dense ``(D, N)`` IDCT basis
+matrix while preserving gradients for native-space losses.
 
 Usage
 -----
@@ -52,6 +46,8 @@ import numpy as np
 import torch
 from scipy.fftpack import dct, idct
 from torch import Tensor
+
+import torch.nn.functional as F
 
 from .torch_decoder import TorchDecoder
 
@@ -121,76 +117,78 @@ def _to_3d_view(x: np.ndarray) -> tuple[np.ndarray, tuple[int, ...]]:
 
 
 # ======================================================================================================================
-# Basis matrix computation
+# Torch inverse DCT helpers
 # ======================================================================================================================
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _build_dct3d_basis(codec: DCT3DCodec, original_shape: tuple[int, ...]) -> np.ndarray:
-    """
-    Precompute the (D, N) IDCT basis matrix for a given codec and native signal shape.
-
-    Each row ``basis[i]`` is the native-space signal produced by placing a single unit
-    coefficient at position ``i`` in the coefficient vector and applying the inverse DCT.
-    The decode operation then reduces to a single matmul: ``x_flat = z @ basis``.
-
-    Parameters
-    ----------
-    codec : DCT3DCodec
-        Fully initialised encoder instance. Its ``selection_mode``, ``coeff_indices``
-        (rank mode), and ``keep_h/w/t`` (spatial mode) determine which rows to build.
-    original_shape : tuple[int, ...]
-        Native signal shape (without batch dimension), e.g. ``(T,)``, ``(C, T)``,
-        ``(H, W, T)``. Must be consistent with the shape used during offline encoding.
-
-    Returns
-    -------
-    np.ndarray
-        Basis matrix of shape (D, N) and dtype float32, where
-        D = number of coefficients and N = product of original_shape.
-
-    Raises
-    ------
-    ValueError
-        If ``len(original_shape)`` is not in [1, 2, 3].
-
-    """
+def _shape_to_3d(original_shape: tuple[int, ...]) -> tuple[int, int, int]:
+    """Return the canonical ``(H, W, T)`` view for a native signal shape."""
 
     if len(original_shape) == 1:
-        H_full, W_full, T_full = 1, 1, original_shape[0]
-    elif len(original_shape) == 2:
-        H_full, W_full, T_full = original_shape[0], 1, original_shape[1]
-    elif len(original_shape) == 3:
-        H_full, W_full, T_full = original_shape
-    else:
-        raise ValueError(f"Unsupported original_shape={original_shape!r}: expected 1D, 2D, or 3D native shape.")
+        return 1, 1, int(original_shape[0])
+    if len(original_shape) == 2:
+        return int(original_shape[0]), 1, int(original_shape[1])
+    if len(original_shape) == 3:
+        return int(original_shape[0]), int(original_shape[1]), int(original_shape[2])
+    raise ValueError(f"Unsupported original_shape={original_shape!r}: expected 1D, 2D, or 3D native shape.")
 
-    N = H_full * W_full * T_full
 
-    if codec.selection_mode == "rank":
-        D = len(codec.coeff_indices)  # type: ignore[arg-type]
-        basis = np.zeros((D, N), dtype=np.float32)
-        for i, flat_idx in enumerate(codec.coeff_indices):  # type: ignore[union-attr]
-            X_full = np.zeros((H_full, W_full, T_full), dtype=np.float32)
-            X_full.reshape(-1)[flat_idx] = 1.0
-            basis[i] = _idct3(X_full).reshape(-1)
+# ----------------------------------------------------------------------------------------------------------------------
+def _torch_idct_ortho_last(x: Tensor) -> Tensor:
+    """Inverse DCT-II with ``norm='ortho'`` along the last dimension, matching ``scipy.fftpack.idct``."""
 
-    else:  # spatial
-        h_eff = min(codec.keep_h, H_full)
-        w_eff = min(codec.keep_w, W_full)
-        t_eff = min(codec.keep_t, T_full)
-        D = h_eff * w_eff * t_eff
-        basis = np.zeros((D, N), dtype=np.float32)
-        idx = 0
-        for hi in range(h_eff):
-            for wi in range(w_eff):
-                for ti in range(t_eff):
-                    X_full = np.zeros((H_full, W_full, T_full), dtype=np.float32)
-                    X_full[hi, wi, ti] = 1.0
-                    basis[idx] = _idct3(X_full).reshape(-1)
-                    idx += 1
+    original_shape = x.shape
+    n = int(original_shape[-1])
+    if n == 1:
+        return x.clone()
 
-    return basis
+    original_dtype = x.dtype
+    x_work = x.contiguous().reshape(-1, n)
+    if x_work.dtype not in (torch.float32, torch.float64):
+        x_work = x_work.float()
+
+    x_v = (x_work / 2.0).clone()
+    x_v[:, 0] *= (n**0.5) * 2.0
+    x_v[:, 1:] *= ((n / 2.0) ** 0.5) * 2.0
+
+    # irfft only reads the first m = n//2+1 complex values; build only those.
+    m = n // 2 + 1
+    k = torch.arange(m, dtype=x_v.dtype, device=x_v.device).reshape(1, m) * np.pi / (2.0 * n)
+    w_r = torch.cos(k)
+    w_i = torch.sin(k)
+
+    v_t_r = x_v[:, :m]
+    v_t_i = torch.cat([x_v[:, :1].new_zeros((x_v.shape[0], 1)), -x_v.flip(dims=[1])[:, : m - 1]], dim=1)
+    v_r = v_t_r * w_r - v_t_i * w_i
+    v_i = v_t_r * w_i + v_t_i * w_r
+
+    v = torch.fft.irfft(torch.complex(v_r, v_i), n=n, dim=1)
+    out = v.new_empty(v.shape)
+    out[:, ::2] = v[:, : n - (n // 2)]
+    out[:, 1::2] = v.flip(dims=[1])[:, : n // 2]
+
+    return out.reshape(original_shape).to(dtype=original_dtype)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _torch_idct_ortho_dim(x: Tensor, dim: int) -> Tensor:
+    """Inverse DCT-II with ``norm='ortho'`` along an arbitrary dimension."""
+
+    dim = dim % x.ndim
+    if dim == x.ndim - 1:
+        return _torch_idct_ortho_last(x)
+    return _torch_idct_ortho_last(torch.movedim(x, dim, -1)).movedim(-1, dim)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _torch_idct3(x: Tensor) -> Tensor:
+    """3D inverse DCT-II with ``norm='ortho'`` over the last three axes."""
+
+    y = _torch_idct_ortho_dim(x, dim=-1)
+    y = _torch_idct_ortho_dim(y, dim=-2)
+    y = _torch_idct_ortho_dim(y, dim=-3)
+    return y
 
 
 # ======================================================================================================================
@@ -368,21 +366,15 @@ class DCT3DTorchDecoder(TorchDecoder):
     """
     Differentiable DCT3D decoder for training losses and eval.
 
-    The inverse DCT is a linear operation, so the full decode is expressed as a single
-    matrix multiplication: ``x_flat = z @ basis``, where ``basis`` is the (D, N) matrix
-    of IDCT basis vectors precomputed from the codec.
-
-    The basis is stored as a ``register_buffer`` with ``persistent=False``:
-
-      - Moves to the correct device/dtype with the module.
-      - Never saved to checkpoints — recomputed from the codec at construction time.
-      - The codec carries the ``coeff_indices`` loaded from ``runs/<run_id>/embeddings/``,
-        so the decoder is always numerically consistent with the offline encoder.
+    The decoder mirrors :meth:`DCT3DCodec.decode` in torch: predicted coefficients are scattered into a full DCT
+    tensor and decoded with separable orthonormal inverse DCT operations. This avoids the previous dense ``(D, N)``
+    basis matrix, which is prohibitively expensive for large sparse/ranked outputs such as ``(18, 1, 5000)``.
 
     Parameters
     ----------
     codec : DCT3DCodec
-        Fully initialised encoder instance (used only at construction to build the basis).
+        Fully initialised encoder instance. Its ``selection_mode``, ``coeff_indices`` and ``keep_h/w/t`` determine how
+        the coefficient vector is scattered back into DCT space.
     original_shape : tuple[int, ...]
         Native signal shape (without batch dimension), e.g. ``(T,)``, ``(C, T)``,
         ``(H, W, T)``. Must be consistent with the shape used during offline encoding.
@@ -393,9 +385,27 @@ class DCT3DTorchDecoder(TorchDecoder):
     def __init__(self, codec: DCT3DCodec, original_shape: tuple[int, ...]) -> None:
         super().__init__()
         self._native_shape: tuple[int, ...] = tuple(original_shape)
-        basis = _build_dct3d_basis(codec=codec, original_shape=original_shape)
-        # persistent=False: recomputed from codec at init, never written to checkpoints
-        self.register_buffer("basis", torch.from_numpy(basis), persistent=False)
+        self._full_shape: tuple[int, int, int] = _shape_to_3d(self._native_shape)
+        self._selection_mode = codec.selection_mode
+
+        h_full, w_full, t_full = self._full_shape
+
+        if codec.selection_mode == "rank":
+            if codec.coeff_shape is not None and tuple(codec.coeff_shape) != self._full_shape:
+                raise ValueError(
+                    f"Shape mismatch: expected coeff_shape={codec.coeff_shape}, got {self._full_shape} from "
+                    f"original_shape={original_shape!r}."
+                )
+            coeff_indices = torch.as_tensor(np.asarray(codec.coeff_indices, dtype=np.int64), dtype=torch.long)
+            self.register_buffer("coeff_indices", coeff_indices, persistent=False)
+            self._encoded_dim = int(coeff_indices.numel())
+            self._spatial_shape: tuple[int, int, int] | None = None
+        else:
+            h_eff = min(int(codec.keep_h), h_full)
+            w_eff = min(int(codec.keep_w), w_full)
+            t_eff = min(int(codec.keep_t), t_full)
+            self._spatial_shape = (h_eff, w_eff, t_eff)
+            self._encoded_dim = h_eff * w_eff * t_eff
 
     # ------------------------------------------------------------------------------------------------------------------
     def forward(self, z: Tensor) -> Tensor:
@@ -405,15 +415,37 @@ class DCT3DTorchDecoder(TorchDecoder):
         Parameters
         ----------
         z : Tensor
-            Coefficient vectors of shape (B, D).
+            Coefficient vectors of shape ``(B, D)``.
 
         Returns
         -------
         Tensor
-            Native standardized output of shape (B, *native_shape).
+            Native standardized output of shape ``(B, *native_shape)``.
             Gradients are preserved with respect to ``z``.
 
         """
 
-        x_flat = z.float() @ self.basis  # (B, N)
-        return x_flat.view(z.shape[0], *self._native_shape)
+        if z.ndim != 2:
+            raise ValueError(f"Expected z of shape (B, D), got {tuple(z.shape)}.")
+        if int(z.shape[1]) != self._encoded_dim:
+            raise ValueError(f"Expected z.shape[1]={self._encoded_dim}, got {int(z.shape[1])}.")
+
+        z = z.float()
+        batch_size = int(z.shape[0])
+        h_full, w_full, t_full = self._full_shape
+
+        if self._selection_mode == "rank":
+            x_flat = z.new_zeros((batch_size, h_full * w_full * t_full))
+            x_flat.scatter_(dim=1, index=self.coeff_indices.view(1, -1).expand(batch_size, -1), src=z)  # type: ignore[attr-defined]
+            x_full = x_flat.view(batch_size, h_full, w_full, t_full)
+        else:
+            if self._spatial_shape is None:
+                raise RuntimeError("Spatial DCT decoder is missing _spatial_shape.")
+            h_eff, w_eff, t_eff = self._spatial_shape
+            x_full = F.pad(
+                z.view(batch_size, h_eff, w_eff, t_eff),
+                (0, t_full - t_eff, 0, w_full - w_eff, 0, h_full - h_eff),
+            )
+
+        x_native = _torch_idct3(x_full)
+        return x_native.view(batch_size, *self._native_shape)

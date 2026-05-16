@@ -446,7 +446,7 @@ def build_torch_decoder(
     Build a differentiable :class:`~mmt.data.embeddings.base.TorchDecoder` for the given codec.
 
     The decoder is an ``nn.Module`` — call ``.to(device)`` on it (or on a parent module that
-    contains it) to move any registered buffers (e.g., the DCT3D basis matrix) to the correct
+    contains it) to move any registered buffers (e.g., DCT3D scatter indices) to the correct
     device before training.
 
     Parameters

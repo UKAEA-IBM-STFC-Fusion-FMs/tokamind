@@ -34,7 +34,7 @@ class NativeSparseMSELoss(BaseLoss):
     valid (non-NaN) positions within each supervised sample, consistent with the TokaMark sparse evaluation.
 
     Gradients flow through the decoders into the model predictions. Decoder parameters (e.g. frozen VAE weights,
-    precomputed DCT basis) are kept fixed.
+    fixed scatter indices) are kept fixed.
 
     Parameters
     ----------
