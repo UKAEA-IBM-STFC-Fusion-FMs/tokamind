@@ -8,6 +8,6 @@
 #   - per-signal collate drop rates or masking policies
 #   - preprocess settings specific to this task
 
-preprocess:
-  valid_windows:
-    accept_nan_outputs: false  # LCFS contours have structural all-or-nothing NaN; zero-imputation corrupts training targets
+# preprocess:
+#   valid_windows:
+#     accept_nan_outputs: false  # LCFS contours have structural all-or-nothing NaN; zero-imputation corrupts training targets
