@@ -285,6 +285,8 @@ def _build_signal_specs(cfg: Mapping[str, Any]) -> SignalSpecRegistry:
                 encoder_kwargs={},
                 signal_id=sid,
                 embedding_dim=D,
+                values_shape=(),
+                native_shape=(1, 1, D),
             )
         )
         sid += 1
@@ -299,6 +301,8 @@ def _build_signal_specs(cfg: Mapping[str, Any]) -> SignalSpecRegistry:
                 encoder_kwargs={},
                 signal_id=sid,
                 embedding_dim=D,
+                values_shape=(),
+                native_shape=(1, 1, D),
             )
         )
         sid += 1
@@ -313,6 +317,8 @@ def _build_signal_specs(cfg: Mapping[str, Any]) -> SignalSpecRegistry:
                 encoder_kwargs={},
                 signal_id=sid,
                 embedding_dim=D,
+                values_shape=(),
+                native_shape=(1, 1, D),
             )
         )
         sid += 1
