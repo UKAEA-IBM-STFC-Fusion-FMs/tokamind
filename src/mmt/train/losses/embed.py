@@ -91,23 +91,22 @@ class EmbedMSELoss(BaseLoss):
             if (out_key not in y_emb) or (out_key not in output_mask):
                 continue
 
-            y_t = y_emb[out_key]
             mask = output_mask[out_key]
-
-            if y_pred.shape != y_t.shape:
-                raise RuntimeError(
-                    f"[{out_key!r}] pred/label shape mismatch: {tuple(y_pred.shape)} vs {tuple(y_t.shape)}."
-                )
-
             if mask.dtype != torch.bool:
                 raise RuntimeError(f"[{out_key!r}] output_mask must be bool tensor, got {mask.dtype}.")
 
             if not bool(mask.any()):
                 continue
 
+            y_t = y_emb[out_key]
+            if y_pred.shape != y_t.shape:
+                raise RuntimeError(
+                    f"[{out_key!r}] pred/label shape mismatch: {tuple(y_pred.shape)} vs {tuple(y_t.shape)}."
+                )
+
             y_pred_f = y_pred.to(torch.float32)
             y_t_f = y_t.to(torch.float32)
-            L_o = (y_pred_f - y_t_f).square().mean(dim=1)[mask].mean()  # NOSONAR
+            L_o = (y_pred_f - y_t_f).square().mean(dim=1)[mask].mean()  # NOSONAR - Ignore lowercase warning
 
             w_o = float(self._output_weights.get(out_key, 1.0))
             per_out_losses.append(L_o)
