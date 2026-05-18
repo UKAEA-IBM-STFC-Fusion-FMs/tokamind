@@ -335,8 +335,12 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
             if role_meta is None:
                 raise KeyError(f"`dict_metadata` missing role={role!r}")
             meta = role_meta.get(name)
+            if meta is None:
+                raise KeyError(f"`dict_metadata[{role!r}]` missing signal {name!r}.")
+            if "values_shape" not in meta:
+                raise KeyError(f"`dict_metadata[{role!r}][{name!r}]` missing required key 'values_shape'.")
 
-            values_shape = tuple(meta.get("values_shape", ()))
+            values_shape = tuple(meta["values_shape"])
             dt = float(meta.get("dt"))
 
             # ..........................................................................................................

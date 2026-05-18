@@ -120,8 +120,10 @@ def build_signals_by_role_from_task_definition(
             meta = role_meta.get(name)
             if meta is None:
                 raise KeyError(f"Signal {name!r} missing from `dict_metadata['{role}']`.")
+            if "values_shape" not in meta:
+                raise KeyError(f"`dict_metadata[{role!r}][{name!r}]` missing required key 'values_shape'.")
 
-            values_shape = meta.get("values_shape", ())
+            values_shape = meta["values_shape"]
             modality = infer_modality(values_shape=tuple(values_shape))
             role_map[name] = modality
 
