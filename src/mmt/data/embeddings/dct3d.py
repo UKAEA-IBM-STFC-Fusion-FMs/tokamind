@@ -14,17 +14,15 @@ Encoder design
     • **Orthonormal transform** (energy-preserving)
       MSE in coefficient space equals MSE in native space, up to a (K/N) scale factor.
     • **Fixed-size latent representation**
-      Truncation to (keep_h, keep_w, keep_t) or ranked coefficient selection produces a
-      stable embedding dimension.
+      Truncation to (keep_h, keep_w, keep_t) or ranked coefficient selection produces a stable embedding dimension.
     • **Shape-robust interface**
       Inputs of shape (T,), (C, T), or (H, W, T) are all handled internally.
 
 Decoder design
 --------------
-The torch decoder mirrors the numpy codec: it scatters the predicted coefficients into
-the full DCT tensor, then applies an orthonormal inverse DCT along the three native
-axes using ``torch.fft``. This avoids materialising a huge dense ``(D, N)`` IDCT basis
-matrix while preserving gradients for native-space losses.
+The torch decoder mirrors the numpy codec: it scatters the predicted coefficients into the full DCT tensor, then
+applies an orthonormal inverse DCT along the three native axes using ``torch.fft``. This avoids materializing a huge
+dense ``(D, N)`` IDCT basis matrix while preserving gradients for native-space losses.
 
 Usage
 -----
@@ -207,15 +205,15 @@ class DCT3DCodec:
       - profile:    (C, T)
       - video/map:  (H, W, T)
 
-    Internally, all inputs are viewed as (H, W, T), a 3D DCT is applied, and coefficients are
-    selected using one of two modes:
+    Internally, all inputs are viewed as (H, W, T), a 3D DCT is applied, and coefficients are selected using one of two
+    modes:
 
     **Spatial mode** (default):
       Keeps the top-left-front (keep_h, keep_w, keep_t) block of DCT coefficients.
 
     **Rank mode**:
-      Keeps the top-K coefficients by explained variance (energy), regardless of spatial
-      position. Requires ``coeff_indices``.
+      Keeps the top-K coefficients by explained variance (energy), regardless of spatial position.
+      Requires ``coeff_indices``.
 
     Parameters
     ----------
@@ -234,8 +232,8 @@ class DCT3DCodec:
     coeff_shape : tuple[int, int, int] | None
         Expected (H, W, T) shape for validation in rank mode (optional).
     requires_finite_input : bool
-        Whether the codec requires finite (non-NaN) inputs. Always ``True`` for DCT3D: the
-        DCT transform is undefined for NaN values.
+        Whether the codec requires finite (non-NaN) inputs. Always ``True`` for DCT3D: the DCT transform is undefined
+        for NaN values.
 
     Notes
     -----
@@ -373,7 +371,7 @@ class DCT3DTorchDecoder(TorchDecoder):
     Parameters
     ----------
     codec : DCT3DCodec
-        Fully initialised encoder instance. Its ``selection_mode``, ``coeff_indices`` and ``keep_h/w/t`` determine how
+        Fully initialized encoder instance. Its ``selection_mode``, ``coeff_indices`` and ``keep_h/w/t`` determine how
         the coefficient vector is scattered back into DCT space.
     original_shape : tuple[int, ...]
         Native signal shape (without batch dimension), e.g. ``(T,)``, ``(C, T)``,
@@ -420,8 +418,7 @@ class DCT3DTorchDecoder(TorchDecoder):
         Returns
         -------
         Tensor
-            Native standardized output of shape ``(B, *native_shape)``.
-            Gradients are preserved with respect to ``z``.
+            Native standardized output of shape ``(B, *native_shape)``. Gradients are preserved with respect to ``z``.
 
         """
 

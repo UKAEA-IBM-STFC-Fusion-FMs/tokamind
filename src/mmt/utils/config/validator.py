@@ -80,7 +80,7 @@ def _get_nested(cfg: Mapping[str, Any], path: str) -> Any:
 
 # ----------------------------------------------------------------------------------------------------------------------
 def _ensure_dict(cfg: Mapping[str, Any], path: str) -> dict[str, Any]:
-    """Ensure a nested value exists and is a dict, raising TypeError if `path`does not lead to a dictionary."""
+    """Ensure a nested value exists and is a dict, raising TypeError if `path` does not lead to a dictionary."""
 
     val = _get_nested(cfg=cfg, path=path)
     if not isinstance(val, dict):

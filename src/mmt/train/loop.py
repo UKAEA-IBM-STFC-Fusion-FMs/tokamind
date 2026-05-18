@@ -21,7 +21,7 @@ IMPORTANT:
     No config validation is performed here.
 
 -------------------------------------------------------------------------------
-DATASET: CACHED AND STREAMED BEHAVIOUR
+DATASET: CACHED AND STREAMED BEHAVIOR
 -------------------------------------------------------------------------------
 
 MMT supports two dataset regimes:
@@ -108,10 +108,10 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     loader_cfg : Mapping[str, Any]
         The validated loader configuration.
     output_decoders : dict[int, TorchDecoder] | None
-        Pre-built TorchDecoder instances keyed by signal_id, required when any loss
-        term in ``train_cfg["loss"]["terms"]`` has ``requires_decode=True`` (e.g.
-        ``native_sparse_mse``).  Pass the result of ``build_decoders()`` from
-        ``codec_utils``.  Optional, defaults to None.
+        Pre-built TorchDecoder instances keyed by signal_id, required when any loss term in
+        ``train_cfg["loss"]["terms"]`` has ``requires_decode=True`` (e.g., ``native_sparse_mse``). Pass the result of
+        ``build_decoders()`` from ``codec_utils``.
+         Optional. Default: None.
 
     Returns
     -------
@@ -436,10 +436,10 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 def _fmt_term_pcts(d: dict) -> str:
                     w_sum = sum(d.values())
                     parts = []
-                    for k, v in sorted(d.items()):
-                        name = re.sub(r"_\d+/weighted$", "", k)
-                        pct = 100.0 * v / w_sum if w_sum > 0.0 else 0.0
-                        parts.append(f"{name}={pct:.0f}%")
+                    for k_, v_ in sorted(d.items()):
+                        name_ = re.sub(r"_\d+/weighted$", "", k_)
+                        pct = 100.0 * v_ / w_sum if w_sum > 0.0 else 0.0
+                        parts.append(f"{name_}={pct:.0f}%")
                     return "  ".join(parts)
 
                 logger.info("  terms train: %s", _fmt_term_pcts(train_term_logs))

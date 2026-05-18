@@ -34,8 +34,8 @@ class LossAggregator:
     """
     Combine multiple loss terms into a single weighted scalar.
 
-    Each term is weighted by its own term-level weight before aggregation. Per-output weights (if any) are
-    handled inside each term.
+    Each term is weighted by its own term-level weight before aggregation. Per-output weights (if any) are handled
+    inside each term.
 
     Parameters
     ----------
@@ -71,8 +71,8 @@ class LossAggregator:
         preds:
             Model predictions in embedding space, keyed by signal_id. Shape: ``(B, D)`` per key.
         batch:
-            Collated batch dict. Expected keys: ``output_emb``, ``output_mask``, and optionally
-            ``output_native`` (when any term has ``requires_native_target=True``).
+            Collated batch dict. Expected keys: ``output_emb``, ``output_mask``, and optionally ``output_native`` (when
+            any term has ``requires_native_target=True``).
 
         Returns
         -------
@@ -81,9 +81,9 @@ class LossAggregator:
 
         """
 
-        y_emb: Mapping[Hashable, Tensor] = batch.get("output_emb", {})
-        output_mask: Mapping[Hashable, Tensor] = batch.get("output_mask", {})
-        y_native: Mapping[Hashable, Tensor] | None = batch.get("output_native", None)
+        y_emb: dict[Hashable, Tensor] = batch.get("output_emb", {})
+        output_mask: dict[Hashable, Tensor] = batch.get("output_mask", {})
+        y_native: dict[Hashable, Tensor] | None = batch.get("output_native", None)
 
         if not preds:
             return torch.tensor(0.0, dtype=torch.float32), {}
@@ -106,7 +106,7 @@ class LossAggregator:
             )
 
             term_name = type(term).__name__
-            key_prefix = f"{term_name}_{i}" if n_terms > 1 else term_name
+            key_prefix = f"{term_name}_{i}" if (n_terms > 1) else term_name
 
             raw = float(term_loss.detach().cpu())
             # Weighted contribution: w_i * L_i / Σw_j — gradient share after term weights.
@@ -118,7 +118,7 @@ class LossAggregator:
 
         stacked = torch.stack(term_losses)
         weights_t = torch.tensor([w for _, w in self._terms], device=device, dtype=torch.float32)
-        total = (stacked * weights_t).sum() / w_sum if w_sum > 0.0 else stacked.mean()
+        total = (stacked * weights_t).sum() / w_sum if (w_sum > 0.0) else stacked.mean()
 
         logs["total"] = float(total.detach().cpu())
 
@@ -170,7 +170,9 @@ def build_loss_aggregator(
         term_weight = float(term_def.get("weight", 1.0))
 
         if term_type == "embed_mse":
-            built.append((EmbedMSELoss(output_weights=ow if ow else None), term_weight))
+            built.append(
+                (EmbedMSELoss(output_weights=ow if ow else None), term_weight)
+            )
 
         elif term_type == "native_sparse_mse":
             if not decoders:
@@ -178,7 +180,9 @@ def build_loss_aggregator(
                     "Loss term 'native_sparse_mse' requires decoders to be provided, but got None or empty dict. "
                     "Build and pass a dict[signal_id, TorchDecoder] when using this term."
                 )
-            built.append((NativeSparseMSELoss(decoders=decoders, output_weights=ow if ow else None), term_weight))
+            built.append(
+                (NativeSparseMSELoss(decoders=decoders, output_weights=ow if ow else None), term_weight)
+            )
 
         else:
             raise ValueError(f"Unknown loss term type '{term_type}'. Supported: 'embed_mse', 'native_sparse_mse'.")

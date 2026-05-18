@@ -2,7 +2,7 @@
 Transformer backbone for MMT.
 
 A thin wrapper around PyTorch's nn.TransformerEncoder (batch_first=True).
-Kept as its own module to support clear checkpointing, freezing, and warm-start behaviour independent of the
+Kept as its own module to support clear checkpointing, freezing, and warm-start behavior independent of the
 TokenEncoder and task-specific heads.
 """
 
@@ -86,7 +86,7 @@ class Backbone(nn.Module):
 
         # NOTE:
         # PyTorch's nested tensor API is still marked as prototype and may emit warnings when TransformerEncoder
-        # internally constructs nested tensors. Disabling nested tensors keeps behaviour stable and avoids the warning.
+        # internally constructs nested tensors. Disabling nested tensors keeps behavior stable and avoids the warning.
         try:
             self.encoder = nn.TransformerEncoder(
                 encoder_layer=encoder_layer,

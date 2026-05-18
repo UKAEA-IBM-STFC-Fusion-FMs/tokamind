@@ -91,7 +91,7 @@ def load_model_quadruplet(
         Whether to activate strict mode in `model.load_modality_heads_state_dict()`.
         Optional. Default: True.
     strict_adapters : bool
-        Whether to activate strict mode in `model.load_output_adapters_state_dict)`.
+        Whether to activate strict mode in `model.load_output_adapters_state_dict()`.
         Optional. Default: True.
 
     Returns

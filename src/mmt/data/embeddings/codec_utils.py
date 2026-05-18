@@ -141,7 +141,7 @@ def compute_embedding_dim_for_encoder(  # NOSONAR - Ignore cognitive complexity
     """
     Compute the encoded dimension for a single chunk of a signal.
 
-    Must mirror the codec behaviour (without executing the transform).
+    Must mirror the codec behavior (without executing the transform).
 
     Parameters
     ----------
@@ -180,7 +180,7 @@ def compute_embedding_dim_for_encoder(  # NOSONAR - Ignore cognitive complexity
         If VAE `conv2d` model does not satisfy input_mode="time".
         If VAE `conv2d` channel mismatch is detected.
         If VAE `conv2d` time mismatch is detected.
-        If VAE VAE `model_type`not in ["linear", "conv1d", "conv2d"].
+        If VAE `model_type` not in ["linear", "conv1d", "conv2d"].
 
     """
 
@@ -452,7 +452,7 @@ def build_torch_decoder(
     Parameters
     ----------
     codec : DCT3DCodec | IdentityCodec | VAECodec
-        Fully initialised encoder instance.
+        Fully initialized encoder instance.
     original_shape : tuple[int, ...]
         Per-sample output shape (without batch dimension), e.g. ``(T,)``, ``(C, T)``,
         ``(H, W, T)``. Must match the per-sample shape of ``output_native`` in the
@@ -541,7 +541,7 @@ def build_decoders(
                 "Ensure build_codecs() was called for the same registry."
             )
         n_samples = spec.native_shape[2]
-        # Timeseries values are stored as (T,) in output_native, not (1, T).
+        # Time series values are stored as (T,) in output_native, not (1, T).
         # Profile and video keep their spatial dims: (C, T) and (H, W, T).
         if spec.modality == "timeseries":
             original_shape: tuple[int, ...] = (n_samples,)

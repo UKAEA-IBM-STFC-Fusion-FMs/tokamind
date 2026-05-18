@@ -115,7 +115,7 @@ model:
 
 
 train:
-  # This is run-level behaviour, not per-stage.
+  # This is run-level behavior, not per-stage.
   # If true and checkpoints/latest exists in *this* run_dir, we strictly
   # resume that run: model weights + optimizer + scheduler + scaler + RNG +
   # epoch counters. This is different from model_source.run_dir, which is a

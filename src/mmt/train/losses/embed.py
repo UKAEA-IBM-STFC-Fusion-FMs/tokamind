@@ -24,13 +24,13 @@ class EmbedMSELoss(BaseLoss):
     representations produced by the embedding pipeline.
 
     For orthonormal encoders (DCT/FPCA) using all coefficients, coeff-space MSE and native-space MSE differ only by a
-    constant factor ``K / N`` (see ``mmt.train.losses`` module docstring for details).
+    constant factor `K / N` (see `mmt.train.losses` module docstring for details).
 
     Parameters
     ----------
     output_weights : dict[Hashable, float] | None
-        Optional per-output scalar weights (signal_id → weight). If provided and their sum is > 0,
-        the per-output losses are combined as a normalized weighted average. Otherwise, a uniform mean is used.
+        Optional per-output scalar weights (signal_id → weight). If provided and their sum is > 0, the per-output
+        losses are combined as a normalized weighted average. Otherwise, a uniform mean is used.
 
     """
 
@@ -55,19 +55,25 @@ class EmbedMSELoss(BaseLoss):
 
         Parameters
         ----------
-        preds:
-            Prediction tensors in coeff space, keyed by signal_id. Shape: ``(B, D)``.
-        y_emb:
-            Ground-truth tensors in coeff space, keyed by signal_id. Shape: ``(B, D)``.
-        y_native:
-            Unused. May be ``None``.
-        output_mask:
-            Boolean mask tensors of shape ``(B,)``, True for supervised samples.
+        preds : Mapping[Hashable, Tensor]
+            Prediction tensors in coeff space, keyed by signal_id. Shape: `(B, D)`.
+        y_emb : Mapping[Hashable, Tensor]
+            Ground-truth tensors in coeff space, keyed by signal_id. Shape: `(B, D)`.
+        y_native : Mapping[Hashable, Tensor] | None
+            Unused. May be None.
+        output_mask : Mapping[Hashable, Tensor]
+            Boolean mask tensors of shape `(B,)`, True for supervised samples.
 
         Returns
         -------
         tuple[Tensor, dict[Hashable, float]]
-            ``(loss_scalar, per_output_logs)``
+            `(loss_scalar, per_output_logs)`
+
+        Raises
+        ------
+        RuntimeError
+            If `output_mask` is not a bool tensor.
+            If there is a shape mismatch between a `preds` item and the corresponding `y_emb` item.
 
         """
 

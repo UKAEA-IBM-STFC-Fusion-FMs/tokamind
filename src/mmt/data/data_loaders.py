@@ -15,7 +15,7 @@ etc.) is handled upstream by the entrypoint scripts (run_*.py) and benchmark uti
   - consistent defaults (e.g., pin_memory),
   - tagging loaders with `loader.is_streaming`.
 
-Key behaviour
+Key behavior
 -------------
 - Map-style datasets (cached windows):
     * DataLoader-level `shuffle=True` is allowed.
@@ -62,7 +62,7 @@ def _make_data_generator(seed: int) -> torch.Generator:
     """
     Create a torch.Generator to control DataLoader shuffling deterministically.
 
-    This generator is only used for *map-style* datasets where the DataLoader's `shuffle=True` behaviour is active.
+    This generator is only used for *map-style* datasets where the DataLoader's `shuffle=True` behavior is active.
     For IterableDataset (e.g., WindowStreamedDataset), shuffling is handled by the dataset itself and this generator is
     effectively unused.
 
@@ -107,7 +107,7 @@ def initialize_mmt_dataloader(
       - map-style datasets (e.g., WindowCachedDataset), and
       - IterableDataset (e.g., WindowStreamedDataset).
 
-    Behaviour
+    Behavior
     ---------
     - For **map-style datasets**:
         * Concretely, DataLoader-level shuffling is enabled only when `shuffle=True`.
@@ -146,13 +146,13 @@ def initialize_mmt_dataloader(
         If True, prints a short summary.
         Optional. Default: False.
 
-    seed : int
+    seed : int | None
         If provided, used to:
         - create a torch.Generator (for deterministic shuffle on map-style datasets),
         - create a worker_init_fn via `make_worker_seed_fn()` to seed NumPy / Python RNG per worker.
         Optional. Default: None.
 
-    pin_memory : bool
+    pin_memory : bool | None
         If None, defaults to `torch.cuda.is_available()`. Otherwise, forwarded to the DataLoader.
         Optional. Default: None.
 

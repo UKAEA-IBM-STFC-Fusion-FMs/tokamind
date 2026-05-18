@@ -169,7 +169,8 @@ class SelectValidWindowsTransform:
     # ------------------------------------------------------------------------------------------------------------------
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _mask_if_bad(self, values: Any, *, accept_partial_nan: bool) -> tuple[bool, Union[np.ndarray, None]]:
+    @staticmethod
+    def _mask_if_bad(values: Any, *, accept_partial_nan: bool) -> tuple[bool, Union[np.ndarray, None]]:
         """
         Mask values if considered bad (i.e., if empty values or not finite).
 
@@ -177,6 +178,8 @@ class SelectValidWindowsTransform:
         ----------
         values : Any
             Values to be processed.
+        accept_partial_nan : bool
+            Boolean flag to control whether partial NaNs are allowed.
 
         Returns
         -------

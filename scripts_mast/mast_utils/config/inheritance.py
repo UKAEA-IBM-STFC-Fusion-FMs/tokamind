@@ -181,7 +181,7 @@ def inherit_preprocess_chunk_trim(  # NOSONAR - Ignore cognitive complexity
     src_cfg : Mapping[str, Any]
         Dictionary with source configuration.
     allow_override : bool
-        If True, mapping override is allowed (and override wins at each levels).
+        If True, mapping override is allowed (and override wins at each level).
 
     Returns
     -------

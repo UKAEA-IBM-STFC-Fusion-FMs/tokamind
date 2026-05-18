@@ -114,7 +114,7 @@ def save_config_snapshot(
         Merged experiment config (ExperimentConfig object).
     run_dir : Path
         Run directory where config snapshot will be saved.
-    logger_inst : logging.Logger
+    logger_inst : logging.Logger | None
         Logger for logging the save location.
         Optional. Default: None.
 

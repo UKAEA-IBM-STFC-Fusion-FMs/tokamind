@@ -18,7 +18,7 @@ Run
 Notes
 -----
 - This example depends only on `mmt/` (no scripts_mast/, no FAIR MAST).
-- We set all dropout probabilities to 0.0 in the toy config to avoid PAD/drop edge cases and keep behaviour
+- We set all dropout probabilities to 0.0 in the toy config to avoid PAD/drop edge cases and keep behavior
 deterministic.
 """
 

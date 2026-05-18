@@ -61,7 +61,7 @@ def resolve_split_assets(split: str) -> dict[str, str]:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def apply_signal_stats_override(
+def apply_signal_stats_override(  # NOSONAR - Ignore cognitive complexity
     dict_task_metadata: dict[str, Any],
     *,
     stats_metadata_file_path: str,

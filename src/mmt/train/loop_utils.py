@@ -41,7 +41,7 @@ from .losses import LossAggregator
 
 logger = logging.getLogger("mmt.Train")
 
-# Max gradient norm for clipping (matches original loop.py behaviour)
+# Max gradient norm for clipping (matches original loop.py behavior)
 _MAX_GRAD_NORM = 1.0
 
 # How many batch-level timing lines to show at INFO during the *first* global epoch.
@@ -306,8 +306,8 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     -------
     tuple[float, dict[str, float], int]
         Tuple (avg_loss, avg_term_logs, global_step).
-        ``avg_term_logs`` contains epoch-averaged values for each ``<term>/total`` key produced
-        by ``LossAggregator``. Useful for per-term breakdown when multiple loss terms are active.
+        ``avg_term_logs`` contains epoch-averaged values for each ``<term>/total`` key produced by ``LossAggregator``.
+        Useful for per-term breakdown when multiple loss terms are active.
 
     Raises
     ------
@@ -343,11 +343,11 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                 break
 
             t0 = time.perf_counter()
-            batch = move_batch_to_device(batch, device)
+            batch = move_batch_to_device(batch=batch, device=device)
             t1 = time.perf_counter()
 
             # ----------------------- FORWARD -----------------------
-            with amp_ctx_for_model(model, enable=amp_enabled):
+            with amp_ctx_for_model(model=model, enable=amp_enabled):
                 out = model(batch)
                 preds = out.get("pred", {})
 
@@ -407,7 +407,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
 
                     if (scaler is not None) and scaler.is_enabled():
                         scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
+                        torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=_MAX_GRAD_NORM)
 
                         prev_scale = scaler.get_scale()
                         scaler.step(optimizer)
@@ -417,7 +417,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                         did_step = scaler.get_scale() >= prev_scale
 
                     else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
+                        torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=_MAX_GRAD_NORM)
                         optimizer.step()
 
                     optimizer.zero_grad(set_to_none=True)
@@ -449,7 +449,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                 dt_opt=(t4 - t3) if train else None,
             )
 
-            # update t before next loading
+            # Update t before next loading
             t_before_next = time.perf_counter()
 
     avg_loss = running_loss / max(1, n_batches)

@@ -320,7 +320,7 @@ class VAECodec:
     # ------------------------------------------------------------------------------------------------------------------
     def __init__(self, *, model_dir: str, device: str | None = None, use_mu: bool = True) -> None:
         """
-        Load and initialise the VAE model.
+        Load and initialize the VAE model.
 
         Parameters
         ----------
@@ -651,7 +651,7 @@ class VAETorchDecoder(TorchDecoder):
     Parameters
     ----------
     vae_codec : VAECodec
-        Fully initialised encoder instance. Its ``model``, ``model_type``,
+        Fully initialized encoder instance. Its ``model``, ``model_type``,
         ``input_mode``, and ``input_shape`` are used to configure the decoder.
     original_shape : tuple[int, ...] | None
         Expected per-sample output shape (without batch dimension). When provided, the
@@ -662,7 +662,7 @@ class VAETorchDecoder(TorchDecoder):
     -----
     Some beta_VAE variants return an extra singleton dimension from ``decode()``.
     The ``forward`` method handles this transparently via a try/except, matching
-    the behaviour of the original encoder.
+    the behavior of the original encoder.
 
     """
 

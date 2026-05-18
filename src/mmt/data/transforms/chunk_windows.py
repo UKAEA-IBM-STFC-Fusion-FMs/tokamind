@@ -10,7 +10,7 @@ Key design (v0)
 - Chunk grid is defined in *seconds* (chunk_length_sec and stride_sec), which is the only unit shared across signals
 with different dt.
 - Chunk identity is expressed as integer indices:
-    * chunk_index_in_window: 0..N-1 inside that window/role
+    * chunk_index_in_window: 0 ... N-1 inside that window/role
     * chunk_index_global: stable slot ID on the stride grid (used for caching)
 - Per-signal dt is used only to map slot offsets -> sample indices.
 

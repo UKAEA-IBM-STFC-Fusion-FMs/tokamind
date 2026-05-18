@@ -264,7 +264,7 @@ def load_parts_from_run_dir(  # NOSONAR - Ignore cognitive complexity
     """
     Overlap-load selected parts of `model` from a previous run_dir.
 
-    This function is meant for *initialising a new run from pretraining*, not for strict resume.
+    This function is meant for *initializing a new run from pretraining*, not for strict resume.
     Optimizer/scheduler/scaler/RNG are NOT touched.
 
     It looks for either:
@@ -342,7 +342,7 @@ def load_parts_from_run_dir(  # NOSONAR - Ignore cognitive complexity
 
         """
 
-        if not load_parts.get(blk, False):
+        if not load_parts.get(blk, False):  # noqa - Ignore missing attribute
             return
 
         path = os.path.join(ckpt, filename)  # type: ignore[arg-type]

@@ -133,7 +133,7 @@ embeddings:
     entirely (see `encoder_name: identity` below).
 
 ### `encoder_name: identity`
-Setting `encoder_name: identity` for an **output** signal has a special memory-saving behaviour:
+Setting `encoder_name: identity` for an **output** signal has a special memory-saving behavior:
 `EmbedChunksTransform` skips the embedding step entirely for that signal — no `output_emb` entry is written
 to the window. This avoids duplicating large output arrays (the native values kept by `FinalizeWindowTransform`
 are the only copy in memory). Use this in combination with `native_sparse_mse`, which reads from

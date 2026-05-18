@@ -1,8 +1,8 @@
 """
 Base classes for the MMT embedding pipeline.
 
-This module defines abstract interfaces shared across all codec types, keeping them
-decoupled from any specific embedding implementation.
+This module defines abstract interfaces shared across all codec types, keeping them decoupled from any specific
+embedding implementation.
 """
 
 from __future__ import annotations
@@ -18,8 +18,8 @@ class TorchDecoder(nn.Module, ABC):
     """
     Abstract base class for differentiable embedding decoders.
 
-    All decoders accept a batch of embedding vectors and return the corresponding
-    native-standardized tensors, preserving gradients for use in training losses.
+    All decoders accept a batch of embedding vectors and return the corresponding native-standardized tensors,
+    preserving gradients for use in training losses.
 
     Subclasses implement :meth:`forward` with the signature::
 
@@ -29,20 +29,18 @@ class TorchDecoder(nn.Module, ABC):
 
     Implementation constraints
     --------------------------
-    - No :func:`torch.no_grad`, no ``.detach()``, no ``.cpu()``, no NumPy inside
-      :meth:`forward`. These are eval-only concerns handled by the caller.
-    - Fixed constants (basis matrices, scatter indices) must be stored via
-      :meth:`~torch.nn.Module.register_buffer` with ``persistent=False``, so they
-      move to the correct device with the module but are never saved to checkpoints.
+    - No :func:`torch.no_grad`, no ``.detach()``, no ``.cpu()``, no NumPy inside :meth:`forward`. These are eval-only
+      concerns handled by the caller.
+    - Fixed constants (basis matrices, scatter indices) must be stored via :meth:`~torch.nn.Module.register_buffer`
+      with ``persistent=False``, so they move to the correct device with the module but are never saved to checkpoints.
       They are recomputed from the codec at construction time.
-    - Learned parameters (e.g., a VAE decoder network) must have
-      ``requires_grad_(False)`` so gradients flow *through* the decoder to the
-      embedding prediction ``z``, but do not update the decoder weights.
+    - Learned parameters (e.g., a VAE decoder network) must have ``requires_grad_(False)`` so gradients flow *through*
+      the decoder to the embedding prediction ``z``, but do not update the decoder weights.
 
     Eval usage
     ----------
-    Callers that only need a NumPy output (e.g., eval/decode.py) should wrap the
-    forward pass in ``torch.no_grad()`` and detach afterwards::
+    Callers that only need a NumPy output (e.g., eval/decode.py) should wrap the forward pass in ``torch.no_grad()``
+    and detach afterwards::
 
         with torch.no_grad():
             x_hat = decoder(z_tensor)          # (B, *native_shape) tensor
@@ -62,6 +60,5 @@ class TorchDecoder(nn.Module, ABC):
         Returns
         -------
         Tensor
-            Native standardized output of shape (B, *native_shape).
-            Gradients are preserved with respect to ``z``.
+            Native standardized output of shape (B, *native_shape). Gradients are preserved with respect to ``z``.
         """
