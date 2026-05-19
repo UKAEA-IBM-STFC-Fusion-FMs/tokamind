@@ -198,6 +198,8 @@ Base files:
 - `scripts_mast/configs/common/embeddings.yaml`
 - `scripts_mast/configs/common/pretrain.yaml`
 - `scripts_mast/configs/common/finetune.yaml`
+- `scripts_mast/configs/common/finetune_warmstart.yaml`
+- `scripts_mast/configs/common/finetune_scratch.yaml`
 - `scripts_mast/configs/common/eval.yaml`
 
 Key data config knobs:
@@ -208,10 +210,10 @@ Task files:
 - `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` (optional)
 - `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
 
-Finetune model keys in `scripts_mast/configs/common/finetune.yaml`:
-- `model_scratch`: scratch-only base architecture
-- `finetune_model_overrides`: model overrides applied in both scratch and warmstart
-- `warmstart.model_overrides`: warmstart-only model overrides
+Finetune train/model recipes are split by init mode:
+- `scripts_mast/configs/common/finetune.yaml`: shared data/preprocess/embedding/collate/loader defaults
+- `scripts_mast/configs/common/finetune_warmstart.yaml`: warmstart training recipe, `model_source`, and `model_overrides`
+- `scripts_mast/configs/common/finetune_scratch.yaml`: scratch training recipe and complete `model_scratch`
 
 Details are in:
 - [Configuration Guide](docs/config_guide.md)

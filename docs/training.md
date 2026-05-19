@@ -17,34 +17,58 @@ Both scripts share the same training loop (`train_finetune`) and configuration s
 
 Training is split into one or more sequential stages, each with independent learning rates, weight decay, and freeze settings. Stages run in order; epoch counters continue across stages.
 
+The stage schedule depends on the finetune init mode and lives in the init-mode-specific config file, not in `finetune.yaml` itself:
+
+**`--init warmstart`** (`finetune_warmstart.yaml`) — two stages:
 ```yaml
 train:
   stages:
-    - name: ft_heads
+    - name: ft_heads        # freeze backbone + token_encoder; adapt output side only
       epochs: 5
-      scheduler:
-        grad_accum_steps: 1
-        warmup_steps_fraction: 0.02
       optimizer:
         lr:
           backbone: 0.0
-          token_encoder: 5e-4
+          token_encoder: 0.0
           modality_heads: 1e-3
           output_adapters: 5e-3
-        wd:
-          backbone: 0.0
-          token_encoder: 0.01
-          modality_heads: 0.01
-          output_adapters: 0.01
       freeze:
         backbone: true
-        token_encoder: false
+        token_encoder: true
         modality_heads: false
         output_adapters: false
 
-    - name: ft_full
+    - name: ft_full         # unfreeze everything; joint fine-tuning
       epochs: 15
-      ...
+      optimizer:
+        lr:
+          backbone: 5e-4
+          token_encoder: 5e-4
+          modality_heads: 1e-3
+          output_adapters: 5e-3
+      freeze:
+        backbone: false
+        token_encoder: false
+        modality_heads: false
+        output_adapters: false
+```
+
+**`--init scratch`** (`finetune_scratch.yaml`) — single stage, all blocks trainable from epoch 0:
+```yaml
+train:
+  stages:
+    - name: ft_scratch
+      epochs: 20
+      optimizer:
+        lr:
+          backbone: 1e-3
+          token_encoder: 5e-3
+          modality_heads: 5e-3
+          output_adapters: 5e-3
+      freeze:
+        backbone: false
+        token_encoder: false
+        modality_heads: false
+        output_adapters: false
 ```
 
 ### LR/WD inheritance

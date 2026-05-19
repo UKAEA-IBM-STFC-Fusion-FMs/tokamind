@@ -278,26 +278,25 @@ Top-level location: `loader:`
 - Description: optional cap for streaming-epoch batch count.
 
 ## Finetune Model Configuration
-Top-level locations in `common/finetune.yaml`:
-- `model_scratch`
-- `finetune_model_overrides`
-- `warmstart.model_overrides`
+Train/model configuration is split across init-mode files:
+
+| Key | File | Scope |
+|---|---|---|
+| `model_scratch` | `common/finetune_scratch.yaml` | complete scratch model |
+| `model_overrides` | `common/finetune_warmstart.yaml` | warmstart-only source-model overrides |
+| `train` | `common/finetune_warmstart.yaml` or `common/finetune_scratch.yaml` | per init mode |
 
 ### `model_scratch`
 - Type: mapping
-- Description: scratch-only base model architecture.
+- Description: complete scratch model architecture. Defined in `finetune_scratch.yaml`.
 
-### `finetune_model_overrides`
+### `model_overrides`
 - Type: mapping
-- Description: model overrides applied in both finetune modes.
-
-### `warmstart.model_overrides`
-- Type: mapping
-- Description: warmstart-only model overrides applied on top of source model.
+- Description: warmstart-only model overrides applied on top of the source model. Defined in `finetune_warmstart.yaml`.
 
 Finetune model materialization:
-- `--init scratch`: `model = deep_merge(model_scratch, finetune_model_overrides)`
-- `--init warmstart`: `model = deep_merge(source_model, finetune_model_overrides, warmstart.model_overrides)`
+- `--init scratch`: `model = model_scratch`
+- `--init warmstart`: `model = deep_merge(source_model, model_overrides)`
 
 ## Runtime Model
 Top-level location in runtime config snapshot: `model:`

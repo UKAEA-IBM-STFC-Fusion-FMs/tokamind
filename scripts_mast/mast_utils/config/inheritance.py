@@ -5,12 +5,12 @@ This module handles config inheritance from source models for warmstart/eval:
 - Resolves source model directories (run_id or path)
 - Loads source run config snapshots
 - Optionally inherits preprocessing settings (chunk, trim_chunks)
-- Applies finetune model semantics (scratch vs warmstart)
+- Applies finetune model semantics (scratch model vs warmstart overrides)
 - Merges source model config with current overrides
 
 Key concepts:
 - Warmstart: load source model weights/config, keep finetune preprocess from current task config
-- Scratch: use model_scratch architecture, no source inheritance
+- Scratch: use complete model_scratch architecture, no source inheritance
 - Eval: always inherits from source model (weights + config + embeddings), including preprocess chunk/trim settings
 """
 
@@ -128,10 +128,7 @@ def resolve_model_source_dir(
             "or a valid `model_source['model_path']` (external run directory)."
         )
 
-    return (
-        resolve_run_id_to_run_dir(run_id=str(run_id)),
-        str(run_id).strip()
-    )
+    return (resolve_run_id_to_run_dir(run_id=str(run_id)), str(run_id).strip())
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -247,37 +244,10 @@ def apply_finetune_model_semantics(
     merged: MutableMapping[str, Any], *, init_mode: Literal["warmstart", "scratch"]
 ) -> None:
     """
-    Materialize canonical `model` for scratch and validate warmstart blocks.
+    Materialize canonical ``model`` for scratch and validate warmstart model overrides.
 
-    Parameters
-    ----------
-    merged : MutableMapping[str, Any]
-        Merged config dictionary (modified in-place).
-    init_mode : Literal["warmstart", "scratch"]
-        Finetune initialization mode, either "warmstart" or "scratch".
-
-    Returns
-    -------
-    None
-
-    Raises
-    ------
-    KeyError
-        If `merged` contains a key 'model'.
-    TypeError
-        If `merged['finetune_model_overrides']` is not a mapping.
-        If `init_mode='scratch'` and `merged['model_scratch']` is not a mapping (dict).
-        If `merged['warmstart']` is not a mapping (dict).
-        If `merged['warmstart']['model_overrides'] is not a mapping (dict)."
-
-    Notes
-    =====
-
-    New finetune semantics:
-      - `model_scratch`: full architecture base used for scratch init
-      - `finetune_model_overrides`: overrides applied in both scratch and warmstart
-      - `warmstart.model_overrides`: additional overrides applied only in warmstart
-
+    Scratch configs define the full model under ``model_scratch``.
+    Warmstart configs define optional ``model_overrides`` that are applied later on top of the source model.
     """
 
     if init_mode not in ["warmstart", "scratch"]:
@@ -285,17 +255,10 @@ def apply_finetune_model_semantics(
 
     if "model" in merged:
         raise KeyError(
-            "Finetune config now uses explicit keys: "
-            "'model_scratch', 'finetune_model_overrides', and 'warmstart.model_overrides'. "
+            "Finetune config now uses explicit init-specific model keys: "
+            "'model_scratch' for scratch or 'model_overrides' for warmstart. "
             "Remove top-level 'model' from finetune configs."
         )
-
-    common_overrides = merged.get("finetune_model_overrides")
-    if common_overrides is None:
-        common_overrides = {}
-        merged["finetune_model_overrides"] = common_overrides
-    if not isinstance(common_overrides, dict):
-        raise TypeError("`merged['finetune_model_overrides']` must be a mapping (dict).")
 
     if init_mode == "scratch":
         model_scratch = merged.get("model_scratch")
@@ -303,22 +266,14 @@ def apply_finetune_model_semantics(
             raise TypeError(
                 "Finetune `init_mode='scratch'` requires `merged['model_scratch']` to be defined as a mapping (dict)."
             )
+        merged["model"] = copy.deepcopy(model_scratch)
 
-        merged["model"] = deep_merge(base=copy.deepcopy(model_scratch), override=common_overrides)
-
-    else:  # -> I.e., init_mode is "warmstart"
-        warm_cfg = merged.get("warmstart")
-        if warm_cfg is None:
-            warm_cfg = {}
-            merged["warmstart"] = warm_cfg
-        if not isinstance(warm_cfg, dict):
-            raise TypeError("`merged['warmstart']` must be a mapping (dict).")
-
-        ws_model_overrides = warm_cfg.get("model_overrides")
-        if ws_model_overrides is None:
-            warm_cfg["model_overrides"] = {}
-        elif not isinstance(ws_model_overrides, dict):
-            raise TypeError("`merged['warmstart']['model_overrides'] must be a mapping (dict).")
+    else:
+        model_overrides = merged.get("model_overrides")
+        if model_overrides is None:
+            merged["model_overrides"] = {}
+        elif not isinstance(model_overrides, dict):
+            raise TypeError("`merged['model_overrides']` must be a mapping (dict) for warmstart finetune.")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -343,8 +298,7 @@ def inherit_from_source_model(  # NOSONAR - Ignore cognitive complexity
     ------
     TypeError
         If `merged["model_source"]` is not set as a mapping (dict) for finetune/eval phases.
-        If `merged["finetune_model_overrides"]` is not a mapping (dict) for finetune.
-        iF `merged["warmstart"]["model_overrides"] is not a mapping (dict) for finetune.
+        If `merged["model_overrides"]` is not a mapping (dict) for finetune warmstart.
     KeyError
         If a loaded source config derived from `merged["model_source"]` does not have a key "model".
         If a loaded source config derived from `merged["model_source"]` does not have a key "embeddings" for eval phase.
@@ -375,25 +329,13 @@ def inherit_from_source_model(  # NOSONAR - Ignore cognitive complexity
         )
 
     if phase == "finetune":
-        common_overrides = merged.get("finetune_model_overrides", {})
-        if not isinstance(common_overrides, dict):
-            raise TypeError("`merged['finetune_model_overrides']` must be a mapping (dict) for finetune.")
-
-        warm_cfg = merged.get("warmstart", {})
-        if not isinstance(warm_cfg, dict):
-            raise TypeError("`merged['warmstart']` must be a mapping (dict) for finetune.")
-
-        ws_model_overrides = warm_cfg.get("model_overrides") or {}
-        if ws_model_overrides is None:
-            ws_model_overrides = {}
-        if not isinstance(ws_model_overrides, dict):
-            raise TypeError("`merged['warmstart']['model_overrides'] must be a mapping (dict) for finetune.")
+        model_overrides = merged.get("model_overrides", {})
+        if not isinstance(model_overrides, dict):
+            raise TypeError("`merged['model_overrides']` must be a mapping (dict) for warmstart finetune.")
 
         merged["model"] = copy.deepcopy(src_cfg["model"])
-        if common_overrides:
-            merged["model"] = deep_merge(base=merged["model"], override=common_overrides)
-        if ws_model_overrides:
-            merged["model"] = deep_merge(base=merged["model"], override=ws_model_overrides)
+        if model_overrides:
+            merged["model"] = deep_merge(base=merged["model"], override=model_overrides)
 
         source_split = src_cfg["data"]["split"]
         requested_split = merged["data"]["split"]

@@ -1,0 +1,90 @@
+# Scratch-specific FINETUNE configuration.
+#
+# Loaded automatically after finetune.yaml when running:
+#   python scripts_mast/run_finetune.py --init scratch ...
+
+train:
+  # Run-level behavior (not per-stage).
+  resume: false
+
+  early_stop:
+    patience: 10
+    delta: 0.0
+
+  amp:
+    enable: true
+
+  loss:
+    output_weights:
+#      summary-ip: 1.2
+
+    terms:
+      - type: embed_mse
+        weight: 1.0
+#      - type: native_sparse_mse   # data.keep_output_native is set automatically when this term is present
+#        weight: 0.5
+
+  optimizer:
+    use_adamw: true
+
+  stages:
+    - name: ft_scratch
+      epochs: 20
+
+      scheduler:
+        grad_accum_steps: 1
+        warmup_steps_fraction: 0.02
+
+      optimizer:
+        lr:
+          token_encoder: 5e-3
+          backbone: 1e-3
+          modality_heads: 5e-3
+          output_adapters: 5e-3
+        wd:
+          token_encoder: 0.01
+          backbone: 0.01
+          modality_heads: 0.01
+          output_adapters: 0.01
+
+      freeze:
+        token_encoder: false
+        backbone: false
+        modality_heads: false
+        output_adapters: false
+
+# Scratch: model = model_scratch
+model_scratch:
+  backbone:
+    d_model: 192
+    n_layers: 4
+    n_heads: 6
+    dim_ff: 768
+    dropout: 0.05
+    activation: gelu
+
+  modality_heads:
+    timeseries:
+      hidden: 192
+      out_dim: 192
+    profile:
+      hidden: 192
+      out_dim: 192
+    video:
+      hidden: 192
+      out_dim: 192
+
+  output_adapters:
+    hidden_dim:
+      default: 0
+
+      bucketed:
+        enable: true
+        rules:
+          - {max_out_dim: 64, hidden: 0}
+          - {max_out_dim: 512, hidden: 32}
+          - {max_out_dim: 4096, hidden: 64}
+          - {max_out_dim: 8192, hidden: 128}
+          - {max_out_dim: null, hidden: d_model}
+
+      manual: {}  # {output_name: hidden_int, ...} (always wins)
