@@ -2,12 +2,12 @@
 DCT3D Codec
 -----------
 
-This module implements a lightweight 3D Discrete Cosine Transform (DCT) codec used for compressing
-multi-dimensional time-dependent signals, together with its differentiable torch decoder.
+This module implements a lightweight 3D Discrete Cosine Transform (DCT) codec used for compressing multi-dimensional
+time-dependent signals, together with its differentiable torch decoder.
 
 The module provides:
-    • ``DCT3DCodec``          — numpy encoder (offline use: embedding generation, index tuning)
-    • ``DCT3DTorchDecoder``   — differentiable nn.Module decoder (training losses + eval)
+    • `DCT3DCodec`          — numpy encoder (offline use: embedding generation, index tuning)
+    • `DCT3DTorchDecoder`   — differentiable nn.Module decoder (training losses + eval)
 
 Encoder design
 --------------
@@ -21,8 +21,8 @@ Encoder design
 Decoder design
 --------------
 The torch decoder mirrors the numpy codec: it scatters the predicted coefficients into the full DCT tensor, then
-applies an orthonormal inverse DCT along the three native axes using ``torch.fft``. This avoids materializing a huge
-dense ``(D, N)`` IDCT basis matrix while preserving gradients for native-space losses.
+applies an orthonormal inverse DCT along the three native axes using `torch.fft`. This avoids materializing a huge
+dense `(D, N)` IDCT basis matrix while preserving gradients for native-space losses.
 
 Usage
 -----
@@ -39,13 +39,13 @@ Usage
 from __future__ import annotations
 
 from dataclasses import dataclass
-
+from typing import Literal
 import numpy as np
-import torch
 from scipy.fftpack import dct, idct
-from torch import Tensor
 
-import torch.nn.functional as F
+import torch
+from torch import Tensor
+import torch.nn.functional as F  # noqa - Ignore lowercase warning
 
 from .torch_decoder import TorchDecoder
 
@@ -91,12 +91,12 @@ def _to_3d_view(x: np.ndarray) -> tuple[np.ndarray, tuple[int, ...]]:
     Returns
     -------
     tuple[np.ndarray, tuple[int, ...]]
-        3D view of input ``x`` array, along with the original shape.
+        3D view of input `x` array, along with the original shape.
 
     Raises
     ------
     ValueError
-        If ``x`` is not a 1D/2D/3D array.
+        If `x` is not a 1D/2D/3D array.
 
     """
 
@@ -121,7 +121,7 @@ def _to_3d_view(x: np.ndarray) -> tuple[np.ndarray, tuple[int, ...]]:
 
 # ----------------------------------------------------------------------------------------------------------------------
 def _shape_to_3d(original_shape: tuple[int, ...]) -> tuple[int, int, int]:
-    """Return the canonical ``(H, W, T)`` view for a native signal shape."""
+    """Return the canonical `(H, W, T)` view for a native signal shape."""
 
     if len(original_shape) == 1:
         return 1, 1, int(original_shape[0])
@@ -134,7 +134,7 @@ def _shape_to_3d(original_shape: tuple[int, ...]) -> tuple[int, int, int]:
 
 # ----------------------------------------------------------------------------------------------------------------------
 def _torch_idct_ortho_last(x: Tensor) -> Tensor:
-    """Inverse DCT-II with ``norm='ortho'`` along the last dimension, matching ``scipy.fftpack.idct``."""
+    """Inverse DCT-II with `norm='ortho'` along the last dimension, matching `scipy.fftpack.idct`."""
 
     original_shape = x.shape
     n = int(original_shape[-1])
@@ -171,7 +171,7 @@ def _torch_idct_ortho_last(x: Tensor) -> Tensor:
 
 # ----------------------------------------------------------------------------------------------------------------------
 def _torch_idct_ortho_dim(x: Tensor, dim: int) -> Tensor:
-    """Inverse DCT-II with ``norm='ortho'`` along an arbitrary dimension."""
+    """Inverse DCT-II with `norm='ortho'` along an arbitrary dimension."""
 
     dim = dim % x.ndim
     if dim == x.ndim - 1:
@@ -181,7 +181,7 @@ def _torch_idct_ortho_dim(x: Tensor, dim: int) -> Tensor:
 
 # ----------------------------------------------------------------------------------------------------------------------
 def _torch_idct3(x: Tensor) -> Tensor:
-    """3D inverse DCT-II with ``norm='ortho'`` over the last three axes."""
+    """3D inverse DCT-II with `norm='ortho'` over the last three axes."""
 
     y = _torch_idct_ortho_dim(x, dim=-1)
     y = _torch_idct_ortho_dim(y, dim=-2)
@@ -213,7 +213,7 @@ class DCT3DCodec:
 
     **Rank mode**:
       Keeps the top-K coefficients by explained variance (energy), regardless of spatial position.
-      Requires ``coeff_indices``.
+      Requires `coeff_indices`.
 
     Parameters
     ----------
@@ -225,20 +225,20 @@ class DCT3DCodec:
         Number of DCT coefficients to keep along the "T" (time) dimension (spatial mode).
     dtype : np.dtype
         Data type for encoded coefficients (default: float32).
-    selection_mode : str
-        Coefficient selection strategy: ``"spatial"`` or ``"rank"`` (default: ``"spatial"``).
+    selection_mode : Literal["spatial", "rank"]
+        Coefficient selection strategy: `"spatial"` or `"rank"` (default: `"spatial"`).
     coeff_indices : np.ndarray | None
-        1D array of coefficient indices for rank mode. Required if ``selection_mode="rank"``.
+        1D array of coefficient indices for rank mode. Required if `selection_mode="rank"`.
     coeff_shape : tuple[int, int, int] | None
         Expected (H, W, T) shape for validation in rank mode (optional).
     requires_finite_input : bool
-        Whether the codec requires finite (non-NaN) inputs. Always ``True`` for DCT3D: the DCT transform is undefined
-        for NaN values.
+        Whether the codec requires finite (non-NaN) inputs. Always True for DCT3D: the DCT transform is undefined for
+        NaN values.
 
     Notes
     -----
     - **Spatial mode**: actual coefficients kept = min(keep_h, H) * min(keep_w, W) * min(keep_t, T)
-    - **Rank mode**: coefficients kept = ``len(coeff_indices)``
+    - **Rank mode**: coefficients kept = `len(coeff_indices)`
     - The encoder returns a (D,) array.
 
     """
@@ -247,7 +247,7 @@ class DCT3DCodec:
     keep_w: int
     keep_t: int
     dtype: type = np.float32
-    selection_mode: str = "spatial"
+    selection_mode: Literal["spatial", "rank"] = "spatial"
     coeff_indices: np.ndarray | None = None
     coeff_shape: tuple[int, int, int] | None = None
     requires_finite_input: bool = True
@@ -260,11 +260,11 @@ class DCT3DCodec:
         Raises
         ------
         ValueError
-            If ``self.selection_mode`` not in ``["spatial", "rank"]``.
-            If ``self.coeff_indices`` is None when ``selection_mode="rank"``.
-            If ``self.coeff_indices`` is not a 1D array when ``selection_mode="rank"``.
-            If ``self.coeff_indices`` is empty when ``selection_mode='rank'``.
-            If ``self.coeff_indices`` contains negative integers when ``selection_mode='rank'``.
+            If `self.selection_mode` not in ["spatial", "rank"].
+            If `self.coeff_indices` is None when `selection_mode="rank"`.
+            If `self.coeff_indices` is not a 1D array when `selection_mode="rank"`.
+            If `self.coeff_indices` is empty when `selection_mode="rank"`.
+            If `self.coeff_indices` contains negative integers when `selection_mode="rank"`.
 
         """
 
@@ -314,8 +314,8 @@ class DCT3DCodec:
         Raises
         ------
         ValueError
-            If input shape mismatches ``self.coeff_shape`` in rank mode.
-            If ``self.coeff_indices`` contains out-of-bounds indices.
+            If input shape mismatches `self.coeff_shape` in rank mode.
+            If `self.coeff_indices` contains out-of-bounds indices.
 
         """
 
@@ -339,7 +339,7 @@ class DCT3DCodec:
 
             X_flat = X.reshape(-1)  # NOSONAR # noqa - Ignore lowercase warning
             max_idx = H * W * T
-            if np.any(self.coeff_indices >= max_idx):
+            if np.any(self.coeff_indices >= max_idx):  # noqa - Ignore missing attribute warning (checked in post_init)
                 raise ValueError(f"`coeff_indices` contains out-of-bounds indices (max={max_idx - 1}).")
 
             z = X_flat[self.coeff_indices].astype(self.dtype, copy=False)
@@ -365,17 +365,17 @@ class DCT3DTorchDecoder(TorchDecoder):
     Differentiable DCT3D decoder for training losses and eval.
 
     The decoder mirrors :meth:`DCT3DCodec.decode` in torch: predicted coefficients are scattered into a full DCT
-    tensor and decoded with separable orthonormal inverse DCT operations. This avoids the previous dense ``(D, N)``
-    basis matrix, which is prohibitively expensive for large sparse/ranked outputs such as ``(18, 1, 5000)``.
+    tensor and decoded with separable orthonormal inverse DCT operations. This avoids the previous dense `(D, N)`
+    basis matrix, which is prohibitively expensive for large sparse/ranked outputs such as `(18, 1, 5000)`.
 
     Parameters
     ----------
     codec : DCT3DCodec
-        Fully initialized encoder instance. Its ``selection_mode``, ``coeff_indices`` and ``keep_h/w/t`` determine how
-        the coefficient vector is scattered back into DCT space.
+        Fully initialized encoder instance. Its `selection_mode`, `coeff_indices` and `keep_h/w/t` determine how the
+        coefficient vector is scattered back into DCT space.
     original_shape : tuple[int, ...]
-        Native signal shape (without batch dimension), e.g. ``(T,)``, ``(C, T)``,
-        ``(H, W, T)``. Must be consistent with the shape used during offline encoding.
+        Native signal shape (without batch dimension), e.g., `(T,)`, `(C, T)`,  `(H, W, T)`. Must be consistent with the
+        shape used during offline encoding.
 
     """
 
@@ -413,12 +413,12 @@ class DCT3DTorchDecoder(TorchDecoder):
         Parameters
         ----------
         z : Tensor
-            Coefficient vectors of shape ``(B, D)``.
+            Coefficient vectors of shape `(B, D)`.
 
         Returns
         -------
         Tensor
-            Native standardized output of shape ``(B, *native_shape)``. Gradients are preserved with respect to ``z``.
+            Native standardized output of shape `(B, *native_shape)`. Gradients are preserved with respect to `z`.
 
         """
 
@@ -445,4 +445,5 @@ class DCT3DTorchDecoder(TorchDecoder):
             )
 
         x_native = _torch_idct3(x_full)
+
         return x_native.view(batch_size, *self._native_shape)

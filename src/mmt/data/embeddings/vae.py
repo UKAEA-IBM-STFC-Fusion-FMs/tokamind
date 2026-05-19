@@ -714,7 +714,11 @@ class VAETorchDecoder(TorchDecoder):
         return x_hat
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _reshape_to_native(self, x_hat: Tensor, B: int) -> Tensor:  # NOSONAR - Ignore cognitive complexity
+    def _reshape_to_native(  # NOSONAR - Ignore cognitive complexity
+        self,
+        x_hat: Tensor,
+        B: int  # noqa - Ignore lowercase warning
+    ) -> Tensor:
         """
         Convert the raw model output to (B, *native_shape).
 

@@ -33,7 +33,7 @@ import numpy as np
 import yaml
 
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa - Ignore lowercase warning
 from torch.utils.data import DataLoader, Dataset
 
 from mmt.data import MMTCollate, SignalSpec

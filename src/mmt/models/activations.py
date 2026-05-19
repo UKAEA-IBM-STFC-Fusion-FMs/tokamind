@@ -11,7 +11,7 @@ import torch.nn as nn
 # ======================================================================================================================
 class WaveletActivation(nn.Module):
     """
-    PINNsFormer's Wavelet activation function.
+    PINNsFormer's wavelet activation function.
 
     Source: PINNsFormer: A Transformer-Based Framework For Physics-Informed Neural Networks
     https://arxiv.org/abs/2307.11833
@@ -23,6 +23,11 @@ class WaveletActivation(nn.Module):
     w2 : nn.Parameter
         Learnable weight for the cosine component.
 
+    Methods
+    -------
+    forward(x)
+        Pass specified object `x` through the wavelet activation function.
+
     """
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -33,6 +38,7 @@ class WaveletActivation(nn.Module):
 
     # ------------------------------------------------------------------------------------------------------------------
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """Pass specified object `x` through the wavelet activation function."""
         return self.w1 * torch.sin(x) + self.w2 * torch.cos(x)
 
     # ------------------------------------------------------------------------------------------------------------------

@@ -162,7 +162,10 @@ class BuildTokensTransform:
             if "chunk_index_in_window" not in ch:
                 raise KeyError("[BuildTokensTransform] `ch['chunk_index_in_window']` is required.")
 
-            return (int(ch["pos"]), int(ch["chunk_index_in_window"]))
+            return (
+                int(ch["pos"]),
+                int(ch["chunk_index_in_window"])
+            )
 
         # ..............................................................................................................
 

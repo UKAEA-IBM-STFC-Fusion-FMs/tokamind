@@ -128,7 +128,10 @@ def resolve_model_source_dir(
             "or a valid `model_source['model_path']` (external run directory)."
         )
 
-    return (resolve_run_id_to_run_dir(run_id=str(run_id)), str(run_id).strip())
+    return (
+        resolve_run_id_to_run_dir(run_id=str(run_id)),
+        str(run_id).strip()
+    )
 
 
 # ----------------------------------------------------------------------------------------------------------------------

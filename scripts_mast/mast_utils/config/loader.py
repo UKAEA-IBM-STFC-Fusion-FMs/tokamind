@@ -37,7 +37,7 @@ def load_experiment_config(
     model: str | None = None,
     run_id: str | None = None,
     tag: str | None = None,
-    finetune_init: Literal["warmstart", "scratch"] | None = None,
+    finetune_init: Literal["warmstart", "scratch"] | None = None,  # noqa - Ignore expected type warning
 ) -> ExperimentConfig:
     """
     Load, merge, and persist experiment config for a task+phase run.

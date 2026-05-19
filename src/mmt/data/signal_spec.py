@@ -97,11 +97,11 @@ class SignalSpec:
     embedding_dim : int
         Dimension of the codec output for a single chunk.
     values_shape : tuple[int, ...]
-        Spatial shape of the signal values, without the time axis (e.g. ``()`` for scalar timeseries,
-        ``(C,)`` for a profile, ``(H, W)`` for a video frame). Matches the shape of
-        ``window['output'][name]['values']`` as stored in the dataset.
+        Spatial shape of the signal values, without the time axis (e.g., `()` for scalar timeseries, `(C,)` for a
+        profile, `(H, W)` for a video frame). Matches the shape of `window['output'][name]['values']` as stored in the
+        dataset.
     native_shape : tuple[int, int, int]
-        Canonical 3-D shape ``(H, W, T)`` used internally by codecs. Derived from ``values_shape`` and ``dt``.
+        Canonical 3-D shape `(H, W, T)` used internally by codecs. Derived from `values_shape` and `dt`.
 
     Notes
     -----
@@ -197,6 +197,7 @@ class SignalSpecRegistry:
         ValueError
             If a duplicate signal ID is identified for different specs items.
             If a duplicate entry is identified for a (role, name) key for different specs items.
+
         """
 
         self._specs: list[SignalSpec] = list(specs)
@@ -289,15 +290,15 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
 
     Parameters
     ----------
-    embeddings_cfg:
+    embeddings_cfg : Mapping[str, Any]
         Embedding configuration dictionary (defaults + optional per-signal overrides).
         Expected to follow the structure used in mmt/configs/embeddings_*.yaml.
 
-    signals_by_role:
+    signals_by_role : Mapping[str, Mapping[str, str]]
         Mapping of role -> {canonical_signal_name -> modality}.
         role must be one of {"input", "actuator", "output"}.
 
-    dict_metadata:
+    dict_metadata : Mapping[str, Mapping[str, Any]]
         Mapping of role -> {canonical_signal_name -> meta}.
         For each (role, name), meta must include:
           - "dt": float
@@ -305,16 +306,27 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
         Additionally, for role == "output", meta must include:
           - "sec_length": float  (target window length in seconds)
 
-    chunk_length_sec:
+    chunk_length_sec : float
         Chunk length used for input/actuator chunking (seconds). This is used to derive chunk counts/strides and to
         validate embeddings.
-    log_summary:
+
+    log_summary : bool
         If True, print the grouped SignalSpec summary to `mmt.SignalSpec` logger.
+        Optional. Default: True.
 
     Returns
     -------
     SignalSpecRegistry
         Registry containing all SignalSpecs with stable IDs, roles, modalities, and embedding parameters.
+
+    Raises
+    ------
+    KeyError
+        If `dict_metadata` misses role.
+        If `dict_metadata[role]` misses a given signal.
+        If `dict_metadata[role][signal]` misses required key 'values_shape'.
+        If no default embedding settings for specified role and modality.
+        If missing `encoder_name` for specified role and modality.
 
     """
 
@@ -349,13 +361,13 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
             role_defaults = defaults.get(role, {})
             modality_defaults = role_defaults.get(modality)
             if modality_defaults is None:
-                raise KeyError(f"No default embedding settings for role={role}, modality={modality}")
+                raise KeyError(f"No default embedding settings for role={role}, modality={modality}.")
 
             encoder_name = modality_defaults.get("encoder_name")
             encoder_kwargs = dict(modality_defaults.get("encoder_kwargs", {}) or {})
 
             if encoder_name is None:
-                raise KeyError(f"Missing encoder_name for role={role}, modality={modality}")
+                raise KeyError(f"Missing `encoder_name` for role={role}, modality={modality}.")
 
             # ..........................................................................................................
             # Apply per-signal overrides
