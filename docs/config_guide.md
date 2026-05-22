@@ -21,9 +21,9 @@ scripts_mast/configs/
   common/
     embeddings.yaml
     pretrain.yaml
-    finetune.yaml              # shared finetune data/preprocess/embedding/collate/loader defaults
-    finetune_warmstart.yaml    # warmstart train/model recipe + model_source
-    finetune_scratch.yaml      # scratch train/model recipe
+    finetune.yaml              # shared finetune data/preprocess/collate/loader defaults
+    finetune_warmstart.yaml    # warmstart embeddings/train/model recipe + model_source
+    finetune_scratch.yaml      # scratch embeddings/train/model recipe
     eval.yaml
 
   tasks_overrides/
@@ -75,8 +75,8 @@ For `pretrain`, merge order is:
 
 For `finetune`, merge order is:
 1. `common/embeddings.yaml` (shared embedding defaults + tuning objective)
-2. `common/finetune.yaml` (shared finetune data/preprocess/embedding/collate/loader defaults)
-3. `common/finetune_warmstart.yaml` **or** `common/finetune_scratch.yaml` (init-mode-specific train/model recipe, selected automatically from `--init`)
+2. `common/finetune.yaml` (shared finetune data/preprocess/collate/loader defaults)
+3. `common/finetune_warmstart.yaml` **or** `common/finetune_scratch.yaml` (init-mode-specific embeddings/train/model recipe, selected automatically from `--init`)
 4. `tasks_overrides/<task>/finetune_overrides.yaml` (task-specific edits, optional)
 5. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` (task/profile embedding edits, required)
 
@@ -108,7 +108,8 @@ When a source model is used, the loader resolves and stores:
 - `data.split` sets the split strategy (`random` or `temporal`, default `random`).
 
 ### Finetune
-Train/model configuration is owned by the init-mode files:
+Embedding/train/model configuration is owned by the init-mode files:
+- `embeddings.role_mode` and finetune `embeddings.tuning` — defined in `finetune_scratch.yaml` or `finetune_warmstart.yaml`
 - `model_scratch` — defined in `finetune_scratch.yaml`: complete scratch model architecture
 - `model_overrides` — defined in `finetune_warmstart.yaml`: overrides applied on top of the source model
 - `train` — defined in `finetune_warmstart.yaml` or `finetune_scratch.yaml`: optimizer, loss, AMP, early stop, and stage schedule
@@ -124,9 +125,10 @@ If `--init warmstart`:
 - `preprocess.chunk` and `preprocess.trim_chunks` are used from the current merged finetune config, not inherited from the source run.
 - `data.split` is inherited from source run. If the finetune config specifies a different split, a warning is logged and the source split is enforced.
 - Stage schedule: `ft_heads` (backbone + token_encoder frozen) → `ft_full` (all blocks trainable).
-- Embeddings are resolved by `embeddings.mode`:
-  - `source`: stage only task-used source DCT3D artifacts into current run, then inherit and/or retune by role
-  - `config`: ignore source embedding artifacts and use merged config directly
+- Embeddings are resolved by `embeddings.role_mode` per role:
+  - `tune`: tune DCT3D coefficients in the current run
+  - `source`: stage task-used source DCT3D artifacts and inherit that role
+  - `config`: ignore source artifacts for that role and use merged config/profile defaults
 
 ### Eval
 - Inherits `model`, `embeddings`, `preprocess.chunk`, `preprocess.trim_chunks`, and `data.split` from source run config.

@@ -53,12 +53,12 @@ preprocess:
 embeddings:
   impute_na: true
 
-  tune_embeddings:
-    roles:
-      input: true
-      actuator: true
-      output: true
-    
+  role_mode:
+    input: tune
+    actuator: tune
+    output: tune
+
+  tuning:
     guardrails:
       enable: true
 

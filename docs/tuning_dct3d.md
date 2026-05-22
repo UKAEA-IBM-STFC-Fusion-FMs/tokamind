@@ -14,8 +14,8 @@ The objective is role-specific: each role can target different explained-energy 
 
 ## Where Tuning Runs
 Tuning is integrated in training scripts and controlled by config:
-- pretrain: role selection from `embeddings.tune_embeddings.roles`
-- finetune: role selection from `embeddings.tune_embeddings.roles`, combined with `embeddings.mode`
+- pretrain: role selection from `embeddings.role_mode`
+- finetune: per-role policy from `embeddings.role_mode`
 
 There is no separate tuning phase in the open-source flow.
 
@@ -44,7 +44,7 @@ Base tuning settings live in `scripts_mast/configs/common/embeddings.yaml`:
 
 ```yaml
 embeddings:
-  tune_embeddings:
+  tuning:
     n_shots: 100
     max_windows: 15000
     objective:
@@ -87,7 +87,7 @@ Guardrails operate on canonical DCT dimensions `(H, W, T)`:
 Example:
 ```yaml
 embeddings:
-  tune_embeddings:
+  tuning:
     guardrails:
       enable: true
       timeseries:
@@ -114,76 +114,74 @@ At `INFO` level tuning logs include:
   - `signals=<N> guardrail_up=<N> budget_capped=<N>`
 
 ## Pretrain Behavior
-`pretrain.yaml` controls which roles tune:
+`pretrain.yaml` tunes whichever roles have `role_mode: tune`:
 
 ```yaml
 embeddings:
-  tune_embeddings:
-    roles:
-      input: false
-      actuator: false
-      output: false
+  role_mode:
+    input: tune
+    actuator: tune
+    output: tune
 ```
 
-Set any role to `true` to tune it during pretrain.
+Pretrain normally tunes all three roles. `role_mode: source` is invalid for pretrain because there is no source run.
 
 ## Finetune Behavior
-Finetune uses `embeddings.mode`:
+Finetune uses per-role `embeddings.role_mode`:
 
 ```yaml
 embeddings:
-  mode: source   # source | config
-  tune_embeddings:
-    roles:
-      input: false
-      actuator: false
-      output: false
+  role_mode:
+    input: source
+    actuator: source
+    output: tune
 ```
 
-### `mode: source`
-- stages only task-used source DCT3D artifacts into the current run
-- inherited roles read source rank overrides
-- roles set to `true` are retuned in current run
-- inherited source roles are validated strictly
-
-### `mode: config`
-- ignores source run embedding artifacts
-- uses merged profile config directly
-- all roles must stay `false`
+Available role modes:
+- `tune`: tune DCT3D coefficients in the current run.
+- `source`: inherit DCT3D coefficients from `model_source.run_dir`; inherited source roles are validated strictly.
+- `config`: use merged config/profile defaults for that role without tuning or source artifacts.
 
 ## Example Patterns
-### Inherit all roles during finetune
+### Warmstart standard DCT3D finetune
 ```yaml
 embeddings:
-  mode: source
-  tune_embeddings:
-    roles:
-      input: false
-      actuator: false
-      output: false
+  role_mode:
+    input: source
+    actuator: source
+    output: tune
 ```
 
-### Retune only output during finetune
+### Scratch standard DCT3D finetune
 ```yaml
 embeddings:
-  mode: source
-  tune_embeddings:
-    roles:
-      input: false
-      actuator: false
-      output: true
+  role_mode:
+    input: tune
+    actuator: tune
+    output: tune
 ```
 
 ### Use profile config only
 ```yaml
 embeddings:
-  mode: config
-  tune_embeddings:
-    roles:
-      input: false
-      actuator: false
-      output: false
+  role_mode:
+    input: config
+    actuator: config
+    output: config
 ```
+
+### Identity native outputs
+```yaml
+embeddings:
+  per_signal_overrides:
+    output:
+      some-output-signal:
+        encoder_name: identity
+  role_mode:
+    output: config
+```
+
+This keeps native output values for `native_sparse_mse` and prevents output DCT3D tuning from overwriting the identity profile.
 
 ## Profile Override Files
 Task profile files under `embeddings_overrides/<profile>.yaml` should keep only config overrides.
@@ -197,12 +195,12 @@ Run-local artifacts belong in `runs/<run_id>/embeddings/`.
 ## Troubleshooting
 ### Missing inherited source role in finetune
 - Cause: source run has no required role entries in `embeddings/dct3d.yaml`.
-- Fix: set that role to retune, or switch to `mode: config`.
+- Fix: set that role to `tune`, or set it to `config` if config/profile defaults are intended.
 
 ### Rank mode cannot load indices
 - Cause: missing `dct3d_indices/*.npy` for a rank override.
 - Fix: ensure the run has matching artifacts in `runs/<run_id>/embeddings/`.
 
 ### No tuning executed
-- Cause: all role flags are `false`.
-- Fix: set desired role(s) to `true`.
+- Cause: no role has `role_mode: tune`.
+- Fix: set desired role(s) to `tune`.

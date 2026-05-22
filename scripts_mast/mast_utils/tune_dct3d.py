@@ -83,7 +83,7 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
     Parameters
     ----------
     cfg_mmt : ExperimentConfig
-        Merged experiment config. Reads `embeddings.tune_embeddings` for tuning params, and `preprocess` for
+        Merged experiment config. Reads `embeddings.tuning` for tuning params, and `preprocess` for
         chunk/window settings.
     signal_specs : SignalSpecRegistry
         Signal spec registry (built from default spatial embeddings config).
@@ -112,7 +112,7 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
 
     cfg_data = cfg_mmt.data
     cfg_prep = cfg_mmt.preprocess
-    cfg_tune = cfg_mmt.embeddings.get("tune_embeddings", {})
+    cfg_tune = cfg_mmt.embeddings.get("tuning", {})
     cfg_objective = cfg_tune.get("objective", {})
 
     n_shots = cfg_tune.get("n_shots", 100)

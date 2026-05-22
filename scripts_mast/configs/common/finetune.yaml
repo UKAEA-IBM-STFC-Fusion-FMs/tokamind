@@ -5,7 +5,7 @@
 #
 # Quick edit guide:
 # - CLI init mode: --init warmstart|scratch (and --model for warmstart)
-# - embeddings.mode and embeddings.tune_embeddings.roles
+# - embeddings.role_mode is selected by --init via finetune_warmstart.yaml or finetune_scratch.yaml
 # - train/model recipe is selected by --init via finetune_warmstart.yaml or finetune_scratch.yaml
 # - collate drop probabilities
 #
@@ -54,28 +54,6 @@ preprocess:
     accept_nan_outputs: true
     window_stride_sec: 0.005
 
-
-embeddings:
-  mode: source  # source | config
-  # source: copy source run embeddings; roles=true re-tunes that role.
-  # config: ignore source embeddings and use the selected emb_profile as-is.
-
-  impute_na: true
-
-  tune_embeddings:
-    roles:
-      input: false
-      actuator: false
-      output: true
-
-    guardrails:
-      enable: true
-
-    objective:
-      thresholds:
-        output: 0.999
-      max_budget:
-        output: 8192
 
 
 collate:

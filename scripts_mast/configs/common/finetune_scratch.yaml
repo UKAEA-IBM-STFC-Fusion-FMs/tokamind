@@ -3,6 +3,29 @@
 # Loaded automatically after finetune.yaml when running:
 #   python scripts_mast/run_finetune.py --init scratch ...
 
+embeddings:
+  impute_na: true
+
+  # Per-role embedding policy:
+  # - tune: learn DCT3D rank coefficients in this run
+  # - source: inherit DCT3D rank coefficients from model_source.run_dir
+  # - config: use config/profile defaults without tuning or source artifacts
+  # Scratch has no source model, so all roles are tuned.
+  role_mode:
+    input: tune
+    actuator: tune
+    output: tune
+
+  tuning:
+    guardrails:
+      enable: true
+
+    objective:
+      thresholds:
+        output: 0.999
+      max_budget:
+        output: 8192
+
 train:
   # Run-level behavior (not per-stage).
   resume: false

@@ -211,19 +211,20 @@ Task files:
 - `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
 
 Finetune train/model recipes are split by init mode:
-- `scripts_mast/configs/common/finetune.yaml`: shared data/preprocess/embedding/collate/loader defaults
-- `scripts_mast/configs/common/finetune_warmstart.yaml`: warmstart training recipe, `model_source`, and `model_overrides`
-- `scripts_mast/configs/common/finetune_scratch.yaml`: scratch training recipe and complete `model_scratch`
+- `scripts_mast/configs/common/finetune.yaml`: shared data/preprocess/collate/loader defaults
+- `scripts_mast/configs/common/finetune_warmstart.yaml`: warmstart embedding policy, training recipe, `model_source`, and `model_overrides`
+- `scripts_mast/configs/common/finetune_scratch.yaml`: scratch embedding policy, training recipe, and complete `model_scratch`
 
 Details are in:
 - [Configuration Guide](docs/config_guide.md)
 - [Configuration Reference](docs/config_reference.md)
 
 ## 🧩 Embedding Resolution
-DCT3D tuning is integrated in the training scripts and controlled through `embeddings.tune_embeddings`.
+DCT3D tuning is integrated in the training scripts and controlled through `embeddings.role_mode` and `embeddings.tuning`.
 
-- Pretrain: `tune_embeddings.roles` selects which roles to tune.
-- Finetune: `embeddings.mode` controls whether embeddings are inherited from source run (`source`) or read directly from config (`config`).
+- `role_mode.<role>=tune`: tune DCT3D coefficients in the current run.
+- `role_mode.<role>=source`: inherit DCT3D coefficients from the source run.
+- `role_mode.<role>=config`: use config/profile defaults without tuning or source artifacts.
 - Eval: embeddings are loaded from the evaluated training run.
 
 Details are in [DCT3D Tuning](docs/tuning_dct3d.md).

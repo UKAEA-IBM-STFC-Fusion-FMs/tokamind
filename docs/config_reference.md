@@ -150,70 +150,60 @@ writes `embeddings` into the chunk dict as usual).
 - Description: per-signal encoder overrides merged at runtime.
 - Typical source: run-local tuned rank overrides.
 
-### `embeddings.mode`
-- Type: `"source" | "config"`
-- Used in: finetune
+### `embeddings.role_mode.{input,actuator,output}`
+- Type: `"tune" | "source" | "config"`
+- Used in: pretrain, finetune
 - Description:
-  - `source`: stage only task-used source DCT3D artifacts into the current run and optionally retune selected roles.
-  - `config`: ignore source artifacts and use merged config directly.
+  - `tune`: tune DCT3D coefficients in the current run.
+  - `source`: inherit DCT3D coefficients from the source run. Valid only in finetune and requires `model_source.run_dir`.
+  - `config`: use merged config/profile defaults without tuning or source artifacts.
+  - Pretrain accepts only `tune` or `config`; `source` is invalid because pretrain has no source run.
 
-### `embeddings.tune_embeddings.roles.input`
-- Type: `bool`
-- Description: tune/retune input role.
-
-### `embeddings.tune_embeddings.roles.actuator`
-- Type: `bool`
-- Description: tune/retune actuator role.
-
-### `embeddings.tune_embeddings.roles.output`
-- Type: `bool`
-- Description: tune/retune output role.
-
-### `embeddings.tune_embeddings.n_shots`
+### `embeddings.tuning.n_shots`
 - Type: `int`
 - Description: shot sample size for DCT3D tuning.
 
-### `embeddings.tune_embeddings.max_windows`
+### `embeddings.tuning.max_windows`
 - Type: `int | null`
 - Description: max streamed windows for tuning.
 
-### `embeddings.tune_embeddings.objective.thresholds.{input,actuator,output}`
+### `embeddings.tuning.objective.thresholds.{input,actuator,output}`
 - Type: `float` in `(0, 1]`
 - Description: explained-energy targets by role.
 
-### `embeddings.tune_embeddings.objective.max_budget.{input,actuator,output}`
+### `embeddings.tuning.objective.max_budget.{input,actuator,output}`
 - Type: `int`
 - Description: maximum selected coefficients per role (hard final cap).
 
-### `embeddings.tune_embeddings.guardrails`
+### `embeddings.tuning.guardrails`
 - Type: mapping
 - Description: optional minimum-dimension coverage constraints.
 
-### `embeddings.tune_embeddings.guardrails.enable`
+### `embeddings.tuning.guardrails.enable`
 - Type: `bool`
 - Description: enable/disable guardrail lifting during rank tuning.
 
-### `embeddings.tune_embeddings.guardrails.timeseries.min_unique_t`
+### `embeddings.tuning.guardrails.timeseries.min_unique_t`
 - Type: `int`
 - Description: minimum unique T indices required for timeseries signals.
 
-### `embeddings.tune_embeddings.guardrails.profile.min_unique_h`
+### `embeddings.tuning.guardrails.profile.min_unique_h`
 - Type: `int`
 - Description: minimum unique H indices required for profile signals.
 
-### `embeddings.tune_embeddings.guardrails.profile.min_unique_t`
+### `embeddings.tuning.guardrails.profile.min_unique_t`
 - Type: `int`
 - Description: minimum unique T indices required for profile signals.
 
-### `embeddings.tune_embeddings.guardrails.video.min_unique_h`
+### `embeddings.tuning.guardrails.video.min_unique_h`
 - Type: `int`
 - Description: minimum unique H indices required for video signals.
 
-### `embeddings.tune_embeddings.guardrails.video.min_unique_w`
+### `embeddings.tuning.guardrails.video.min_unique_w`
 - Type: `int`
 - Description: minimum unique W indices required for video signals.
 
-### `embeddings.tune_embeddings.guardrails.video.min_unique_t`
+### `embeddings.tuning.guardrails.video.min_unique_t`
 - Type: `int`
 - Description: minimum unique T indices required for video signals.
 
@@ -507,5 +497,5 @@ Per task under `scripts_mast/configs/tasks_overrides/<task>/`:
 2. Task embedding profile file exists for pretrain/finetune.
 3. Finetune/eval include `--model` on CLI.
 4. Eval keeps `data.keep_output_native: true`.
-5. Finetune with `embeddings.mode=config` sets all `tune_embeddings.roles` to `false`.
+5. Finetune with `embeddings.role_mode.*=config` uses config/profile defaults without source artifacts or tuning.
 6. `data.split` is set in pretrain/finetune configs; do not set it in eval configs.
