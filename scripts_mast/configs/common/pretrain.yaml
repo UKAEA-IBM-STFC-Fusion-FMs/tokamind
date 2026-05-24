@@ -49,10 +49,11 @@ preprocess:
     accept_nan_outputs: true
     window_stride_sec: 0.01
 
+  embed_chunks:
+    nan_imputation: zero  # zero | interpolate | null
+
 
 embeddings:
-  impute_na: true
-
   role_mode:
     input: tune
     actuator: tune

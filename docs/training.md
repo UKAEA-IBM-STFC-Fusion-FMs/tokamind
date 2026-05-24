@@ -119,7 +119,7 @@ When multiple terms are present, the total loss is a normalized weighted sum: `t
 When an output signal uses `encoder_name: identity` (e.g. in a `dct3d_native_outputs` embedding profile),
 `EmbedChunksTransform` **skips the embedding step** for that signal and does not store an `output_emb` entry.
 This avoids holding two copies of the same data in memory — particularly important for large spatial outputs
-(Thomson scattering profiles, bolometry) where caching the embedded and native arrays separately would cause
+where caching the embedded and native arrays separately would cause
 significant RAM overhead.
 
 Consequences:
@@ -151,25 +151,30 @@ preprocess:
 
 Setting `accept_nan_outputs: false` prevents corrupted or partially missing targets from entering the loss. Setting it to `true` (as in eval) allows those windows through — correct when the loss can handle NaN positions explicitly (e.g. `native_sparse_mse`) or when the evaluator uses `nanmean`.
 
-### 2. Encoding: `embeddings.impute_na`
-`embeddings.impute_na` (default `true`) controls whether NaN values are zero-filled before `codec.encode()`.
+### 2. Encoding: `preprocess.embed_chunks.nan_imputation`
+`preprocess.embed_chunks.nan_imputation` (default `"zero"`) controls how NaN values are handled before `codec.encode()`.
 
 ```yaml
-embeddings:
-  impute_na: true
+preprocess:
+  embed_chunks:
+    nan_imputation: zero  # zero | interpolate | null
 ```
 
-- `true` (default): NaN → zero (signal mean in standardized space) on a local copy immediately before encoding. The original `window["output"][name]["values"]` is **never modified**, preserving NaN locations for eval metrics and for `native_sparse_mse` targets.
-- `false`: no imputation. Only valid when all codecs can handle NaN inputs natively. An error is raised at pipeline construction if any codec has `requires_finite_input=True` (all current codecs do).
+- `"zero"` (default): NaN → zero on a local copy immediately before encoding. If data are standardized, zero corresponds to the signal mean; otherwise this is a literal zero-fill. Fast but creates hard step discontinuities at NaN/valid boundaries, which DCT3D can amplify.
+- `"interpolate"`: fills NaN via temporal then spatial linear interpolation with zero fallback. Avoids step edges — preferred when signals have structured boundary NaN (transitions from observed values to non-finite at a boundary).
+- `null`: no imputation; the array is passed to the codec as-is. Allowed only when all registered codecs can handle non-finite inputs natively; current finite-only codecs raise at construction time.
+
+In all cases, the original `window["output"][name]["values"]` is **never modified**, preserving NaN locations for eval metrics and for `native_sparse_mse` targets.
 
 ### Combined behavior
 
-| `accept_nan_outputs` | `impute_na` | Loss term | Outcome |
+| `accept_nan_outputs` | `nan_imputation` | Loss term | Outcome |
 |---|---|---|---|
-| `false` | `true` | `embed_mse` | Windows with NaN outputs are dropped; remaining windows are fully observed. Cleanest training signal. |
-| `true` | `true` | `embed_mse` | NaN positions become zeros in the target embedding. Loss trains through imputed positions with no masking. |
-| `true` | `true` | `native_sparse_mse` | NaN positions imputed before encoding, but `output_native` preserves original NaNs. Loss masks imputed positions out at the native level. |
-| `true` | `true` | `native_sparse_mse` + identity output | Embedding step is skipped entirely for identity outputs — no `output_emb` stored, no RAM duplication. `output_native` is the only copy. Loss masks NaN positions as normal. |
+| `false` | any | `embed_mse` | Windows with NaN outputs are dropped; remaining windows are fully observed. Cleanest training signal. |
+| `true` | `"zero"` | `embed_mse` | NaN positions become zeros in the target embedding. In standardized data this is mean imputation. Loss trains through imputed positions with no masking. Can corrupt DCT3D for signals with structured boundary NaN. |
+| `true` | `"interpolate"` | `embed_mse` | NaN positions filled by interpolation before encoding. Avoids step discontinuities — better DCT3D representation for structured boundary NaN. |
+| `true` | any | `native_sparse_mse` | NaN positions imputed before encoding, but `output_native` preserves original NaNs. Loss masks imputed positions out at the native level. |
+| `true` | any | `native_sparse_mse` + identity output | Embedding step is skipped entirely for identity outputs — no `output_emb` stored, no RAM duplication. `output_native` is the only copy. Loss masks NaN positions as normal. |
 
 ## AMP (Mixed Precision)
 

@@ -53,6 +53,9 @@ preprocess:
     accept_nan_outputs: true
     window_stride_sec: 0.005
 
+  embed_chunks:
+    nan_imputation: zero  # zero | interpolate | null
+
 
 collate:
   p_drop_inputs: 0.05
@@ -75,8 +78,6 @@ loader:
   batches_per_epoch: null  # required only when data.cache.enable=false
 
 embeddings:
-  impute_na: true
-
   # Per-role embedding policy:
   # - tune: learn DCT3D rank coefficients in this run
   # - source: inherit DCT3D rank coefficients from model_source.run_dir

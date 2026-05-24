@@ -187,7 +187,7 @@ def build_default_transform(
     cfg_chunks = cfg_prep["chunk"]
     cfg_trim = cfg_prep["trim_chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
-    impute_na = bool((cfg_mmt.raw.get("embeddings") or {}).get("impute_na", True))
+    nan_imputation = (cfg_prep.get("embed_chunks") or {}).get("nan_imputation", "zero")
 
     return ComposeTransforms(
         [
@@ -205,7 +205,7 @@ def build_default_transform(
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(max_chunks=cfg_trim["max_chunks"]),
-            EmbedChunksTransform(signal_specs=signal_specs, codecs=codecs, impute_na=impute_na),
+            EmbedChunksTransform(signal_specs=signal_specs, codecs=codecs, nan_imputation=nan_imputation),
             BuildTokensTransform(signal_specs=signal_specs),
             FinalizeWindowTransform(keep_output_native=keep_output_native),
         ]

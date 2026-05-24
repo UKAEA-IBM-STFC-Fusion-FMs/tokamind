@@ -121,16 +121,21 @@ embeddings:
         encoder_kwargs: { keep_h: 1, keep_w: 1, keep_t: 10 }
 ```
 
-### `embeddings.impute_na`
-- Type: `bool`
-- Default: `true`
-- Description: controls NaN imputation in `EmbedChunksTransform` before `codec.encode()`.
-  - `true` (default): NaN values are zero-filled on a local copy before encoding. Zero equals the signal mean
-    in standardized space — the least-biased imputation. Output signal native values are never modified.
-  - `false`: no imputation. Only valid when all codecs can handle NaN inputs natively. An error is raised at
-    pipeline construction if any codec has `requires_finite_input=True` (all current codecs do).
-  - Note: `impute_na` has no effect on identity-encoded output signals — their embedding step is skipped
-    entirely (see `encoder_name: identity` below).
+### `preprocess.embed_chunks.nan_imputation`
+- Type: `"zero" | "interpolate" | null`
+- Default: `"zero"`
+- Description: controls NaN imputation strategy in `EmbedChunksTransform` before `codec.encode()`.
+  - `"zero"` (default): NaN/inf values are zero-filled on a local copy. If data are standardized,
+    zero corresponds to the signal mean; otherwise this is a literal zero-fill. Fast, but creates hard
+    step discontinuities at NaN/valid boundaries, which can contaminate DCT3D low-frequency coefficients.
+  - `"interpolate"`: fills NaN via temporal then spatial linear interpolation, with zero fallback for
+    positions that cannot be interpolated (e.g. entire spatial region missing). Avoids step discontinuities
+    that contaminate DCT3D low-frequency coefficients. Preferred for signals with structured boundary NaN.
+  - `null`: no imputation. The array is passed to the codec unchanged. Allowed only when all registered
+    codecs can handle non-finite inputs natively; current finite-only codecs raise at construction time.
+  - Note: this setting has no effect on identity-encoded output signals — their embedding step is skipped
+    entirely (see `encoder_name: identity` below). Output native values are never modified regardless of
+    this setting.
 
 ### `encoder_name: identity`
 Setting `encoder_name: identity` for an **output** signal has a special memory-saving behavior:
@@ -365,7 +370,7 @@ Supported term types:
 
 | Type | Description |
 |---|---|
-| `embed_mse` | MSE in embedding (coefficient) space. No decoding required. With `impute_na: true`, NaN positions are zero-filled before encoding; the loss trains against the embedding of the zero-imputed signal with no explicit NaN awareness. |
+| `embed_mse` | MSE in embedding (coefficient) space. No decoding required. NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; the loss trains against the embedding of the imputed signal with no explicit NaN masking. |
 | `native_sparse_mse` | MSE in native standardized space. Decodes predictions back to native space, then explicitly masks out NaN positions from `output_native` before computing the mean. Only observed positions contribute. Requires decoders to be built at startup. |
 
 Example:

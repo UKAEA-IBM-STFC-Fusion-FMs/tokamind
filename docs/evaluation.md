@@ -108,7 +108,7 @@ For eval it is always `true`. For training it is `true` only when the loss requi
 ## Sparse Evaluation
 The TokaMark evaluator computes metrics using `nanmean`, which correctly ignores NaN values in ground truth. This enables benchmark-comparable sparse evaluation even when signals have missing timesteps or channels.
 
-For this to work correctly, the pipeline preserves NaN values in `window["output"]` through to the evaluator — they are never overwritten. The zero-fill imputation applied in `EmbedChunksTransform` operates only on a temporary local copy used for encoding and does not affect the ground truth values used for scoring.
+For this to work correctly, the pipeline preserves NaN values in `window["output"]` through to the evaluator — they are never overwritten. The imputation applied in `EmbedChunksTransform` operates only on a temporary local copy used for encoding and does not affect the ground truth values used for scoring.
 
 During training, `accept_nan_outputs=False` in `SelectValidWindowsTransform` ensures windows with partial-NaN outputs are dropped before reaching the loss. During eval, `accept_nan_outputs=True` allows those windows through so the evaluator can score on the non-NaN positions using `nanmean`.
 
