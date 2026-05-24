@@ -254,7 +254,9 @@ class EmbedChunksTransform:
         """
         Fill NaN values via temporal then spatial linear interpolation, with zero fallback.
 
-        Applied to a local copy of a standardized signal array of shape ``(H, W, T)``.
+        Uses the same native-to-DCT view convention as ``DCT3DCodec``:
+        ``(T,) -> (1, 1, T)``, ``(C, T) -> (C, 1, T)``, ``(H, W, T) -> (H, W, T)``.
+        The returned array has the same shape as the input.
 
         Steps
         -----
@@ -273,42 +275,58 @@ class EmbedChunksTransform:
         Parameters
         ----------
         arr : np.ndarray
-            Input array of shape ``(H, W, T)``. Must be a writable copy — modified in-place.
+            Input array of shape ``(T,)``, ``(C, T)``, or ``(H, W, T)``. Must be a writable copy — modified
+            in-place.
 
         Returns
         -------
         np.ndarray
             Array with all non-finite values filled. Guaranteed finite on return.
 
+        Raises
+        ------
+        ValueError
+            If ``arr`` is not 1D, 2D, or 3D.
+
         """
 
-        H, W, T = arr.shape
+        original_shape = arr.shape
+        if arr.ndim == 1:
+            arr_view = arr.reshape(1, 1, arr.shape[0])
+        elif arr.ndim == 2:
+            arr_view = arr.reshape(arr.shape[0], 1, arr.shape[1])
+        elif arr.ndim == 3:
+            arr_view = arr
+        else:
+            raise ValueError(f"[EmbedChunksTransform] Interpolation supports 1D/2D/3D arrays, got shape={arr.shape}.")
+
+        H, W, T = arr_view.shape
 
         # Step 1: temporal interpolation per (h, w)
         t_idx = np.arange(T)
         for h in range(H):
             for w in range(W):
-                row = arr[h, w]
+                row = arr_view[h, w]
                 non_finite_mask = ~np.isfinite(row)
                 if non_finite_mask.any() and not non_finite_mask.all():
                     valid = np.where(~non_finite_mask)[0]
-                    arr[h, w] = np.interp(t_idx, valid, row[valid])
+                    arr_view[h, w] = np.interp(t_idx, valid, row[valid])
 
         # Step 2: spatial interpolation along H per (w, t)
         if H > 1:
             h_idx = np.arange(H)
             for w in range(W):
                 for t in range(T):
-                    col = arr[:, w, t]
+                    col = arr_view[:, w, t]
                     non_finite_mask = ~np.isfinite(col)
                     if non_finite_mask.any() and not non_finite_mask.all():
                         valid = np.where(~non_finite_mask)[0]
-                        arr[:, w, t] = np.interp(h_idx, valid, col[valid])
+                        arr_view[:, w, t] = np.interp(h_idx, valid, col[valid])
 
         # Step 3: zero fallback for any remaining non-finite values (NaN and ±inf)
-        np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0, copy=False)
+        np.nan_to_num(arr_view, nan=0.0, posinf=0.0, neginf=0.0, copy=False)
 
-        return arr
+        return arr_view.reshape(original_shape)
 
     # ------------------------------------------------------------------------------------------------------------------
     def __call__(  # NOSONAR - Ignore cognitive complexity
