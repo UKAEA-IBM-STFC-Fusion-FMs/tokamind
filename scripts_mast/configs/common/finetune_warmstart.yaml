@@ -1,7 +1,79 @@
 # Warm-start-specific FINETUNE configuration.
 #
-# Loaded automatically after finetune.yaml when running:
-#   python scripts_mast/run_finetune.py --init warmstart ...
+# Complete self-contained finetune config loaded by:
+#   python scripts_mast/run_finetune.py --init warmstart --model <run_id_or_path> ...
+#
+# Task-specific deltas still belong in:
+#   scripts_mast/configs/tasks_overrides/<task>/finetune_overrides.yaml
+#
+# Contains:
+#   - data / preprocess / collate / loader defaults
+#   - warmstart embedding role policy
+#   - train schedule
+#   - model_source / model_overrides
+
+seed: 54
+
+runtime:
+  debug_logging: false
+
+# Optional run folder name under runs/. If null, loader generates one.
+run_id: null
+
+
+data:
+  local: false  # true = load from local_path (dev/laptop); false = stream from remote HPC store
+  local_path:   # used only when local: true
+  subset_of_shots: null   # None / null → uses all shots
+  split: random  # random | temporal
+
+  cache:
+    enable: true
+    dtype: float16
+    num_workers: 64
+    max_windows:
+      train: null
+      val: null
+
+
+preprocess:
+  # Task-specific finetune_overrides.yaml can override these defaults.
+  chunk:
+    chunk_length: 0.005
+    stride: null
+
+  trim_chunks:
+    max_chunks: 50
+
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    accept_nan_inputs_actuators: true
+    accept_nan_outputs: true
+    window_stride_sec: 0.005
+
+
+collate:
+  p_drop_inputs: 0.05
+  p_drop_inputs_overrides: {}
+#    pf_active-solenoid_current: 0.1
+  p_drop_outputs: 0.0
+  p_drop_outputs_overrides: {}
+  p_drop_actuators: 0.0
+  p_drop_actuators_overrides: {}
+  p_drop_inputs_chunks: 0.05
+  p_drop_actuators_chunks: 0.0
+
+
+# For cached mode, loader.num_workers=0 (or at most 1) is usually best.
+loader:
+  batch_size: 512
+  num_workers: 0
+  shuffle_train: true
+  drop_last: false
+  batches_per_epoch: null  # required only when data.cache.enable=false
+
 
 embeddings:
   impute_na: true
@@ -26,6 +98,7 @@ embeddings:
       max_budget:
         output: 8192
 
+
 train:
   # Run-level behavior (not per-stage).
   resume: false
@@ -42,10 +115,10 @@ train:
 #      summary-ip: 1.2
 
     terms:
-      - type: embed_mse
+#      - type: embed_mse
+#        weight: 1.0
+      - type: native_sparse_mse   # data.keep_output_native is set automatically when this term is present
         weight: 1.0
-#      - type: native_sparse_mse   # data.keep_output_native is set automatically when this term is present
-#        weight: 0.5
 
   optimizer:
     use_adamw: true
@@ -109,6 +182,7 @@ model_source:
     backbone: true
     modality_heads: true
     output_adapters: false
+
 
 # Warmstart: model = deep_merge(source_model, model_overrides)
 model_overrides:

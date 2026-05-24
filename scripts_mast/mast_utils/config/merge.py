@@ -195,14 +195,8 @@ def load_and_merge_base_configs(
     common_dir = configs_root_path / "common"
 
     embeddings_path = common_dir / "embeddings.yaml"
-    phase_common_path = common_dir / f"{phase}.yaml"
-    for path in [embeddings_path, phase_common_path]:
-        if not path.is_file():
-            raise FileNotFoundError(f"Required config file not found at path {path}.")
-
-    merged: dict[str, Any] = {}
-    merged = deep_merge(base=merged, override=load_yaml(path=embeddings_path))
-    merged = deep_merge(base=merged, override=load_yaml(path=phase_common_path))
+    if not embeddings_path.is_file():
+        raise FileNotFoundError(f"Required config file not found at path {embeddings_path}.")
 
     if phase == "finetune":
         if finetune_init not in ["warmstart", "scratch"]:
@@ -210,10 +204,17 @@ def load_and_merge_base_configs(
                 "`finetune_init` must be provided when loading finetune configs and must be one of "
                 f"['warmstart', 'scratch'], got {finetune_init!r}."
             )
-        init_common_path = common_dir / f"finetune_{finetune_init}.yaml"
-        if not init_common_path.is_file():
-            raise FileNotFoundError(f"Required init-specific finetune config not found at path {init_common_path}.")
-        merged = deep_merge(base=merged, override=load_yaml(path=init_common_path))
+        phase_common_path = common_dir / f"finetune_{finetune_init}.yaml"
+        if not phase_common_path.is_file():
+            raise FileNotFoundError(f"Required init-specific finetune config not found at path {phase_common_path}.")
+    else:
+        phase_common_path = common_dir / f"{phase}.yaml"
+        if not phase_common_path.is_file():
+            raise FileNotFoundError(f"Required config file not found at path {phase_common_path}.")
+
+    merged: dict[str, Any] = {}
+    merged = deep_merge(base=merged, override=load_yaml(path=embeddings_path))
+    merged = deep_merge(base=merged, override=load_yaml(path=phase_common_path))
 
     phase_overrides_path = tasks_overrides_dir / f"{phase}_overrides.yaml"
     if phase_overrides_path.is_file():

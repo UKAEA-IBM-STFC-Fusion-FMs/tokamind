@@ -21,9 +21,8 @@ scripts_mast/configs/
   common/
     embeddings.yaml
     pretrain.yaml
-    finetune.yaml              # shared finetune data/preprocess/collate/loader defaults
-    finetune_warmstart.yaml    # warmstart embeddings/train/model recipe + model_source
-    finetune_scratch.yaml      # scratch embeddings/train/model recipe
+    finetune_warmstart.yaml    # complete warmstart finetune config
+    finetune_scratch.yaml      # complete scratch finetune config
     eval.yaml
 
   tasks_overrides/
@@ -74,11 +73,10 @@ For `pretrain`, merge order is:
 4. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` (task/profile embedding edits, required)
 
 For `finetune`, merge order is:
-1. `common/embeddings.yaml` (shared embedding defaults + tuning objective)
-2. `common/finetune.yaml` (shared finetune data/preprocess/collate/loader defaults)
-3. `common/finetune_warmstart.yaml` **or** `common/finetune_scratch.yaml` (init-mode-specific embeddings/train/model recipe, selected automatically from `--init`)
-4. `tasks_overrides/<task>/finetune_overrides.yaml` (task-specific edits, optional)
-5. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` (task/profile embedding edits, required)
+1. `common/embeddings.yaml` (shared embedding defaults)
+2. `common/finetune_warmstart.yaml` **or** `common/finetune_scratch.yaml` (complete init-mode config, selected automatically from `--init`)
+3. `tasks_overrides/<task>/finetune_overrides.yaml` (task-specific edits, optional; applies to both init modes)
+4. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` (task/profile embedding edits, required)
 
 For `eval`, merge order is:
 1. `common/embeddings.yaml` (base embedding defaults)
@@ -108,7 +106,8 @@ When a source model is used, the loader resolves and stores:
 - `data.split` sets the split strategy (`random` or `temporal`, default `random`).
 
 ### Finetune
-Embedding/train/model configuration is owned by the init-mode files:
+Finetune data/preprocess/collate/loader plus embedding/train/model configuration is owned by the init-mode files:
+- `data`, `preprocess`, `collate`, and `loader` — duplicated in `finetune_scratch.yaml` and `finetune_warmstart.yaml` for self-contained run recipes
 - `embeddings.role_mode` and finetune `embeddings.tuning` — defined in `finetune_scratch.yaml` or `finetune_warmstart.yaml`
 - `model_scratch` — defined in `finetune_scratch.yaml`: complete scratch model architecture
 - `model_overrides` — defined in `finetune_warmstart.yaml`: overrides applied on top of the source model

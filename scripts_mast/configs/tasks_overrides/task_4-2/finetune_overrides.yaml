@@ -35,3 +35,9 @@ loader:
 #       optimizer:
 #         lr:
 #           token_encoder: 0.0    # <- task specific
+
+train:
+  loss:
+    terms:
+      - type: embed_mse
+        weight: 1.0

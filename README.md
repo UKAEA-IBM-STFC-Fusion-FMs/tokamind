@@ -197,7 +197,6 @@ Configuration is convention-based and merged by phase.
 Base files:
 - `scripts_mast/configs/common/embeddings.yaml`
 - `scripts_mast/configs/common/pretrain.yaml`
-- `scripts_mast/configs/common/finetune.yaml`
 - `scripts_mast/configs/common/finetune_warmstart.yaml`
 - `scripts_mast/configs/common/finetune_scratch.yaml`
 - `scripts_mast/configs/common/eval.yaml`
@@ -210,10 +209,11 @@ Task files:
 - `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` (optional)
 - `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
 
-Finetune train/model recipes are split by init mode:
-- `scripts_mast/configs/common/finetune.yaml`: shared data/preprocess/collate/loader defaults
-- `scripts_mast/configs/common/finetune_warmstart.yaml`: warmstart embedding policy, training recipe, `model_source`, and `model_overrides`
-- `scripts_mast/configs/common/finetune_scratch.yaml`: scratch embedding policy, training recipe, and complete `model_scratch`
+Finetune configs are split by init mode:
+- `scripts_mast/configs/common/finetune_warmstart.yaml`: complete warmstart config, embedding policy, training recipe, `model_source`, and `model_overrides`
+- `scripts_mast/configs/common/finetune_scratch.yaml`: complete scratch config, embedding policy, training recipe, and complete `model_scratch`
+
+Task-specific finetune deltas still live in `tasks_overrides/<task>/finetune_overrides.yaml` and apply on top of either init mode.
 
 Details are in:
 - [Configuration Guide](docs/config_guide.md)

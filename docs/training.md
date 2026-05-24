@@ -17,7 +17,7 @@ Both scripts share the same training loop (`train_finetune`) and configuration s
 
 Training is split into one or more sequential stages, each with independent learning rates, weight decay, and freeze settings. Stages run in order; epoch counters continue across stages.
 
-The stage schedule depends on the finetune init mode and lives in the init-mode-specific config file, not in `finetune.yaml` itself:
+The full finetune recipe depends on the init mode and lives in the init-mode-specific config file:
 
 **`--init warmstart`** (`finetune_warmstart.yaml`) — two stages:
 ```yaml

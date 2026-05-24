@@ -268,10 +268,11 @@ Top-level location: `loader:`
 - Description: optional cap for streaming-epoch batch count.
 
 ## Finetune Model Configuration
-Train/model configuration is split across init-mode files:
+Finetune configuration is split across init-mode files:
 
 | Key | File | Scope |
 |---|---|---|
+| `data` / `preprocess` / `collate` / `loader` | `common/finetune_warmstart.yaml` or `common/finetune_scratch.yaml` | duplicated per init mode |
 | `model_scratch` | `common/finetune_scratch.yaml` | complete scratch model |
 | `model_overrides` | `common/finetune_warmstart.yaml` | warmstart-only source-model overrides |
 | `train` | `common/finetune_warmstart.yaml` or `common/finetune_scratch.yaml` | per init mode |

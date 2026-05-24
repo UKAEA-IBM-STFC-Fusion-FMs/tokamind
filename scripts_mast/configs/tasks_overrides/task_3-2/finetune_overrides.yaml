@@ -11,3 +11,9 @@
 # preprocess:
 #   valid_windows:
 #     window_stride_sec: 0.005
+
+train:
+  loss:
+    terms:
+      - type: embed_mse
+        weight: 1.0
