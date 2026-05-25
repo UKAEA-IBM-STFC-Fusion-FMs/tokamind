@@ -4,14 +4,14 @@ Source-run inheritance and finetune model semantics.
 This module handles config inheritance from source models for warmstart/eval:
 - Resolves source model directories (run_id or path)
 - Loads source run config snapshots
-- Optionally inherits preprocessing settings (chunk, trim_chunks)
+- Optionally inherits representation preprocessing settings (chunk, trim_chunks, embed_chunks)
 - Applies finetune model semantics (scratch model vs warmstart overrides)
 - Merges source model config with current overrides
 
 Key concepts:
 - Warmstart: load source model weights/config, keep finetune preprocess from current task config
 - Scratch: use complete model_scratch architecture, no source inheritance
-- Eval: always inherits from source model (weights + config + embeddings), including preprocess chunk/trim settings
+- Eval: always inherits from source model (weights + config + embeddings), including representation preprocess settings
 """
 
 from __future__ import annotations
@@ -165,14 +165,14 @@ def load_source_run_config_yaml(model_run_dir: Path) -> dict[str, Any]:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def inherit_preprocess_chunk_trim(  # NOSONAR - Ignore cognitive complexity
+def inherit_preprocess_representation(  # NOSONAR - Ignore cognitive complexity
     merged: MutableMapping[str, Any],
     src_cfg: Mapping[str, Any],
     *,
     allow_override: bool,
 ) -> None:
     """
-    Inherit preprocess.chunk and preprocess.trim_chunks from source config.
+    Inherit representation-defining preprocess settings from source config.
 
     Parameters
     ----------
@@ -191,7 +191,7 @@ def inherit_preprocess_chunk_trim(  # NOSONAR - Ignore cognitive complexity
     ------
     KeyError
         If `src_cfg` does not have a key 'preprocess'.
-        If `src_cfg["preprocess"]` does not have a required key 'chunk' or 'trim_chunks'.
+        If `src_cfg["preprocess"]` misses required representation preprocess keys.
     TypeError
         If `merged["preprocess"]` is not of type dict.
 
@@ -201,12 +201,13 @@ def inherit_preprocess_chunk_trim(  # NOSONAR - Ignore cognitive complexity
     if not isinstance(src_pre, dict):
         raise KeyError(
             "Source run config `src_cfg` is missing required key 'preprocess' with mapping (dict) value.\n"
-            "Expected 'preprocess.chunk' and 'preprocess.trim_chunks' to be present."
+            "Expected 'preprocess.chunk', 'preprocess.trim_chunks', and 'preprocess.embed_chunks' to be present."
         )
-    if ("chunk" not in src_pre) or ("trim_chunks" not in src_pre):
+    missing = [key for key in ("chunk", "trim_chunks", "embed_chunks") if key not in src_pre]
+    if missing:
         raise KeyError(
-            "Source run config key `src_cfg['preprocess']` is missing a required key 'chunk' or 'trim_chunks'.\n"
-            "Expected: preprocess.chunk and preprocess.trim_chunks"
+            "Source run config key `src_cfg['preprocess']` is missing required representation preprocess keys "
+            f"{missing}.\nExpected: preprocess.chunk, preprocess.trim_chunks, preprocess.embed_chunks"
         )
 
     merged_pre = merged.get("preprocess")
@@ -218,12 +219,15 @@ def inherit_preprocess_chunk_trim(  # NOSONAR - Ignore cognitive complexity
 
     override_chunk = None
     override_trim = None
+    override_embed = None
     if allow_override:
         override_chunk = copy.deepcopy(merged_pre.get("chunk"))
         override_trim = copy.deepcopy(merged_pre.get("trim_chunks"))
+        override_embed = copy.deepcopy(merged_pre.get("embed_chunks"))
 
     merged_pre["chunk"] = copy.deepcopy(src_pre["chunk"])
     merged_pre["trim_chunks"] = copy.deepcopy(src_pre["trim_chunks"])
+    merged_pre["embed_chunks"] = copy.deepcopy(src_pre["embed_chunks"])
 
     if allow_override:
         if override_chunk is not None:
@@ -237,6 +241,12 @@ def inherit_preprocess_chunk_trim(  # NOSONAR - Ignore cognitive complexity
                 merged_pre["trim_chunks"] = deep_merge(base=merged_pre["trim_chunks"], override=override_trim)
             else:
                 merged_pre["trim_chunks"] = override_trim
+
+        if override_embed is not None:
+            if isinstance(override_embed, dict) and isinstance(merged_pre["embed_chunks"], dict):
+                merged_pre["embed_chunks"] = deep_merge(base=merged_pre["embed_chunks"], override=override_embed)
+            else:
+                merged_pre["embed_chunks"] = override_embed
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -351,7 +361,7 @@ def inherit_from_source_model(  # NOSONAR - Ignore cognitive complexity
         merged["data"]["split"] = source_split
         merged["model_source"]["data_split"] = source_split
         # Finetune warmstart: keep preprocess settings from current merged config (common + task overrides), do not
-        # force source chunk/trim inheritance.
+        # force source representation-preprocess inheritance.
 
     else:  # -> I.e., phase is "eval"
         if "embeddings" not in src_cfg:
@@ -362,7 +372,7 @@ def inherit_from_source_model(  # NOSONAR - Ignore cognitive complexity
         merged["model"] = copy.deepcopy(src_cfg["model"])
         merged["embeddings"] = copy.deepcopy(src_cfg["embeddings"])
         merged["embeddings_profile"] = src_cfg.get("embeddings_profile", merged.get("embeddings_profile"))
-        inherit_preprocess_chunk_trim(merged=merged, src_cfg=src_cfg, allow_override=False)
+        inherit_preprocess_representation(merged=merged, src_cfg=src_cfg, allow_override=False)
         merged["model_source"]["data_split"] = src_cfg["data"]["split"]
 
     merged["model_source"]["run_dir"] = str(src_run_dir)

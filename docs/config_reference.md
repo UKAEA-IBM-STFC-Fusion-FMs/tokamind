@@ -136,6 +136,8 @@ embeddings:
   - Note: this setting has no effect on identity-encoded output signals — their embedding step is skipped
     entirely (see `encoder_name: identity` below). Output native values are never modified regardless of
     this setting.
+  - Eval inherits this setting from the source training run being evaluated; it is intentionally not defined
+    in `common/eval.yaml` because it changes the token representation and must match training.
 
 ### `encoder_name: identity`
 Setting `encoder_name: identity` for an **output** signal has a special memory-saving behavior:

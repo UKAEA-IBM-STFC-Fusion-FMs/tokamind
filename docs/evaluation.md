@@ -110,6 +110,8 @@ The TokaMark evaluator computes metrics using `nanmean`, which correctly ignores
 
 For this to work correctly, the pipeline preserves NaN values in `window["output"]` through to the evaluator — they are never overwritten. The imputation applied in `EmbedChunksTransform` operates only on a temporary local copy used for encoding and does not affect the ground truth values used for scoring.
 
+Eval inherits `preprocess.embed_chunks` from the source training run so the token representation matches training. Eval-specific sparse-window policy remains controlled by `preprocess.valid_windows`.
+
 During training, `accept_nan_outputs=False` in `SelectValidWindowsTransform` ensures windows with partial-NaN outputs are dropped before reaching the loss. During eval, `accept_nan_outputs=True` allows those windows through so the evaluator can score on the non-NaN positions using `nanmean`.
 
 ## Loss Choice and NaN Behavior

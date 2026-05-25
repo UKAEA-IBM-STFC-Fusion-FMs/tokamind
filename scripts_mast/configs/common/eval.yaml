@@ -34,10 +34,6 @@ preprocess:
     accept_nan_outputs: true
     window_stride_sec: null  # if null we evaluate on all the possible windows
 
-  embed_chunks:
-    nan_imputation: zero  # zero | interpolate | null
-
-
 loader:
   batch_size: 512
   num_workers: 32

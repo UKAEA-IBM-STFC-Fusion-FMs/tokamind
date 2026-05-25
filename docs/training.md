@@ -174,7 +174,6 @@ In all cases, the original `window["output"][name]["values"]` is **never modifie
 | `true` | `"zero"` | `embed_mse` | NaN positions become zeros in the target embedding. In standardized data this is mean imputation. Loss trains through imputed positions with no masking. Can corrupt DCT3D for signals with structured boundary NaN. |
 | `true` | `"interpolate"` | `embed_mse` | NaN positions filled by interpolation before encoding. Avoids step discontinuities — better DCT3D representation for structured boundary NaN. |
 | `true` | any | `native_sparse_mse` | NaN positions imputed before encoding, but `output_native` preserves original NaNs. Loss masks imputed positions out at the native level. |
-| `true` | any | `native_sparse_mse` + identity output | Embedding step is skipped entirely for identity outputs — no `output_emb` stored, no RAM duplication. `output_native` is the only copy. Loss masks NaN positions as normal. |
 
 ## AMP (Mixed Precision)
 
