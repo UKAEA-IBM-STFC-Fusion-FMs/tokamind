@@ -168,6 +168,7 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
     cfg_chunks = cfg_prep["chunk"]
     cfg_trim = cfg_prep["trim_chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
+    nan_imputation = (cfg_prep.get("embed_chunks") or {}).get("nan_imputation", "zero")
 
     tune_transform = TuneRankedDCT3DTransform(
         signal_specs=signal_specs,
@@ -175,6 +176,7 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
         max_budget=max_budget_cfg,
         roles=roles,
         guardrails=guardrails_cfg,
+        nan_imputation=nan_imputation,
     )
 
     transform_pipeline = ComposeTransforms(

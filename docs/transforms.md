@@ -43,7 +43,8 @@ The shared entry helpers use:
 - applies per-signal codecs from `signal_specs`
 - uses codec map built by `build_codecs`
 - outputs fixed-width embedding vectors per signal/chunk
-- NaN imputation is controlled by `preprocess.embed_chunks.nan_imputation` (default `"zero"`):
+- NaN imputation is controlled by `preprocess.embed_chunks.nan_imputation` (default `"zero"`). The same
+  policy is also used during DCT3D rank tuning, so tuned coefficient indices match the runtime embedding policy:
   - `"zero"`: zero-fill on a local copy before encoding; zero equals the signal mean only when data are standardized
   - `"interpolate"`: temporal then spatial linear interpolation with zero fallback; avoids hard step
     discontinuities at NaN boundaries that would contaminate DCT3D low-frequency coefficients — preferred
@@ -90,6 +91,8 @@ preprocess:
 `TuneRankedDCT3DTransform` is used only during DCT3D rank tuning
 
 - role: collects pooled coefficient energies and selects rank-mode coefficients
+- NaN/inf policy: uses `preprocess.embed_chunks.nan_imputation`, the same policy used later by
+  `EmbedChunksTransform` before `codec.encode()`
 - policy order: threshold target -> guardrail lift -> hard budget cap
 - output: selected indices plus tuning metadata consumed by
   `runs/<run_id>/embeddings/dct3d.yaml`

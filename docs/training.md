@@ -101,7 +101,7 @@ train:
 
 | Type | Space | NaN handling | Cost |
 |---|---|---|---|
-| `embed_mse` | Embedding (coefficient) | Implicit: NaN positions are zero-filled before encoding; the loss trains against the embedding of the zero-imputed signal with no explicit NaN awareness. | Cheapest — no decoding. |
+| `embed_mse` | Embedding (coefficient) | Implicit: NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; the loss trains against the embedding of the imputed signal with no explicit NaN awareness. | Cheapest — no decoding. |
 | `native_sparse_mse` | Native (standardized) | Explicit: model predictions are decoded back to native space, then NaN positions from `output_native` are masked out before the mean. Only observed positions contribute. | Requires decoder forward pass per batch. |
 
 When multiple terms are present, the total loss is a normalized weighted sum: `total = Σ(w_i · L_i) / Σ(w_i)`.
@@ -110,7 +110,7 @@ When multiple terms are present, the total loss is a normalized weighted sum: `t
 
 ### When to use which
 
-- **`embed_mse`** is the default. It is fast and works well when output signals are reliably observed or when zero-imputed coefficients are an acceptable training proxy for the signal structure.
+- **`embed_mse`** is the default. It is fast and works well when output signals are reliably observed or when the configured imputed coefficients are an acceptable training proxy for the signal structure.
 - **`native_sparse_mse`** is preferable when output signals have systematic NaN gaps (partial channels, timestep dropouts) and you want the loss to ignore those positions explicitly rather than train through imputed zeros.
 - Both terms can be combined with independent weights for a mixed objective.
 
@@ -152,7 +152,7 @@ preprocess:
 Setting `accept_nan_outputs: false` prevents corrupted or partially missing targets from entering the loss. Setting it to `true` (as in eval) allows those windows through — correct when the loss can handle NaN positions explicitly (e.g. `native_sparse_mse`) or when the evaluator uses `nanmean`.
 
 ### 2. Encoding: `preprocess.embed_chunks.nan_imputation`
-`preprocess.embed_chunks.nan_imputation` (default `"zero"`) controls how NaN values are handled before `codec.encode()`.
+`preprocess.embed_chunks.nan_imputation` (default `"zero"`) controls how NaN/inf values are handled before DCT3D rank tuning and before runtime `codec.encode()`.
 
 ```yaml
 preprocess:
@@ -164,7 +164,7 @@ preprocess:
 - `"interpolate"`: fills NaN via temporal then spatial linear interpolation with zero fallback. Avoids step edges — preferred when signals have structured boundary NaN (transitions from observed values to non-finite at a boundary).
 - `null`: no imputation; the array is passed to the codec as-is. Allowed only when all registered codecs can handle non-finite inputs natively; current finite-only codecs raise at construction time.
 
-In all cases, the original `window["output"][name]["values"]` is **never modified**, preserving NaN locations for eval metrics and for `native_sparse_mse` targets.
+In all runtime embedding cases, the original `window["output"][name]["values"]` is **never modified**, preserving NaN locations for eval metrics and for `native_sparse_mse` targets. DCT3D tuning uses the same imputation strategy only to select coefficient indices from finite arrays.
 
 ### Combined behavior
 

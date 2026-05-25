@@ -124,7 +124,9 @@ embeddings:
 ### `preprocess.embed_chunks.nan_imputation`
 - Type: `"zero" | "interpolate" | null`
 - Default: `"zero"`
-- Description: controls NaN imputation strategy in `EmbedChunksTransform` before `codec.encode()`.
+- Description: controls NaN/inf imputation strategy before DCT3D rank tuning and before runtime
+  `EmbedChunksTransform` calls `codec.encode()`. Keeping both paths on the same policy ensures the tuned
+  coefficient indices match the embeddings used during training/evaluation.
   - `"zero"` (default): NaN/inf values are zero-filled on a local copy. If data are standardized,
     zero corresponds to the signal mean; otherwise this is a literal zero-fill. Fast, but creates hard
     step discontinuities at NaN/valid boundaries, which can contaminate DCT3D low-frequency coefficients.
@@ -372,7 +374,7 @@ Supported term types:
 
 | Type | Description |
 |---|---|
-| `embed_mse` | MSE in embedding (coefficient) space. No decoding required. NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; the loss trains against the embedding of the imputed signal with no explicit NaN masking. |
+| `embed_mse` | MSE in embedding (coefficient) space. No decoding required. NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; DCT3D tuning uses the same policy. The loss trains against the embedding of the imputed signal with no explicit NaN masking. |
 | `native_sparse_mse` | MSE in native standardized space. Decodes predictions back to native space, then explicitly masks out NaN positions from `output_native` before computing the mean. Only observed positions contribute. Requires decoders to be built at startup. |
 
 Example:

@@ -11,6 +11,8 @@ The codec supports two selection modes:
 
 Tuning computes rank selections and stores them per run.
 The objective is role-specific: each role can target different explained-energy thresholds and budgets.
+The tuning transform uses the same `preprocess.embed_chunks.nan_imputation` policy as runtime embedding so
+coefficient selection and encoded training data are consistent.
 
 ## Where Tuning Runs
 Tuning is integrated in training scripts and controlled by config:
@@ -61,6 +63,8 @@ embeddings:
 ```
 
 Parameter intent:
+- `preprocess.embed_chunks.nan_imputation`: NaN/inf policy used before full-DCT energy accumulation; this is
+  shared with runtime embedding before `codec.encode()`
 - `n_shots`: number of shots sampled for tuning statistics
 - `max_windows`: upper bound on analyzed windows
 - `thresholds`: minimum explained energy target by role
@@ -68,6 +72,10 @@ Parameter intent:
 - `guardrails`: optional sanity checks to avoid under-dimensioned selections
 
 ## Selection Policy (Transform)
+Before computing full-DCT energies, `TuneRankedDCT3DTransform` applies `preprocess.embed_chunks.nan_imputation`
+(`"zero"`, `"interpolate"`, or `null`) to match runtime embedding behavior. With current finite-only DCT3D codecs,
+`null` is only valid if no non-finite values reach tuning.
+
 `TuneRankedDCT3DTransform` applies selection in this order for each signal:
 1. Compute `K_target` from explained-energy threshold.
 2. If guardrails are enabled, compute modality-specific minimum coverage and lift K to:

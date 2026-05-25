@@ -94,13 +94,14 @@ from __future__ import annotations
 
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Iterable
+from typing import Any, Iterable, Literal
 from collections.abc import Mapping
 import logging
 import numpy as np
 
 from mmt.data.embeddings.dct3d import DCT3DCodec
 from mmt.data.signal_spec import SignalSpecRegistry
+from mmt.data.nan_imputation import impute_non_finite, validate_nan_imputation_strategy
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -329,6 +330,7 @@ class TuneRankedDCT3DTransform:
         max_budget: int | Mapping[str, int] | None = None,
         progress_every_n_shots: int | None = 10,
         guardrails: Mapping[str, Any] | None = None,
+        nan_imputation: Literal["zero", "interpolate"] | None = "zero",
     ) -> None:
         """
         Create a ranked DCT3D tuner.
@@ -353,6 +355,10 @@ class TuneRankedDCT3DTransform:
             Guardrails configuration to ensure minimum dimension coverage.
             Expected structure: {"enable": bool, "timeseries": {...}, "profile": {...}, "video": {...}}
             Optional. Default: None.
+        nan_imputation : "zero" | "interpolate" | None
+            Non-finite imputation strategy applied before full DCT encoding. Must match the runtime embedding
+            policy used by EmbedChunksTransform for consistent coefficient selection.
+            Optional. Default: "zero".
 
         Returns
         -------
@@ -369,7 +375,10 @@ class TuneRankedDCT3DTransform:
 
         """
 
+        validate_nan_imputation_strategy(nan_imputation, owner="TuneRankedDCT3DTransform")
+
         self.signal_specs = signal_specs
+        self.nan_imputation = nan_imputation
 
         # Progress logging
         self.progress_every_n_shots: int | None
@@ -453,10 +462,11 @@ class TuneRankedDCT3DTransform:
                     self.guardrails_config[signal_type] = dict(type_config)
 
         logger.debug(
-            "TuneRankedDCT3D initialized | roles=%s | budgets=%s | guardrails=%s",
+            "TuneRankedDCT3D initialized | roles=%s | budgets=%s | guardrails=%s | nan_imputation=%s",
             ",".join(self.roles),
             {r: self.max_budget.get(r) for r in self.roles},
             "enable" if self.guardrails_enable else "disabled",
+            self.nan_imputation,
         )
         if self.guardrails_enable:
             logger.info(
@@ -665,7 +675,16 @@ class TuneRankedDCT3DTransform:
         if not finite.any():
             return
 
-        x_clean = np.where(finite, x, 0.0)
+        x_clean = impute_non_finite(
+            x,
+            self.nan_imputation,
+            owner="TuneRankedDCT3DTransform",
+        )
+        if not np.isfinite(x_clean).all():
+            raise ValueError(
+                "[TuneRankedDCT3DTransform] Non-finite values remain after nan_imputation. "
+                "Use nan_imputation='zero' or 'interpolate' for DCT3D tuning."
+            )
 
         H, W, T = _dct_view_shape(native_shape=tuple(x.shape))
         codec_full = self._full_codec(H=H, W=W, T=T)

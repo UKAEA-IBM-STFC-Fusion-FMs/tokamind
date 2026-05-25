@@ -85,6 +85,7 @@ import logging
 import numpy as np
 
 from mmt.data.signal_spec import SignalSpecRegistry
+from mmt.data.nan_imputation import impute_non_finite, validate_nan_imputation_strategy
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -115,8 +116,6 @@ class EmbedChunksTransform:
 
     Methods
     -------
-    _interpolate_nans(arr)
-        Fill NaN values via temporal then spatial interpolation, with zero fallback.
     __call__(window)
         Call method for the class instances to behave like a function.
     _get_spec(role, name)
@@ -164,12 +163,7 @@ class EmbedChunksTransform:
 
         """
 
-        _VALID = {"zero", "interpolate", None}
-        if nan_imputation not in _VALID:
-            raise ValueError(
-                f"[EmbedChunksTransform] Invalid nan_imputation={nan_imputation!r}. "
-                "Must be one of: 'zero', 'interpolate', None."
-            )
+        validate_nan_imputation_strategy(nan_imputation, owner="EmbedChunksTransform")
 
         if nan_imputation is None:
             bad = [sid for sid, c in codecs.items() if getattr(c, "requires_finite_input", True)]
@@ -247,86 +241,6 @@ class EmbedChunksTransform:
             raise KeyError(f"[EmbedChunksTransform] No codec registered for `signal_id={sid}`.")
 
         return self.codecs[sid]
-
-    # ------------------------------------------------------------------------------------------------------------------
-    @staticmethod
-    def _interpolate_nans(arr: np.ndarray) -> np.ndarray:
-        """
-        Fill NaN values via temporal then spatial linear interpolation, with zero fallback.
-
-        Uses the same native-to-DCT view convention as ``DCT3DCodec``:
-        ``(T,) -> (1, 1, T)``, ``(C, T) -> (C, 1, T)``, ``(H, W, T) -> (H, W, T)``.
-        The returned array has the same shape as the input.
-
-        Steps
-        -----
-        1. **Temporal interpolation** (along T, per H×W position): fills non-finite timesteps from valid
-           neighbours. ``np.interp`` clamps to boundary values, so trailing non-finite positions are held
-           at the last valid value — avoiding a jump to the global standardized mean.
-        2. **Spatial interpolation** (along H, per W×T position): fills remaining non-finite positions from
-           neighbouring positions along H. Applied after step 1 so that entirely-missing slices can still
-           be filled from spatial neighbours if any valid neighbour exists.
-        3. **Zero fallback**: any position still non-finite after both passes is replaced with 0.0 in-place.
-           ±inf is explicitly cleared here via ``posinf=0.0, neginf=0.0``.
-
-        Both interpolation passes check ``~np.isfinite`` so ±inf is treated identically to NaN and
-        cannot survive into the encoder.
-
-        Parameters
-        ----------
-        arr : np.ndarray
-            Input array of shape ``(T,)``, ``(C, T)``, or ``(H, W, T)``. Must be a writable copy — modified
-            in-place.
-
-        Returns
-        -------
-        np.ndarray
-            Array with all non-finite values filled. Guaranteed finite on return.
-
-        Raises
-        ------
-        ValueError
-            If ``arr`` is not 1D, 2D, or 3D.
-
-        """
-
-        original_shape = arr.shape
-        if arr.ndim == 1:
-            arr_view = arr.reshape(1, 1, arr.shape[0])
-        elif arr.ndim == 2:
-            arr_view = arr.reshape(arr.shape[0], 1, arr.shape[1])
-        elif arr.ndim == 3:
-            arr_view = arr
-        else:
-            raise ValueError(f"[EmbedChunksTransform] Interpolation supports 1D/2D/3D arrays, got shape={arr.shape}.")
-
-        H, W, T = arr_view.shape
-
-        # Step 1: temporal interpolation per (h, w)
-        t_idx = np.arange(T)
-        for h in range(H):
-            for w in range(W):
-                row = arr_view[h, w]
-                non_finite_mask = ~np.isfinite(row)
-                if non_finite_mask.any() and not non_finite_mask.all():
-                    valid = np.where(~non_finite_mask)[0]
-                    arr_view[h, w] = np.interp(t_idx, valid, row[valid])
-
-        # Step 2: spatial interpolation along H per (w, t)
-        if H > 1:
-            h_idx = np.arange(H)
-            for w in range(W):
-                for t in range(T):
-                    col = arr_view[:, w, t]
-                    non_finite_mask = ~np.isfinite(col)
-                    if non_finite_mask.any() and not non_finite_mask.all():
-                        valid = np.where(~non_finite_mask)[0]
-                        arr_view[:, w, t] = np.interp(h_idx, valid, col[valid])
-
-        # Step 3: zero fallback for any remaining non-finite values (NaN and ±inf)
-        np.nan_to_num(arr_view, nan=0.0, posinf=0.0, neginf=0.0, copy=False)
-
-        return arr_view.reshape(original_shape)
 
     # ------------------------------------------------------------------------------------------------------------------
     def __call__(  # NOSONAR - Ignore cognitive complexity
@@ -421,11 +335,11 @@ class EmbedChunksTransform:
                         emb = self._cache[key]
                         n_signal_cache_hits += 1
                     else:
-                        if not np.isfinite(arr).all():
-                            if self.nan_imputation == "zero":
-                                arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-                            elif self.nan_imputation == "interpolate":
-                                arr = self._interpolate_nans(arr.copy())
+                        arr = impute_non_finite(
+                            arr,
+                            self.nan_imputation,
+                            owner="EmbedChunksTransform",
+                        )
                         emb = codec.encode(arr)
                         self._cache[key] = emb
                         n_signal_emb_new += 1
@@ -479,11 +393,11 @@ class EmbedChunksTransform:
 
                 arr = np.asarray(values)
                 # Impute on a local copy only — native values in window["output"] are preserved for eval metrics.
-                if not np.isfinite(arr).all():
-                    if self.nan_imputation == "zero":
-                        arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
-                    elif self.nan_imputation == "interpolate":
-                        arr = self._interpolate_nans(arr.copy())
+                arr = impute_non_finite(
+                    arr,
+                    self.nan_imputation,
+                    owner="EmbedChunksTransform",
+                )
                 emb = codec.encode(arr)
 
                 emb_out[sid] = emb

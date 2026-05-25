@@ -50,14 +50,15 @@ MAST signals can contain NaN values (missing channels, partial dropouts). The pi
   - `accept_nan_inputs_actuators` (default `True`): partial-NaN input/actuator signals pass through with NaN intact for downstream imputation.
   - `accept_nan_outputs` (default `True`): partial-NaN output signals pass through. Set to `False` in finetune/pretrain configs to drop windows with partial-NaN outputs from training, preventing corrupted targets from entering the loss.
   - In all cases, entirely-NaN or empty signals are always masked as invalid regardless of these flags.
-- **At encoding**: `EmbedChunksTransform` imputes NaN values on a local copy before `codec.encode()`,
-  controlled by `preprocess.embed_chunks.nan_imputation` (default `"zero"`):
+- **At representation building**: `preprocess.embed_chunks.nan_imputation` (default `"zero"`) controls
+  non-finite value handling before DCT3D tuning and before runtime `codec.encode()`. This keeps coefficient
+  selection consistent with the embeddings used during training/evaluation:
   - `"zero"`: literal zero-fill. If data are standardized, zero corresponds to the signal mean. Fast,
     but creates hard discontinuities at NaN/valid boundaries that can contaminate DCT3D low-frequency coefficients.
   - `"interpolate"`: temporal then spatial linear interpolation with zero fallback. Avoids step edges
     that contaminate DCT3D coefficients — preferred for signals with structured boundary NaN.
   - `null`: no imputation; allowed only when all registered codecs can handle non-finite inputs natively.
-  - Original values in `window["output"]` are never modified — NaN locations are preserved for eval
+  - Original values in `window["output"]` are never modified by runtime embedding — NaN locations are preserved for eval
     metrics and for native-space loss targets. See
     [Training — NaN Handling](training.md#nan-handling-in-training) for the full interaction with loss choice.
 

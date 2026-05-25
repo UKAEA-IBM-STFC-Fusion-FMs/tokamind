@@ -221,6 +221,7 @@ Details are in:
 
 ## 🧩 Embedding Resolution
 DCT3D tuning is integrated in the training scripts and controlled through `embeddings.role_mode` and `embeddings.tuning`.
+NaN/inf handling for both DCT3D tuning and runtime embedding is controlled by `preprocess.embed_chunks.nan_imputation`.
 
 - `role_mode.<role>=tune`: tune DCT3D coefficients in the current run.
 - `role_mode.<role>=source`: inherit DCT3D coefficients from the source run.
