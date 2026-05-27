@@ -59,11 +59,6 @@ embeddings:
     actuator: tune
     output: tune
 
-  tuning:
-    guardrails:
-      enable: true
-
-
 collate:
   p_drop_inputs: 0.1
   p_drop_inputs_overrides: {}
