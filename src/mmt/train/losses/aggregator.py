@@ -79,6 +79,11 @@ class LossAggregator:
         tuple[Tensor, dict]
             ``(total_loss, logs)`` where logs contains per-term and per-output loss values.
 
+        Raises
+        ------
+        RuntimeError
+            If ``preds`` is empty, which indicates that the model produced no output predictions.
+
         """
 
         y_emb: dict[Hashable, Tensor] = batch.get("output_emb", {})
@@ -86,7 +91,7 @@ class LossAggregator:
         y_native: dict[Hashable, Tensor] | None = batch.get("output_native", None)
 
         if not preds:
-            return torch.tensor(0.0, dtype=torch.float32), {}
+            raise RuntimeError("LossAggregator received empty predictions from the model.")
 
         ref = next(iter(preds.values()))
         device = ref.device
@@ -170,9 +175,7 @@ def build_loss_aggregator(
         term_weight = float(term_def.get("weight", 1.0))
 
         if term_type == "embed_mse":
-            built.append(
-                (EmbedMSELoss(output_weights=ow if ow else None), term_weight)
-            )
+            built.append((EmbedMSELoss(output_weights=ow if ow else None), term_weight))
 
         elif term_type == "native_sparse_mse":
             if not decoders:
@@ -180,9 +183,7 @@ def build_loss_aggregator(
                     "Loss term 'native_sparse_mse' requires decoders to be provided, but got None or empty dict. "
                     "Build and pass a dict[signal_id, TorchDecoder] when using this term."
                 )
-            built.append(
-                (NativeSparseMSELoss(decoders=decoders, output_weights=ow if ow else None), term_weight)
-            )
+            built.append((NativeSparseMSELoss(decoders=decoders, output_weights=ow if ow else None), term_weight))
 
         else:
             raise ValueError(f"Unknown loss term type '{term_type}'. Supported: 'embed_mse', 'native_sparse_mse'.")

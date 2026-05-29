@@ -94,13 +94,14 @@ class NativeSparseMSELoss(BaseLoss):
         Raises
         ------
         RuntimeError
+            If ``preds`` is empty, which indicates that the model produced no output predictions.
             If `output_mask` is not a bool tensor.
             If `y_native` is None when a supervised output is encountered.
 
         """
 
         if not preds:
-            return torch.tensor(0.0, dtype=torch.float32), {}
+            raise RuntimeError("NativeSparseMSELoss received empty predictions from the model.")
 
         ref = next(iter(preds.values()))
         device = ref.device

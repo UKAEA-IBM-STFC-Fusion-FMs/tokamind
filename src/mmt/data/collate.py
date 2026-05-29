@@ -21,7 +21,7 @@ Output signals configured with ``encoder_name: identity`` intentionally have no 
 this transparently:
 
 - ``output_native`` is built from ``window["output"]`` when ``keep_output_native=True``, for mapped output
-  signals present in the batch (signals absent from ``window["output"]`` or not in ``output_id_to_name`` are skipped).
+  signals present in the batch (missing per-window native values are represented as NaN, not supervised zeros).
 - ``output_mask`` is built from ``output_emb`` presence for embedded outputs, and from native value presence for
   identity outputs — so ``NativeSparseMSELoss`` sees both correctly.
 - ``output_emb`` only contains embedded outputs; ``EmbedMSELoss`` silently ignores signals absent from it.
@@ -609,7 +609,7 @@ class MMTCollate:
                     continue
 
                 output_native_batch_np[sig_id] = np.stack(
-                    [v if v is not None else np.zeros(ref_shape_nat, dtype=np.float32) for v in native_vals],
+                    [v if v is not None else np.full(ref_shape_nat, np.nan, dtype=np.float32) for v in native_vals],
                     axis=0,
                 )
 

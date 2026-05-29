@@ -72,13 +72,14 @@ class EmbedMSELoss(BaseLoss):
         Raises
         ------
         RuntimeError
+            If ``preds`` is empty, which indicates that the model produced no output predictions.
             If `output_mask` is not a bool tensor.
             If there is a shape mismatch between a `preds` item and the corresponding `y_emb` item.
 
         """
 
         if not preds:
-            return torch.tensor(0.0, dtype=torch.float32), {}
+            raise RuntimeError("EmbedMSELoss received empty predictions from the model.")
 
         ref = next(iter(preds.values()))
         device = ref.device
@@ -114,7 +115,9 @@ class EmbedMSELoss(BaseLoss):
             logs[out_key] = float(L_o.detach().cpu())
 
         if not per_out_losses:
-            return torch.zeros((), device=device, dtype=torch.float32), logs
+            # ref.sum() * 0.0 is zero but stays in the computation graph, so backward() does not crash when
+            # embed_mse is the only active loss term.
+            return ref.sum() * 0.0, logs
 
         per_out = torch.stack(per_out_losses)
         weights = torch.tensor(per_out_weights, device=device, dtype=torch.float32)

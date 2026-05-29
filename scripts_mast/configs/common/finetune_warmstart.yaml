@@ -54,7 +54,7 @@ preprocess:
     window_stride_sec: 0.005
 
   embed_chunks:
-    nan_imputation: zero  # zero | interpolate | null
+    nan_imputation: interpolate  # zero | interpolate | null
 
 
 collate:
