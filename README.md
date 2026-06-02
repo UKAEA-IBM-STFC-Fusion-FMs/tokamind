@@ -130,10 +130,9 @@ pip install -e .
 
 ## 🤗 Pretrained Model
 
-Pretrained TokaMind checkpoints (trained on MAST data) are available on HuggingFace:
+Pretrained TokaMind checkpoints (trained on MAST data) are available on HuggingFace: [tokamind-base-v2](https://huggingface.co/UKAEA-IBM-STFC/tokamind-base-v2)
 
-- [tokamind-base-v1](https://huggingface.co/UKAEA-IBM-STFC/tokamind/tree/main/tokamind-base-v1)
-- [tokamind-tiny-v1](https://huggingface.co/UKAEA-IBM-STFC/tokamind/tree/main/tokamind-tiny-v1)
+[//]: # (- [tokamind-tiny-v1]&#40;https://huggingface.co/UKAEA-IBM-STFC/tokamind/tree/main/tokamind-tiny-v1&#41;)
 
 The HuggingFace repository includes:
 - Model weights (`checkpoints/best`)
@@ -144,8 +143,8 @@ To use it, download and place the model under `runs/` so it matches the expected
 
 ```
 runs/
-└── tokamind_base/
-    ├── tokamind_base.yaml
+└── tokamind-base-v2/
+    ├── tokamind-base-v2.yaml
     ├── checkpoints/
     │   └── best
     └── embeddings/
