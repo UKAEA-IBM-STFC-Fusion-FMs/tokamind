@@ -491,10 +491,9 @@ class VAECodec:
         Convert an input sample to the shape expected by the underlying VAE encoder.
 
         Returns a model-ready array without batch dimension:
-          - linear (input_mode="time")      -> (C, T)
-          - linear (input_mode="channels")  -> (T, C)
-          - conv1d                          -> (C, T)
-          - conv2d                          -> (T, H, W)
+          - linear                         -> (F,), where F = C*T
+          - conv1d                         -> (C, T)
+          - conv2d                         -> (H, W, T) channels-last
 
         Parameters
         ----------
@@ -548,8 +547,9 @@ class VAECodec:
                     f"Expected [H,W,T]={list(self.input_shape)}, got shape {tuple(x.shape)}."
                 )
 
-            x_thw = np.transpose(x_hwt, (2, 0, 1))  # (T, H, W)
-            return np.asarray(x_thw, dtype=np.float32)
+            # New VAE_fairmast conv2d models expect channels-last input (H, W, T).
+            # The VAE internally permutes to torch conv2d layout and appends the mask.
+            return np.asarray(x_hwt, dtype=np.float32)
 
         x_ct = self._to_channel_time(x=x)
         c_exp, t_exp = int(self.input_shape[0]), int(self.input_shape[1])
@@ -574,7 +574,9 @@ class VAECodec:
                     f"[VAECodec] Unexpected input_mode={self.input_mode!r} for `linear` model "
                     f"{self.meta['model_dir'].name!r}."
                 )
-            return np.asarray(x_linear, dtype=np.float32)
+            # New VAE_fairmast linear models expect one flat feature vector per sample.
+            # The VAE internally appends the finite-value mask, doubling this feature dimension.
+            return np.asarray(x_linear.reshape(-1), dtype=np.float32)
 
         raise ValueError(
             f"[VAECodec] Unsupported model_type={self.model_type!r} in _prepare_encode_array for "
@@ -609,7 +611,13 @@ class VAECodec:
         x_t = x_t.to(device=self.device, dtype=torch.float32)
 
         with torch.no_grad():
-            mu, logvar = self.model.encode(x_t)
+            encoded = self.model.encode(x_t)
+            if not isinstance(encoded, tuple) or len(encoded) < 2:
+                raise RuntimeError(
+                    f"[VAECodec] encode() for model {self.meta['model_dir'].name!r} returned unsupported output "
+                    f"of type {type(encoded).__name__}. Expected tuple with at least (mu, logvar)."
+                )
+            mu, logvar = encoded[:2]
             z_t = mu if self.use_mu else self.model.reparameterize(mu, logvar)
 
         z = np.asarray(z_t.detach().cpu().numpy(), dtype=np.float32)
@@ -753,9 +761,8 @@ class VAETorchDecoder(TorchDecoder):
                 x_hat = x_hat.view(B, -1)
             c_exp, t_exp = self._input_shape
             if self._input_mode == "time":
-                # Model saw (B, C, T) → output is (B, C, T)
                 return x_hat.view(B, c_exp, t_exp)
-            else:  # channels: model saw (B, T, C) → transpose back to (B, C, T)
+            else:  # channels: flattening used (T, C), so transpose back to (B, C, T)
                 return x_hat.view(B, t_exp, c_exp).permute(0, 2, 1).contiguous()
 
         if self._model_type == "conv2d":
