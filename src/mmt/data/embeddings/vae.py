@@ -13,7 +13,7 @@ Strict expectations (current VAE_fairmast refactor)
 ---------------------------------------------------
 - VAE_fairmast is installed and exposes the python package ``vae_pipeline``.
 - Trained VAEs live under:
-    <VAE_fairmast>/src/vae_pipeline/data/VAEs/<MODEL_DIR>/
+    <VAE_fairmast>/src/vae_pipeline/data/New_VAEs/<MODEL_DIR>/
   containing:
     - exactly one ``config_*.json``
     - exactly one ``best_*.pt``
@@ -22,7 +22,7 @@ MMT YAML usage (per-signal)
 ---------------------------
     encoder_name: vae
     encoder_kwargs:
-      model_dir: conv1d_vae_config_coil_current   # folder name under VAEs/
+      model_dir: conv1d_vae_config_coil_current   # folder name under New_VAEs/
       device: cuda:0                              # optional, empty/None -> cpu
       use_mu: true                                # optional, default true
 
@@ -100,7 +100,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
 
     Accepted:
       1) A filesystem path to a directory (absolute or relative) that exists.
-      2) A folder name under: <vae_pipeline package>/data/VAEs/<model_dir>
+      2) A folder name under: <vae_pipeline package>/data/New_VAEs/<model_dir>
 
     Parameters
     ----------
@@ -135,7 +135,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
         )
 
     vae_pkg_dir = Path(cs_file_obj).resolve().parent.parent
-    trained_root = (vae_pkg_dir / "data" / "VAEs").resolve()
+    trained_root = (vae_pkg_dir / "data" / "New_VAEs").resolve()
     cand = trained_root / p
 
     if cand.is_dir():
@@ -147,7 +147,7 @@ def resolve_vae_model_dir(model_dir: str | Path) -> Path:
         "Tried:\n"
         f"  - as a filesystem directory: {p.resolve()}\n"
         f"  - as a trained VAE folder:   {cand}\n\n"
-        "Expected trained VAEs under: <VAE_fairmast>/src/vae_pipeline/data/VAEs/<MODEL_DIR>."
+        "Expected trained VAEs under: <VAE_fairmast>/src/vae_pipeline/data/New_VAEs/<MODEL_DIR>."
     )
 
 
@@ -281,7 +281,7 @@ class VAECodec:
     Parameters
     ----------
     model_dir : str
-        Path to the trained VAE directory (or folder name under ``VAEs/``).
+        Path to the trained VAE directory (or folder name under ``New_VAEs/``).
     device : str | None
         Device for the model (default: cpu).
     use_mu : bool
@@ -717,7 +717,7 @@ class VAETorchDecoder(TorchDecoder):
     def _reshape_to_native(  # NOSONAR - Ignore cognitive complexity
         self,
         x_hat: Tensor,
-        B: int  # noqa - Ignore lowercase warning
+        B: int,  # noqa - Ignore lowercase warning
     ) -> Tensor:
         """
         Convert the raw model output to (B, *native_shape).
