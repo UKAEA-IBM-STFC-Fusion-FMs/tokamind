@@ -315,7 +315,7 @@ class VAECodec:
 
     """
 
-    requires_finite_input: bool = True
+    requires_finite_input: bool = False
 
     # ------------------------------------------------------------------------------------------------------------------
     def __init__(self, *, model_dir: str, device: str | None = None, use_mu: bool = True) -> None:
