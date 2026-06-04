@@ -64,6 +64,10 @@ this is a literal zero-fill.
 construction time if any registered codec has ``requires_finite_input=True``, since those codecs cannot
 handle non-finite arrays. Use ``None`` only when all codecs can handle non-finite inputs natively.
 
+For codecs with ``requires_finite_input=False``, transform-level imputation is skipped even when
+``nan_imputation`` is configured, and the raw array is passed to the codec. A warning is emitted once per
+signal ID to make this pass-through explicit.
+
 For output signals, imputation (regardless of strategy) is applied only to the local copy used for encoding.
 The original values in ``window["output"][name]["values"]`` are **never modified**, preserving NaN locations
 for benchmark-comparable evaluation metrics (e.g. nanmean in the tokamark evaluator).
@@ -184,6 +188,50 @@ class EmbedChunksTransform:
 
         # We only need within-shot reuse; clear caches when shot_id changes.
         self._last_shot_id: Any = None
+
+        # Avoid emitting the same non-finite pass-through warning once per signal_id.
+        self._warned_nan_passthrough: set[int] = set()
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def _maybe_impute_for_codec(self, arr: np.ndarray, *, codec: Any, sid: int) -> np.ndarray:
+        """
+        Apply the transform-level non-finite imputation only when the codec requires finite inputs.
+
+        Parameters
+        ----------
+        arr : np.ndarray
+            Array to encode.
+        codec : Any
+            Codec used to encode ``arr``.
+        sid : int
+            Signal ID, used for warning messages.
+
+        Returns
+        -------
+        np.ndarray
+            Original or imputed array to pass to ``codec.encode``.
+
+        """
+
+        codec_requires_finite = bool(getattr(codec, "requires_finite_input", True))
+        if codec_requires_finite:
+            return impute_non_finite(
+                arr,
+                self.nan_imputation,
+                owner="EmbedChunksTransform",
+            )
+
+        if self.nan_imputation is not None and sid not in self._warned_nan_passthrough:
+            logger.warning(
+                "[EmbedChunksTransform] nan_imputation=%r is configured, but codec %s for signal_id=%s "
+                "does not require finite input; passing non-finite values through to the codec.",
+                self.nan_imputation,
+                type(codec).__name__,
+                sid,
+            )
+            self._warned_nan_passthrough.add(sid)
+
+        return arr
 
     # ------------------------------------------------------------------------------------------------------------------
     def _get_spec(self, role: str, name: str) -> Any:
@@ -335,11 +383,7 @@ class EmbedChunksTransform:
                         emb = self._cache[key]
                         n_signal_cache_hits += 1
                     else:
-                        arr = impute_non_finite(
-                            arr,
-                            self.nan_imputation,
-                            owner="EmbedChunksTransform",
-                        )
+                        arr = self._maybe_impute_for_codec(arr, codec=codec, sid=sid)
                         emb = codec.encode(arr)
                         self._cache[key] = emb
                         n_signal_emb_new += 1
@@ -384,7 +428,7 @@ class EmbedChunksTransform:
                 sid = int(spec.signal_id)
                 codec = self._get_codec(sid=sid)
 
-                # Identity-encoded outputs: skip embedding entirely.
+                # Identity-encoded outputs skip embedding entirely before the imputation helper is reached.
                 # The native values kept by FinalizeWindowTransform are sufficient for
                 # native_sparse_mse. Storing output_emb separately would duplicate the
                 # data in memory for every cached window.
@@ -393,11 +437,7 @@ class EmbedChunksTransform:
 
                 arr = np.asarray(values)
                 # Impute on a local copy only — native values in window["output"] are preserved for eval metrics.
-                arr = impute_non_finite(
-                    arr,
-                    self.nan_imputation,
-                    owner="EmbedChunksTransform",
-                )
+                arr = self._maybe_impute_for_codec(arr, codec=codec, sid=sid)
                 emb = codec.encode(arr)
 
                 emb_out[sid] = emb
