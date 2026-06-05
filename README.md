@@ -22,7 +22,7 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 | TokaMark paper | [arXiv:2602.10132](https://arxiv.org/abs/2602.10132) |
 | TokaMark repository | [UKAEA-IBM-STFC-Fusion-FMs/tokamark](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/tokamark) |
 | VAE-FAIRMAST repository | _coming soon_ |
-| Pretrained models (HuggingFace) | [UKAEA-IBM-STFC/tokamind](https://huggingface.co/UKAEA-IBM-STFC/tokamind) |
+| Pretrained model (HuggingFace) | [UKAEA-IBM-STFC/tokamind-base-v2](https://huggingface.co/UKAEA-IBM-STFC/tokamind-base-v2) |
 
 ## 📚 Documentation
 - [Configuration Guide](docs/config_guide.md)
