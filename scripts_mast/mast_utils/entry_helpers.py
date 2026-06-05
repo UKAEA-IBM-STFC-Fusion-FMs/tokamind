@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from typing import Any, Literal, Union
+from typing import Any, Literal, Union, cast
 
 import torch
 
@@ -49,6 +49,7 @@ from .pipeline_ops import (
     build_default_transform,
     make_collate_fn,
 )
+from .tokamark_split import resolve_split_assets, apply_signal_stats_override
 
 
 # ======================================================================================================================
@@ -115,6 +116,7 @@ def build_mast_datasets(
     cfg_task: Mapping[str, Any],
     cfg_data: Mapping[str, Any],
     phase: Literal["pretrain", "finetune", "eval"],
+    cfg_model_source: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], Union[Any, None], Union[Any, None], Union[Any, None]]:
     """
     Build task metadata and MAST datasets for train/val/test.
@@ -130,6 +132,9 @@ def build_mast_datasets(
         Data config section from cfg_mmt.data.
     phase : Literal["pretrain", "finetune", "eval"]
         Phase name, either "pretrain", "finetune", or "eval".
+    cfg_model_source : Mapping[str, Any] | None
+        model_source config mapping. Required for eval to infer source data split.
+        Optional. Default: None.
 
     Returns
     -------
@@ -140,11 +145,27 @@ def build_mast_datasets(
 
     """
 
+    if phase in ("pretrain", "finetune"):
+        split_name = cfg_data["split"]
+    else:
+        if not isinstance(cfg_model_source, dict):
+            raise TypeError("For phase='eval', cfg_model_source must be a mapping (dict).")
+        split_name = cfg_model_source["data_split"]
+
+    split_assets = resolve_split_assets(split=split_name)
+
     # Task metadata
-    dict_task_metadata = dict(get_task_metadata(config_task=cfg_task, verbose=False))
+    dict_task_metadata = cast(dict[str, Any], dict(get_task_metadata(config_task=cfg_task, verbose=False)))
+    apply_signal_stats_override(
+        dict_task_metadata=dict_task_metadata,
+        stats_metadata_file_path=split_assets["stats_metadata_file_path"],
+    )
 
     # Shot splits
-    train_shots, test_shots, val_shots = get_train_test_val_shots(max_index=cfg_data["subset_of_shots"])
+    train_shots, test_shots, val_shots = get_train_test_val_shots(
+        max_index=cfg_data["subset_of_shots"],
+        data_splits_file_path=split_assets["data_splits_file_path"],
+    )
 
     local_flag = cfg_data.get("local", True)
     local_path = cfg_data.get("local_path", None)
@@ -159,7 +180,10 @@ def build_mast_datasets(
             shots_list=test_shots,
             local_flag=local_flag,
             use_std_scaling=True,
-            return_incomplete_shots=True,
+            stats_metadata_file_path=split_assets["stats_metadata_file_path"],
+            use_nan_filling=False,
+            remove_outliers=True,
+            outlier_metadata_file=split_assets["outlier_metadata_file"],
             store_manager_settings=store_settings,
             verbose=False,
         )
@@ -171,7 +195,10 @@ def build_mast_datasets(
             shots_list=train_shots,
             local_flag=local_flag,
             use_std_scaling=True,
-            return_incomplete_shots=True,
+            stats_metadata_file_path=split_assets["stats_metadata_file_path"],
+            use_nan_filling=False,
+            remove_outliers=True,
+            outlier_metadata_file=split_assets["outlier_metadata_file"],
             store_manager_settings=store_settings,
             verbose=False,
         )
@@ -181,7 +208,10 @@ def build_mast_datasets(
             shots_list=val_shots,
             local_flag=local_flag,
             use_std_scaling=True,
-            return_incomplete_shots=True,
+            stats_metadata_file_path=split_assets["stats_metadata_file_path"],
+            use_nan_filling=False,
+            remove_outliers=True,
+            outlier_metadata_file=split_assets["outlier_metadata_file"],
             store_manager_settings=store_settings,
             verbose=False,
         )

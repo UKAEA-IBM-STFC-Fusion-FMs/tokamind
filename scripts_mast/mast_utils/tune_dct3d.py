@@ -52,6 +52,7 @@ from .benchmark_imports import (
     initialize_TokaMark_dataset,
     get_train_test_val_shots,
 )
+from .tokamark_split import resolve_split_assets
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -82,7 +83,7 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
     Parameters
     ----------
     cfg_mmt : ExperimentConfig
-        Merged experiment config. Reads `embeddings.tune_embeddings` for tuning params, and `preprocess` for
+        Merged experiment config. Reads `embeddings.tuning` for tuning params, and `preprocess` for
         chunk/window settings.
     signal_specs : SignalSpecRegistry
         Signal spec registry (built from default spatial embeddings config).
@@ -111,13 +112,14 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
 
     cfg_data = cfg_mmt.data
     cfg_prep = cfg_mmt.preprocess
-    cfg_tune = cfg_mmt.embeddings.get("tune_embeddings", {})
+    cfg_tune = cfg_mmt.embeddings.get("tuning", {})
     cfg_objective = cfg_tune.get("objective", {})
 
     n_shots = cfg_tune.get("n_shots", 100)
     max_windows = cfg_tune.get("max_windows", 15000)
     local_flag = cfg_data.get("local", True)
     local_path = cfg_data.get("local_path", None)
+    split_assets = resolve_split_assets(split=cfg_data["split"])
     max_budget_cfg = cfg_objective.get("max_budget", {})
     budget_summary = (
         {r: max_budget_cfg.get(r) for r in roles} if isinstance(max_budget_cfg, Mapping) else max_budget_cfg
@@ -138,7 +140,12 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
     # Dataset: subsample training shots for tuning
     # ..................................................................................................................
 
-    train_shots, _, _ = get_train_test_val_shots(max_index=n_shots, shuffle=True, seed=cfg_mmt.seed)
+    train_shots, _, _ = get_train_test_val_shots(
+        max_index=n_shots,
+        shuffle=True,
+        seed=cfg_mmt.seed,
+        data_splits_file_path=split_assets["data_splits_file_path"],
+    )
 
     store_settings = {"base_local_zarr_path": local_path} if (local_flag and local_path) else None
 
@@ -147,7 +154,9 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
         shots_list=train_shots,
         local_flag=local_flag,
         use_std_scaling=True,
-        return_incomplete_shots=True,
+        stats_metadata_file_path=split_assets["stats_metadata_file_path"],
+        remove_outliers=True,
+        outlier_metadata_file=split_assets["outlier_metadata_file"],
         store_manager_settings=store_settings,
         verbose=False,
     )
@@ -159,6 +168,7 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
     cfg_chunks = cfg_prep["chunk"]
     cfg_trim = cfg_prep["trim_chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
+    nan_imputation = (cfg_prep.get("embed_chunks") or {}).get("nan_imputation", "zero")
 
     tune_transform = TuneRankedDCT3DTransform(
         signal_specs=signal_specs,
@@ -166,6 +176,7 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
         max_budget=max_budget_cfg,
         roles=roles,
         guardrails=guardrails_cfg,
+        nan_imputation=nan_imputation,
     )
 
     transform_pipeline = ComposeTransforms(
@@ -179,6 +190,8 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
                 min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_valid_win["min_valid_chunks"],
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],
+                accept_nan_inputs_actuators=cfg_valid_win.get("accept_nan_inputs_actuators", True),
+                accept_nan_outputs=cfg_valid_win.get("accept_nan_outputs", True),
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(max_chunks=cfg_trim["max_chunks"]),

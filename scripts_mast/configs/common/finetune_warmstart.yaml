@@ -1,18 +1,16 @@
-# Default FINETUNE configuration (shared across tasks).
+# Warm-start-specific FINETUNE configuration.
 #
-# Most task-specific changes belong in:
+# Complete self-contained finetune config loaded by:
+#   python scripts_mast/run_finetune.py --init warmstart --model <run_id_or_path> ...
+#
+# Task-specific deltas still belong in:
 #   scripts_mast/configs/tasks_overrides/<task>/finetune_overrides.yaml
 #
-# Quick edit guide:
-# - CLI init mode: --init warmstart|scratch (and --model for warmstart)
-# - embeddings.mode and embeddings.tune_embeddings.roles
-# - train.stages (epochs, lr, wd, freeze)
-# - collate drop probabilities
-#
-# Resume vs warmstart:
-# - train.resume=true resumes the same run_dir state (weights, optimizer,
-#   scheduler, scaler, RNG, epoch counters).
-# - warmstart (--init warmstart --model ...) initializes from another run.
+# Contains:
+#   - data / preprocess / collate / loader defaults
+#   - warmstart embedding role policy
+#   - train schedule
+#   - model_source / model_overrides
 
 seed: 54
 
@@ -27,8 +25,8 @@ data:
   local: false  # true = load from local_path (dev/laptop); false = stream from remote HPC store
   local_path:   # used only when local: true
   subset_of_shots: null   # None / null → uses all shots
+  split: random  # random | temporal
 
-  keep_output_native: false
   cache:
     enable: true
     dtype: float16
@@ -39,8 +37,7 @@ data:
 
 
 preprocess:
-  # Both scratch and warmstart use this block.
-  # Task-specific finetune_overrides.yaml can override these values.
+  # Task-specific finetune_overrides.yaml can override these defaults.
   chunk:
     chunk_length: 0.005
     stride: null
@@ -52,28 +49,12 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
+    accept_nan_inputs_actuators: true
+    accept_nan_outputs: true
     window_stride_sec: 0.005
 
-
-embeddings:
-  mode: source  # source | config
-  # source: copy source run embeddings; roles=true re-tunes that role.
-  # config: ignore source embeddings and use the selected emb_profile as-is.
-
-  tune_embeddings:
-    roles:
-      input: false
-      actuator: false
-      output: true
-
-    guardrails:
-      enable: true
-
-    objective:
-      thresholds:
-        output: 0.999
-      max_budget:
-        output: null
+  embed_chunks:
+    nan_imputation: interpolate  # zero | interpolate | null
 
 
 collate:
@@ -97,6 +78,28 @@ loader:
   batches_per_epoch: null  # required only when data.cache.enable=false
 
 
+embeddings:
+  # Per-role embedding policy:
+  # - tune: learn DCT3D rank coefficients in this run
+  # - source: inherit DCT3D rank coefficients from model_source.run_dir
+  # - config: use config/profile defaults without tuning or source artifacts
+  # Warmstart keeps input/actuator embeddings aligned with the source model and retunes task outputs.
+  role_mode:
+    input: source
+    actuator: source
+    output: tune
+
+  tuning:
+    guardrails:
+      enable: true
+
+    objective:
+      thresholds:
+        output: 0.999
+      max_budget:
+        output: 8192
+
+
 train:
   # Run-level behavior (not per-stage).
   resume: false
@@ -112,6 +115,12 @@ train:
     output_weights:
 #      summary-ip: 1.2
 
+    terms:
+#      - type: embed_mse
+#        weight: 1.0
+      - type: native_sparse_mse   # data.keep_output_native is set automatically when this term is present
+        weight: 1.0
+
   optimizer:
     use_adamw: true
 
@@ -125,18 +134,18 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 5e-4
+          token_encoder: 0.0
           backbone: 0.0
           modality_heads: 1e-3
           output_adapters: 5e-3
         wd:
-          token_encoder: 0.01
+          token_encoder: 0.0
           backbone: 0.0
           modality_heads: 0.01
           output_adapters: 0.01
 
       freeze:
-        token_encoder: false
+        token_encoder: true
         backbone: true
         modality_heads: false
         output_adapters: false
@@ -150,29 +159,24 @@ train:
 
       optimizer:
         lr:
-          token_encoder: 0.0
+          token_encoder: 5e-4
           backbone: 5e-4
           modality_heads: 1e-3
           output_adapters: 5e-3
         wd:
-          token_encoder: 0.0
+          token_encoder: 0.01
           backbone: 0.01
           modality_heads: 0.01
           output_adapters: 0.01
 
       freeze:
-        token_encoder: true
+        token_encoder: false
         backbone: false
         modality_heads: false
         output_adapters: false
 
 
-# -----------------------------
-# Advanced model initialization
-# -----------------------------
-
 # Warmstart source is provided by CLI: --init warmstart --model <run_id_or_path>.
-# Scratch mode ignores model_source and does not load source parts.
 model_source:
   load_parts:
     token_encoder: true
@@ -180,29 +184,9 @@ model_source:
     modality_heads: true
     output_adapters: false
 
-# Scratch: model = deep_merge(model_scratch, finetune_model_overrides)
-model_scratch:
-  backbone:
-    d_model: 192
-    n_layers: 4
-    n_heads: 6
-    dim_ff: 768
-    dropout: 0.05
-    activation: relu
 
-  modality_heads:
-    timeseries:
-      hidden: 192
-      out_dim: 192
-    profile:
-      hidden: 192
-      out_dim: 192
-    video:
-      hidden: 192
-      out_dim: 192
-
-# Applied in both scratch and warmstart.
-finetune_model_overrides:
+# Warmstart: model = deep_merge(source_model, model_overrides)
+model_overrides:
   output_adapters:
     hidden_dim:
       default: 0
@@ -217,7 +201,3 @@ finetune_model_overrides:
           - {max_out_dim: null, hidden: d_model}
 
       manual: {}  # {output_name: hidden_int, ...} (always wins)
-
-# Warmstart: model = deep_merge(source_model, finetune_model_overrides, warmstart.model_overrides)
-warmstart:
-  model_overrides: {}

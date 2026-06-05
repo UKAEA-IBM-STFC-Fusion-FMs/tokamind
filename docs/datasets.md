@@ -1,6 +1,6 @@
 # Datasets
 
-Related documentation: [Project README](../README.md) | [Transforms](transforms.md) | [Configuration Guide](config_guide.md)
+Related documentation: [Project README](../README.md) | [Transforms](transforms.md) | [Training](training.md) | [Configuration Guide](config_guide.md)
 
 This document describes shot-level and window-level data handling in the project.
 
@@ -22,6 +22,45 @@ A window is one model sample derived from a shot. It includes:
 3. `MMTCollate` batches tokenized windows for training/eval.
 
 Split selection (`train` / `val` / `test`) is defined by task setup before the transform chain starts.
+
+## Data Split Strategies
+Two split strategies are supported, selected via `data.split` in pretrain and finetune configs:
+
+| Split | Description |
+|---|---|
+| `random` (default) | Shots randomly partitioned into train/val/test. |
+| `temporal` | Shots partitioned by campaign/discharge time (later campaigns are test). |
+
+Each split has its own set of three consistent artifacts:
+- shot assignment CSV
+- signal normalization stats YAML (mean/std per signal)
+- outlier metadata YAML
+
+All three are resolved together by `tokamark_split.py` to ensure no cross-split contamination of statistics.
+
+### Split inheritance
+- **Pretrain / finetune scratch**: `data.split` is read directly from config.
+- **Finetune warmstart**: split is inherited from the source run. If `data.split` in the finetune config differs from the source run, a warning is logged and the source split is enforced.
+- **Eval**: `data.split` must not be set in eval config. Split is always inherited from the source run config automatically.
+
+## NaN Handling
+MAST signals can contain NaN values (missing channels, partial dropouts). The pipeline is designed to handle them without dropping windows unnecessarily:
+
+- **At window selection**: `SelectValidWindowsTransform` has two independent NaN-tolerance flags:
+  - `accept_nan_inputs_actuators` (default `True`): partial-NaN input/actuator signals pass through with NaN intact for downstream imputation.
+  - `accept_nan_outputs` (default `True`): partial-NaN output signals pass through. Set to `False` in finetune/pretrain configs to drop windows with partial-NaN outputs from training, preventing corrupted targets from entering the loss.
+  - In all cases, entirely-NaN or empty signals are always masked as invalid regardless of these flags.
+- **At representation building**: `preprocess.embed_chunks.nan_imputation` (default `"zero"`) controls
+  non-finite value handling before DCT3D tuning and before runtime `codec.encode()`. This keeps coefficient
+  selection consistent with the embeddings used during training/evaluation:
+  - `"zero"`: literal zero-fill. If data are standardized, zero corresponds to the signal mean. Fast,
+    but creates hard discontinuities at NaN/valid boundaries that can contaminate DCT3D low-frequency coefficients.
+  - `"interpolate"`: temporal then spatial linear interpolation with zero fallback. Avoids step edges
+    that contaminate DCT3D coefficients — preferred for signals with structured boundary NaN.
+  - `null`: no imputation; allowed only when all registered codecs can handle non-finite inputs natively.
+  - Original values in `window["output"]` are never modified by runtime embedding — NaN locations are preserved for eval
+    metrics and for native-space loss targets. See
+    [Training — NaN Handling](training.md#nan-handling-in-training) for the full interaction with loss choice.
 
 ## Dataset Types
 ### Streaming window iterable

@@ -1,6 +1,6 @@
 # Pretraining task (Option 1): Denoising / masked reconstruction with a downstream-like supervision set.
 # Inputs are ALL benchmark inputs + ALL actuators; targets are ALL benchmark outputs.
-# Advantages: fastest and closest to finetuning behaviour; learns a robust backbone conditioned on actuators
+# Advantages: fastest and closest to finetuning behavior; learns a robust backbone conditioned on actuators
 # while training only the output heads used in downstream tasks.
 #
 # Windowing: instantaneous reconstruction (output window overlaps input window).

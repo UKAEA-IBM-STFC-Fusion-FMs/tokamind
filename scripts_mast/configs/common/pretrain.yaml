@@ -21,8 +21,8 @@ data:
   local: false  # true = load from local_path (dev/laptop); false = stream from remote HPC store
   local_path:   # used only when local: true
   subset_of_shots: null   # None / null → uses all shots
+  split: random  # random | temporal
 
-  keep_output_native: false
   cache:
     enable: true
     dtype: float16          # or float32
@@ -45,19 +45,19 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
-    window_stride_sec: 0.005
+    accept_nan_inputs_actuators: true
+    accept_nan_outputs: true
+    window_stride_sec: 0.01
+
+  embed_chunks:
+    nan_imputation: zero  # zero | interpolate | null
 
 
 embeddings:
-  tune_embeddings:
-    roles:
-      input: true
-      actuator: true
-      output: true
-    
-    guardrails:
-      enable: true
-
+  role_mode:
+    input: tune
+    actuator: tune
+    output: tune
 
 collate:
   p_drop_inputs: 0.1
@@ -88,7 +88,7 @@ model:
     n_heads: 6
     dim_ff: 768
     dropout: 0.05
-    activation: relu
+    activation: gelu
 
   modality_heads:
     timeseries:
@@ -111,7 +111,7 @@ model:
 
 
 train:
-  # This is run-level behaviour, not per-stage.
+  # This is run-level behavior, not per-stage.
   # If true and checkpoints/latest exists in *this* run_dir, we strictly
   # resume that run: model weights + optimizer + scheduler + scaler + RNG +
   # epoch counters. This is different from model_source.run_dir, which is a
@@ -128,6 +128,12 @@ train:
   loss:
     output_weights: {}
 #      summary-ip: 1.2
+
+    terms:
+      - type: embed_mse
+        weight: 1.0
+#      - type: native_sparse_mse   # data.keep_output_native is set automatically when this term is present
+#        weight: 0.5
 
   optimizer:
     use_adamw: true

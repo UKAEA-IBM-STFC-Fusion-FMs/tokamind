@@ -56,17 +56,17 @@ embeddings:
       pf_active-coil_current:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: conv1d_vae_config_coil_current_25ms
+          model_dir: conv1d_vae_config_coil_current_25
 
       pf_active-solenoid_current:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: linear_vae_config_solenoid_current_25ms
+          model_dir: linear_vae_config_solenoid_current_25
 
       summary-ip:
         encoder_name: vae
         encoder_kwargs:
-          model_dir: linear_vae_config_summary_ip_25ms
+          model_dir: linear_vae_config_summary_ip_25
 
       equilibrium-elongation:
         encoder_name: identity

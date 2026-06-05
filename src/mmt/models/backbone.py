@@ -2,16 +2,17 @@
 Transformer backbone for MMT.
 
 A thin wrapper around PyTorch's nn.TransformerEncoder (batch_first=True).
-Kept as its own module to support clear checkpointing, freezing, and warm-start behaviour independent of the
+Kept as its own module to support clear checkpointing, freezing, and warm-start behavior independent of the
 TokenEncoder and task-specific heads.
 """
 
 from __future__ import annotations
 
-from typing import Optional
 
 import torch
 import torch.nn as nn
+
+from mmt.models.activations import WaveletActivation
 
 
 # ======================================================================================================================
@@ -41,7 +42,7 @@ class Backbone(nn.Module):
         dim_ff: int,
         n_layers: int,
         dropout: float,
-        activation: str = "relu",
+        activation: str | nn.Module = "relu",
     ) -> None:
         """
         Initialize class parameters.
@@ -59,8 +60,9 @@ class Backbone(nn.Module):
             Number of layers.
         dropout : float
             The dropout value, to be passed to the `nn.TransformerEncoderLayer` constructor.
-        activation : str
+        activation : str | nn.Module
             The activation function, to be passed to the `nn.TransformerEncoderLayer` constructor.
+            Supported strings: "relu", "gelu", "wavelet".
             Optional. Default: "relu".
 
         Returns
@@ -70,18 +72,21 @@ class Backbone(nn.Module):
         """
 
         super().__init__()
+
+        _activation: str | nn.Module = WaveletActivation() if activation == "wavelet" else activation
+
         encoder_layer = nn.TransformerEncoderLayer(
             d_model=d_model,
             nhead=n_heads,
             dim_feedforward=dim_ff,
             dropout=dropout,
             batch_first=True,
-            activation=activation,  # Explicit. Default "relu".
+            activation=_activation,
         )
 
         # NOTE:
         # PyTorch's nested tensor API is still marked as prototype and may emit warnings when TransformerEncoder
-        # internally constructs nested tensors. Disabling nested tensors keeps behaviour stable and avoids the warning.
+        # internally constructs nested tensors. Disabling nested tensors keeps behavior stable and avoids the warning.
         try:
             self.encoder = nn.TransformerEncoder(
                 encoder_layer=encoder_layer,
@@ -93,7 +98,7 @@ class Backbone(nn.Module):
             self.encoder = nn.TransformerEncoder(encoder_layer=encoder_layer, num_layers=n_layers)
 
     # ------------------------------------------------------------------------------------------------------------------
-    def forward(self, x: torch.Tensor, src_key_padding_mask: Optional[torch.Tensor] = None) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, src_key_padding_mask: torch.Tensor | None = None) -> torch.Tensor:
         """
         Backbone's forward function.
 
@@ -101,7 +106,7 @@ class Backbone(nn.Module):
         ----------
         x : torch.Tensor
             The sequence to the encoder.
-        src_key_padding_mask : Optional[torch.Tensor]
+        src_key_padding_mask : torch.Tensor | None
             The mask for the `x` keys per batch.
             Optional. Default: None.
 

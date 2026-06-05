@@ -67,7 +67,7 @@ def amp_ctx_for_model(model: nn.Module, enable: bool = True) -> Any:
         with amp_ctx_for_model(model, enable=True):
             outputs = model(**batch)
 
-    Behaviour
+    Behavior
     ---------
     - CUDA:
         * if enable=True:

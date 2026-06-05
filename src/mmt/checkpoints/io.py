@@ -12,7 +12,7 @@ import json
 import os
 import tempfile
 from collections.abc import Mapping, Callable
-from typing import Any, Optional, IO
+from typing import Any, IO
 
 import torch
 
@@ -133,7 +133,7 @@ def torch_load_full(
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def best_or_latest_dir(run_dir: str) -> Optional[str]:
+def best_or_latest_dir(run_dir: str) -> str | None:
     """
     Return best or latest subdirectory within target run directory.
 
@@ -144,7 +144,7 @@ def best_or_latest_dir(run_dir: str) -> Optional[str]:
 
     Returns
     -------
-    Optional[str]
+    str | None
         Either best or latest subdirectory within target run directory, if available, otherwise None.
 
     """

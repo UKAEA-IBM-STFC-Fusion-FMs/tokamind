@@ -8,14 +8,28 @@ We deliberately keep validation focused and simple:
   • common required fields (phase/task),
   • training stages validation (lr/wd inheritance, freeze rules),
   • loader rules for streaming vs cached datasets,
-  • eval-specific requirements (model_source.run_dir, keep_output_native).
+  • eval-specific requirements (model_source.run_dir),
+  • automatic derivation of data.keep_output_native from phase and loss terms.
 """
 
 from __future__ import annotations
 
 import warnings
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 from typing import Any, Union
+
+
+# ======================================================================================================================
+# Common required fields
+# ======================================================================================================================
+
+ALLOWED_PHASES = {"pretrain", "finetune", "eval"}
+ALLOWED_DATA_SPLITS = {"random", "temporal"}
+
+# Loss term types that require batch['output_native'] — add one entry here when introducing a new native-space loss.
+_NATIVE_TARGET_TERMS: frozenset[str] = frozenset({"native_sparse_mse"})
+
+REQUIRED_COMMON_FIELDS: list[tuple[str, type]] = [("phase", str), ("task", str)]
 
 
 # ======================================================================================================================
@@ -66,7 +80,7 @@ def _get_nested(cfg: Mapping[str, Any], path: str) -> Any:
 
 # ----------------------------------------------------------------------------------------------------------------------
 def _ensure_dict(cfg: Mapping[str, Any], path: str) -> dict[str, Any]:
-    """Ensure a nested value exists and is a dict, raising TypeError if `path`does not lead to a dictionary."""
+    """Ensure a nested value exists and is a dict, raising TypeError if `path` does not lead to a dictionary."""
 
     val = _get_nested(cfg=cfg, path=path)
     if not isinstance(val, dict):
@@ -106,15 +120,6 @@ def _normalize_null_to_empty_dict(cfg: Mapping[str, Any], path: str) -> None:
         node[leaf] = {}
     elif not isinstance(node[leaf], dict):
         raise TypeError(f"Expected dict at '{path}', got {type(node[leaf]).__name__}.")
-
-
-# ======================================================================================================================
-# Common required fields
-# ======================================================================================================================
-
-ALLOWED_PHASES = {"pretrain", "finetune", "eval"}
-
-REQUIRED_COMMON_FIELDS: list[tuple[str, type]] = [("phase", str), ("task", str)]
 
 
 # ======================================================================================================================
@@ -233,6 +238,33 @@ def _validate_stage_consistency(stage_cfg: Mapping[str, Any]) -> None:
                 f"Inconsistent config: freeze.{block}=False but optimizer.lr.{block}=0. "
                 f"Either set freeze.{block}=True or specify a positive learning rate."
             )
+
+
+# ======================================================================================================================
+# Loss → data dependency resolution
+# ======================================================================================================================
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _resolve_keep_output_native(cfg: MutableMapping[str, Any], phase: str) -> None:
+    """
+    Compute and write ``data.keep_output_native`` — it is always derived, never set manually.
+
+    Rules:
+      • eval phase  → always ``True`` (native outputs are required for metrics and trace saving).
+      • train phase → ``True`` iff any ``train.loss.terms`` entry is in ``_NATIVE_TARGET_TERMS``.
+
+    The computed value is written back into ``cfg["data"]`` so all downstream code (collate, dataset) reads it
+    transparently without knowing how it was determined.
+    """
+
+    if phase == "eval":
+        keep = True
+    else:
+        terms = (cfg.get("train") or {}).get("loss", {}).get("terms") or []
+        keep = any(isinstance(t, dict) and t.get("type") in _NATIVE_TARGET_TERMS for t in terms)
+
+    cfg.setdefault("data", {})["keep_output_native"] = keep
 
 
 # ======================================================================================================================
@@ -437,6 +469,50 @@ def _validate_required_run_context(cfg: Mapping[str, Any]) -> None:
     # runtime must be a dict (already checked), but allow empty dict; no further checks here.
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+def _validate_data_split_for_training(cfg: Mapping[str, Any]) -> None:
+    """
+    Validate and normalize cfg.data.split for training phases.
+
+    Rules:
+    - missing / null / empty -> default to "random"
+    - otherwise value must be one of {"random", "temporal"} (case-insensitive)
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    TypeError
+        If `cfg['data']['split']` is not a string.
+    ValueError
+        If `cfg['data']['split']` is not in allowed values.
+
+    """
+
+    data_cfg = cfg.get("data")
+    if not isinstance(data_cfg, dict):
+        raise TypeError("`cfg['data']` must be a mapping (dict).")
+
+    split = data_cfg.get("split", "random")
+    if split is None:
+        data_cfg["split"] = "random"
+        return
+    if not isinstance(split, str):
+        raise TypeError(f"Expected type str at 'data.split', got {type(split).__name__}.")
+
+    split_norm = split.strip().lower()
+    if split_norm == "":
+        data_cfg["split"] = "random"
+        return
+
+    if split_norm not in ALLOWED_DATA_SPLITS:
+        raise ValueError(f"Unsupported data.split={split!r}. Allowed values are: {sorted(ALLOWED_DATA_SPLITS)}.")
+
+    data_cfg["split"] = split_norm
+
+
 # ======================================================================================================================
 # Public API
 # ======================================================================================================================
@@ -473,6 +549,9 @@ def validate_config(cfg: Union[Mapping[str, Any], Any]) -> None:
         raise ValueError(f"Unsupported phase '{phase}' in `cfg['phase']` (allowed values: {sorted(ALLOWED_PHASES)}).")
 
     _validate_required_run_context(cfg=cfgd)
+
+    # Derive keep_output_native from phase and loss terms — always computed, never set by the user.
+    _resolve_keep_output_native(cfg=cfgd, phase=phase)
 
     # Validate phase-specific config
     if phase in ("pretrain", "finetune"):
@@ -521,6 +600,7 @@ def validate_train_config(  # NOSONAR - Ignore cognitive complexity
 
     # Normalize YAML-null dicts that are commonly left empty by users
     _normalize_null_to_empty_dict(cfg=cfg, path="train.loss.output_weights")
+    _validate_data_split_for_training(cfg=cfg)
 
     # Validate required train fields exist
     for path, _t in REQUIRED_TRAIN_FIELDS:
@@ -580,21 +660,19 @@ def validate_eval_config(cfg: Mapping[str, Any]) -> None:
 
     Raises
     ------
-
     ValueError
-        If `cfg["data"]["keep_output_native"]` is not True.
         If `cfg["model_source"]["run_dir"]` is not defined.
+        If ``data.split`` is set (split is a training-time setting).
 
     """
 
-    _validate_loader(cfg)
+    _validate_loader(cfg=cfg)
 
-    # Eval requires native outputs for metrics/traces.
     data_cfg = cfg.get("data", {}) or {}
-    if not bool(data_cfg.get("keep_output_native", False)):
+    if "split" in data_cfg:
         raise ValueError(
-            "For phase='eval', data.keep_output_native must be True (native outputs are required for metrics and trace "
-            "saving)."
+            "For phase='eval', data.split must not be set. "
+            "Split is a training-time setting and eval inherits behavior from the selected source run."
         )
 
     # Eval requires a run_dir to evaluate.

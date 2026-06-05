@@ -159,6 +159,7 @@ def load_and_merge_base_configs(
     embeddings_profile: str,
     configs_root_path: Path,
     tasks_overrides_dir: Path,
+    finetune_init: Literal["warmstart", "scratch"] | None = None,
 ) -> dict[str, Any]:
     """
     Load and merge common/task configs using the standard hierarchy.
@@ -171,6 +172,8 @@ def load_and_merge_base_configs(
         Phase name, either "pretrain", "finetune", or "eval".
     embeddings_profile : str
         Path to YAML file with embeddings profile.
+    finetune_init : Literal["warmstart", "scratch"] | None
+        Finetune initialization mode. Used only when `phase == "finetune"` to load the mode-specific common config.
     configs_root_path : Path
         Path to the root directory for configuration files.
     tasks_overrides_dir : Path
@@ -192,10 +195,22 @@ def load_and_merge_base_configs(
     common_dir = configs_root_path / "common"
 
     embeddings_path = common_dir / "embeddings.yaml"
-    phase_common_path = common_dir / f"{phase}.yaml"
-    for path in [embeddings_path, phase_common_path]:
-        if not path.is_file():
-            raise FileNotFoundError(f"Required config file not found at path {path}.")
+    if not embeddings_path.is_file():
+        raise FileNotFoundError(f"Required config file not found at path {embeddings_path}.")
+
+    if phase == "finetune":
+        if finetune_init not in ["warmstart", "scratch"]:
+            raise ValueError(
+                "`finetune_init` must be provided when loading finetune configs and must be one of "
+                f"['warmstart', 'scratch'], got {finetune_init!r}."
+            )
+        phase_common_path = common_dir / f"finetune_{finetune_init}.yaml"
+        if not phase_common_path.is_file():
+            raise FileNotFoundError(f"Required init-specific finetune config not found at path {phase_common_path}.")
+    else:
+        phase_common_path = common_dir / f"{phase}.yaml"
+        if not phase_common_path.is_file():
+            raise FileNotFoundError(f"Required config file not found at path {phase_common_path}.")
 
     merged: dict[str, Any] = {}
     merged = deep_merge(base=merged, override=load_yaml(path=embeddings_path))

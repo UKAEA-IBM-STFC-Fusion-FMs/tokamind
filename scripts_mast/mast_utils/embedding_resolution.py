@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import shutil
+from copy import deepcopy
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
@@ -32,6 +33,97 @@ from .tune_dct3d import (
 # ----------------------------------------------------------------------------------------------------------------------
 
 logger = logging.getLogger("mmt.EmbeddingResolution")
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _merge_embedding_overrides(embeddings_cfg: dict[str, Any], overrides: Mapping[str, Any]) -> None:
+    """
+    Merge ``per_signal_overrides`` from ``overrides`` into ``embeddings_cfg`` in place.
+
+    For each role present in ``overrides``, the corresponding role dict inside
+    ``embeddings_cfg["per_signal_overrides"]`` is updated with the incoming signal entries. Existing entries for
+    signals not present in ``overrides`` are left unchanged.
+
+    Parameters
+    ----------
+    embeddings_cfg : dict[str, Any]
+        The ``embeddings`` sub-dict that is mutated in place (i.e. ``cfg_mmt.raw["embeddings"]``).
+    overrides : Mapping[str, Any]
+        ``per_signal_overrides`` to merge, keyed by role then signal name.
+
+    """
+
+    embeddings_cfg.setdefault("per_signal_overrides", {})
+    per_signal = embeddings_cfg["per_signal_overrides"]
+
+    for role, sigs in overrides.items():
+        if not isinstance(sigs, Mapping):
+            continue
+        per_signal.setdefault(role, {})
+        per_signal[role].update(sigs)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _embedding_role_mode(embeddings_cfg: Mapping[str, Any], *, default: str) -> dict[str, str]:
+    """Return validated per-role embedding modes.
+
+    Valid modes are:
+    - ``tune``: tune DCT3D coefficients in the current run
+    - ``source``: inherit DCT3D coefficients from the source run
+    - ``config``: use the selected embedding profile/defaults without tuning or source artifacts
+    """
+
+    raw_role_mode = embeddings_cfg.get("role_mode") or {}
+    if not isinstance(raw_role_mode, Mapping):
+        raise TypeError("embeddings.role_mode must be a mapping from role to one of: tune, source, config.")
+
+    valid_roles = ("input", "actuator", "output")
+    valid_modes = {"tune", "source", "config"}
+    role_mode: dict[str, str] = {}
+
+    for role in valid_roles:
+        mode = raw_role_mode.get(role, default)
+        if mode not in valid_modes:
+            raise ValueError(f"embeddings.role_mode.{role} must be one of {sorted(valid_modes)}, got {mode!r}.")
+        role_mode[role] = str(mode)
+
+    return role_mode
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _filter_embedding_overrides_by_roles(overrides: Mapping[str, Any], roles: list[str]) -> dict[str, Any]:
+    """Return only per-signal overrides for the requested roles."""
+
+    role_set = set(roles)
+    return {role: value for role, value in overrides.items() if role in role_set}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _profile_embedding_overrides(embeddings_cfg: Mapping[str, Any]) -> dict[str, Any]:
+    """
+    Return a deep copy of the explicit ``per_signal_overrides`` present in the profile YAML.
+
+    Must be called before any DCT3D artifacts are merged into ``embeddings_cfg``, so that the snapshot reflects only
+    the user-authored config choices. The copy is re-applied after all artifact merges via
+    :func:`_merge_embedding_overrides`, ensuring that explicit profile overrides always win over computed defaults.
+
+    Parameters
+    ----------
+    embeddings_cfg : Mapping[str, Any]
+        The ``embeddings`` sub-dict from the resolved experiment config (i.e. ``cfg_mmt.raw["embeddings"]``).
+
+    Returns
+    -------
+    dict[str, Any]
+        Deep copy of ``embeddings_cfg["per_signal_overrides"]``, or an empty dict if the key is absent or not a
+        mapping.
+
+    """
+
+    per_signal = embeddings_cfg.get("per_signal_overrides", {})
+    if not isinstance(per_signal, dict):
+        return {}
+    return deepcopy(per_signal)
 
 
 # ======================================================================================================================
@@ -57,7 +149,7 @@ def save_config_snapshot(
         Merged experiment config (ExperimentConfig object).
     run_dir : Path
         Run directory where config snapshot will be saved.
-    logger_inst : logging.Logger
+    logger_inst : logging.Logger | None
         Logger for logging the save location.
         Optional. Default: None.
 
@@ -212,9 +304,15 @@ def resolve_pretrain_embeddings(
 
     """
 
-    cfg_tune_emb = cfg_mmt.embeddings.get("tune_embeddings", {})
-    roles_cfg = cfg_tune_emb.get("roles", {})
-    roles_to_tune = [r for r in ("input", "actuator", "output") if roles_cfg.get(r, True)]
+    role_mode = _embedding_role_mode(cfg_mmt.embeddings, default="tune")
+    roles_as_source = [r for r in ("input", "actuator", "output") if role_mode[r] == "source"]
+    if roles_as_source:
+        raise ValueError(
+            f"embeddings.role_mode=source is invalid for pretrain (roles: {roles_as_source}). "
+            "Use role_mode=tune or role_mode=config."
+        )
+
+    roles_to_tune = [r for r in ("input", "actuator", "output") if role_mode[r] == "tune"]
 
     if roles_to_tune:
         # Step 1: build initial signal_specs with default (spatial) config for tuning
@@ -238,10 +336,7 @@ def resolve_pretrain_embeddings(
         )
 
         # Step 3: update in-memory config with rank-mode overrides
-        cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
-        for role, sigs in per_signal_overrides.items():
-            cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
-            cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
+        _merge_embedding_overrides(cfg_mmt.raw["embeddings"], per_signal_overrides)
 
         # Step 4: save config snapshot to capture tuned per_signal_overrides
         save_config_snapshot(cfg_mmt=cfg_mmt, run_dir=run_dir, logger_inst=logger)
@@ -316,10 +411,10 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
         # Check role exists
         if role not in per_signal_overrides:
             raise ValueError(
-                f"embeddings.mode=source: inherited role '{role}' has no entries in source embeddings/dct3d.yaml. "
+                f"embeddings.role_mode.{role}=source, but source embeddings/dct3d.yaml has no entries for this role. "
                 f"Source model may not have used DCT3D rank-mode tuning for this role. "
-                f"Switch to embeddings.mode=config to use current config defaults instead, or set "
-                f"tune_embeddings.roles.{role}=true to re-tune from scratch."
+                f"Use embeddings.role_mode.{role}=config for current config defaults, or "
+                f"embeddings.role_mode.{role}=tune to tune from scratch."
             )
 
         role_overrides = per_signal_overrides[role]
@@ -333,7 +428,7 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
             # Signal must exist in overrides
             if sig_name not in role_overrides:
                 raise ValueError(
-                    f"embeddings.mode=source: inherited role '{role}' is missing signal "
+                    f"embeddings.role_mode.{role}=source is missing signal "
                     f"'{sig_name}' in source embeddings/dct3d.yaml. Expected all DCT3D signals "
                     f"for inherited roles to have rank-mode overrides. Available signals in "
                     f"source: {list(role_overrides.keys())}."
@@ -344,14 +439,14 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
             # Validate structure
             if not isinstance(sig_override, dict):
                 raise TypeError(
-                    f"embeddings.mode=source: invalid override for {role}:{sig_name}. "
+                    f"embeddings.role_mode.{role}=source has invalid override for {role}:{sig_name}. "
                     f"Expected dict, got {type(sig_override).__name__}"
                 )
 
             # Check encoder_name
             if sig_override.get("encoder_name") != "dct3d":
                 raise TypeError(
-                    f"embeddings.mode=source: {role}:{sig_name} has encoder_name='{sig_override.get('encoder_name')}', "
+                    f"embeddings.role_mode.{role}=source: {role}:{sig_name} has encoder_name='{sig_override.get('encoder_name')}', "
                     f"expected 'dct3d'."
                 )
 
@@ -359,7 +454,7 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
             kwargs = sig_override.get("encoder_kwargs")
             if not isinstance(kwargs, dict):
                 raise TypeError(
-                    f"embeddings.mode=source: {role}:{sig_name} missing or invalid 'encoder_kwargs' (expected dict)."
+                    f"embeddings.role_mode.{role}=source: {role}:{sig_name} missing or invalid 'encoder_kwargs' (expected dict)."
                 )
 
             # Check required kwargs fields
@@ -372,13 +467,13 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
             missing = [f for f in required_fields if f not in kwargs]
             if missing:
                 raise ValueError(
-                    f"embeddings.mode=source: {role}:{sig_name} encoder_kwargs missing required fields: {missing}."
+                    f"embeddings.role_mode.{role}=source: {role}:{sig_name} encoder_kwargs missing required fields: {missing}."
                 )
 
             # Check selection_mode is 'rank'
             if kwargs["selection_mode"] != "rank":
                 raise ValueError(
-                    f"embeddings.mode=source: {role}:{sig_name} has selection_mode='{kwargs['selection_mode']}', "
+                    f"embeddings.role_mode.{role}=source: {role}:{sig_name} has selection_mode='{kwargs['selection_mode']}', "
                     f"expected 'rank' for inherited embeddings."
                 )
 
@@ -397,12 +492,12 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
     cfg_task: Mapping[str, Any],
 ) -> tuple[SignalSpecRegistry, dict]:
     """
-    Resolve embeddings for finetune phase with mode/tune/inherit logic.
+    Resolve embeddings for finetune phase with role_mode tune/source/config logic.
 
     This function handles the complex finetune embedding workflow:
-    - mode=source: stage task-used source DCT3D artifacts, inherit/retune per
-      role with strict validation
-    - mode=config: use config defaults directly (no source artifacts)
+    - role_mode.<role>=source: stage task-used source DCT3D artifacts and inherit that role with strict validation
+    - role_mode.<role>=tune: tune that role in the current run
+    - role_mode.<role>=config: use config defaults for that role
 
     Parameters
     ----------
@@ -425,125 +520,106 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
     Raises
     ------
     ValueError
-        If mode is invalid, or if mode=config with roles_to_tune, or if  strict validation fails for inherited
-        embeddings.
+        If role_mode is invalid, or if strict validation fails for inherited embeddings.
     FileNotFoundError
-        If mode=source, a source run is configured, source embeddings do not exist, and roles need inheriting.
+        If a role uses source mode and source embeddings are unavailable.
 
     """
 
     cfg_emb = cfg_mmt.embeddings
-    cfg_tune_emb = cfg_emb.get("tune_embeddings", {})
-    roles_cfg = cfg_tune_emb.get("roles", {})
-    emb_mode = cfg_emb.get("mode", "source")
+    role_mode = _embedding_role_mode(cfg_emb, default="source")
 
-    # Validate mode
-    if emb_mode not in ["source", "config"]:
-        raise ValueError(f"embeddings.mode must be 'source' or 'config', got '{emb_mode}'")
+    original_profile_overrides = _profile_embedding_overrides(cfg_mmt.raw["embeddings"])
 
-    roles_to_tune = [r for r in ["input", "actuator", "output"] if roles_cfg.get(r, False)]
+    roles_to_tune = [r for r in ["input", "actuator", "output"] if role_mode[r] == "tune"]
+    roles_to_inherit = [r for r in ["input", "actuator", "output"] if role_mode[r] == "source"]
+    roles_from_config = [r for r in ["input", "actuator", "output"] if role_mode[r] == "config"]
 
-    # Validate mode=config does not have roles_to_tune
-    if (emb_mode == "config") and roles_to_tune:
-        raise ValueError(
-            f"embeddings.mode=config does not support re-tuning roles (got tune_embeddings.roles={roles_to_tune}). "
-            "Set all roles to false or switch to mode=source."
+    logger.info("")
+    logger.info(
+        "Embeddings role_mode | tune=%s | source=%s | config=%s",
+        roles_to_tune or "none",
+        roles_to_inherit or "none",
+        roles_from_config or "none",
+    )
+
+    # Step 1: Optional source inheritance path for roles explicitly marked as source.
+    model_source_cfg = cfg_mmt.raw.get("model_source")
+    source_run_dir = None
+    if isinstance(model_source_cfg, dict):
+        run_dir_src = model_source_cfg.get("run_dir")
+        if run_dir_src:
+            source_run_dir = Path(str(run_dir_src))
+
+    if roles_to_inherit:
+        if source_run_dir is None:
+            raise FileNotFoundError(
+                f"embeddings.role_mode requests source roles {roles_to_inherit}, but no model_source.run_dir is set. "
+                "Use role_mode=tune for scratch retuning or role_mode=config for config defaults."
+            )
+
+        src_emb = source_run_dir / "embeddings"
+        source_embeddings_available = stage_task_used_dct3d_artifacts_from_source(
+            source_run_dir=source_run_dir,
+            run_dir=run_dir,
+            signals_by_role=signals_by_role,
         )
 
-    if emb_mode == "source":
-        roles_to_inherit = [r for r in ["input", "actuator", "output"] if r not in roles_to_tune]
-        logger.info("")
-        logger.info(
-            "Embeddings mode=source | retune=%s | inherit=%s",
-            roles_to_tune or "none",
-            roles_to_inherit or "none",
+        if not source_embeddings_available:
+            raise FileNotFoundError(
+                f"embeddings.role_mode requires source embeddings at {src_emb} for source roles "
+                f"{roles_to_inherit}. Ensure the source model was trained with DCT3D rank-mode tuning, "
+                "or use role_mode=tune/config for those roles."
+            )
+
+        # Step 2: Load inherited overrides and perform strict validation.
+        per_signal_overrides = load_embeddings_overrides(run_dir=run_dir)
+
+        # Build initial signal_specs for validation (with default config).
+        signal_specs_for_validation = build_signal_specs(
+            embeddings_cfg=cfg_mmt.embeddings,
+            signals_by_role=signals_by_role,
+            dict_metadata=dict_task_metadata,
+            chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
+            log_summary=False,
         )
 
-        # Step 1: Optional source inheritance path
-        model_source_cfg = cfg_mmt.raw.get("model_source")
-        source_run_dir = None
-        if isinstance(model_source_cfg, dict):
-            run_dir_src = model_source_cfg.get("run_dir")
-            if run_dir_src:
-                source_run_dir = Path(str(run_dir_src))
+        _validate_inherited_embeddings_strict(
+            per_signal_overrides=per_signal_overrides,
+            signals_by_role=signals_by_role,
+            roles_to_inherit=roles_to_inherit,
+            signal_specs=signal_specs_for_validation,
+        )
 
-        if source_run_dir is not None:
-            src_emb = source_run_dir / "embeddings"
-            source_embeddings_available = stage_task_used_dct3d_artifacts_from_source(
-                source_run_dir=source_run_dir,
-                run_dir=run_dir,
-                signals_by_role=signals_by_role,
-            )
+        inherited_overrides = _filter_embedding_overrides_by_roles(per_signal_overrides, roles_to_inherit)
+        if inherited_overrides:
+            _merge_embedding_overrides(cfg_mmt.raw["embeddings"], inherited_overrides)
 
-            if (not source_embeddings_available) and roles_to_inherit:
-                raise FileNotFoundError(
-                    f"embeddings.mode=source requires source embeddings at {src_emb} for inherited roles "
-                    f"{roles_to_inherit}. Ensure the source model was trained with DCT3D rank-mode tuning, or set all "
-                    f"tune_embeddings.roles to true to re-tune from scratch, or switch to embeddings.mode=config."
-                )
+    # Step 3: Re-tune selected roles (overwrites their files in run_dir/embeddings/).
+    if roles_to_tune:
+        signal_specs = build_signal_specs(
+            embeddings_cfg=cfg_mmt.embeddings,
+            signals_by_role=signals_by_role,
+            dict_metadata=dict_task_metadata,
+            chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
+            log_summary=False,
+        )
+        logger.info("Tuning DCT3D embeddings for roles: %s", roles_to_tune)
+        new_overrides = run_dct3d_tuning(
+            cfg_mmt=cfg_mmt,
+            signal_specs=signal_specs,
+            cfg_task=cfg_task,
+            dict_task_metadata=dict_task_metadata,
+            run_dir=run_dir,
+            roles=roles_to_tune,
+        )
+        _merge_embedding_overrides(cfg_mmt.raw["embeddings"], new_overrides)
 
-            # Step 2: Load inherited overrides and perform strict validation
-            per_signal_overrides = load_embeddings_overrides(run_dir=run_dir)
+    # Step 4: Re-apply explicit profile overrides last so user/config choices win over computed artifacts.
+    _merge_embedding_overrides(cfg_mmt.raw["embeddings"], original_profile_overrides)
 
-            if roles_to_inherit:
-                # Build initial signal_specs for validation (with default config)
-                signal_specs_for_validation = build_signal_specs(
-                    embeddings_cfg=cfg_mmt.embeddings,
-                    signals_by_role=signals_by_role,
-                    dict_metadata=dict_task_metadata,
-                    chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
-                    log_summary=False,
-                )
-
-                # Strict validation: check signal-level parameters
-                _validate_inherited_embeddings_strict(
-                    per_signal_overrides=per_signal_overrides,
-                    signals_by_role=signals_by_role,
-                    roles_to_inherit=roles_to_inherit,
-                    signal_specs=signal_specs_for_validation,
-                )
-
-            # Step 3: Merge inherited overrides into config
-            if per_signal_overrides:
-                cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
-                for role, sigs in per_signal_overrides.items():
-                    cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
-                    cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
-        elif roles_to_inherit:
-            logger.info(
-                "Embeddings mode=source without source model: inherited roles %s will use current config defaults.",
-                roles_to_inherit,
-            )
-
-        # Step 4: Re-tune selected roles (overwrites their files in run_dir/embeddings/)
-        if roles_to_tune:
-            signal_specs = build_signal_specs(
-                embeddings_cfg=cfg_mmt.embeddings,
-                signals_by_role=signals_by_role,
-                dict_metadata=dict_task_metadata,
-                chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
-                log_summary=False,
-            )
-            logger.info("Re-tuning DCT3D embeddings for roles: %s", roles_to_tune)
-            new_overrides = run_dct3d_tuning(
-                cfg_mmt=cfg_mmt,
-                signal_specs=signal_specs,
-                cfg_task=cfg_task,
-                dict_task_metadata=dict_task_metadata,
-                run_dir=run_dir,
-                roles=roles_to_tune,
-            )
-            cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
-            for role, sigs in new_overrides.items():
-                cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
-                cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
-
-        # Step 5: Save config snapshot to capture final per_signal_overrides
-        save_config_snapshot(cfg_mmt=cfg_mmt, run_dir=run_dir, logger_inst=logger)
-
-    else:  # -> I.e., emb_mode is "config"
-        logger.info("")
-        logger.info("Embeddings mode=config: using emb_profile config directly (no source artifacts)")
+    # Step 5: Save config snapshot to capture final per_signal_overrides.
+    save_config_snapshot(cfg_mmt=cfg_mmt, run_dir=run_dir, logger_inst=logger)
 
     # Step 6: (Re)build signal_specs with final config
     logger.info("")
@@ -591,6 +667,8 @@ def resolve_eval_embeddings(
 
     """
 
+    original_profile_overrides = _profile_embedding_overrides(cfg_mmt.raw["embeddings"])
+
     # Load per-signal rank-mode overrides from training run
     per_signal_overrides = load_embeddings_overrides(train_run_dir)
 
@@ -601,12 +679,10 @@ def resolve_eval_embeddings(
             train_run_dir / "embeddings",
         )
 
-    # Merge overrides into config
+    # Merge computed artifacts first, then re-apply explicit profile overrides so config choices win.
     if per_signal_overrides:
-        cfg_mmt.raw["embeddings"].setdefault("per_signal_overrides", {})
-        for role, sigs in per_signal_overrides.items():
-            cfg_mmt.raw["embeddings"]["per_signal_overrides"].setdefault(role, {})
-            cfg_mmt.raw["embeddings"]["per_signal_overrides"][role].update(sigs)
+        _merge_embedding_overrides(cfg_mmt.raw["embeddings"], per_signal_overrides)
+    _merge_embedding_overrides(cfg_mmt.raw["embeddings"], original_profile_overrides)
 
     # Build signal_specs with loaded config
     logger.info("")

@@ -37,7 +37,7 @@ def load_experiment_config(
     model: str | None = None,
     run_id: str | None = None,
     tag: str | None = None,
-    finetune_init: Literal["warmstart", "scratch"] | None = None,
+    finetune_init: Literal["warmstart", "scratch"] | None = None,  # noqa - Ignore expected type warning
 ) -> ExperimentConfig:
     """
     Load, merge, and persist experiment config for a task+phase run.
@@ -46,7 +46,7 @@ def load_experiment_config(
     1. Base YAML merge (common + task overrides + embeddings profile)
     2. CLI injection (`--model`, `--run-id`, `--tag`, `--init`)
     3. Phase semantics:
-      - finetune scratch: build `model` from `model_scratch` + shared overrides
+      - finetune scratch: build `model` directly from `model_scratch`
       - finetune warmstart: inherit source model, keep current preprocess config
       - eval: inherit from source run config
     4. Path finalization and config snapshot write
@@ -98,6 +98,16 @@ def load_experiment_config(
     if not emb_profile:
         raise ValueError("`embeddings_profile` must be a non-empty string.")
 
+    if phase == "finetune":
+        init_mode_for_merge = str(finetune_init or "").lower()
+        if init_mode_for_merge not in ["warmstart", "scratch"]:
+            raise ValueError(
+                "Argument `finetune_init` is required for phase 'finetune' and must be one of "
+                f"['warmstart', 'scratch'], got {finetune_init!r}."
+            )
+    else:
+        init_mode_for_merge = None
+
     configs_root_path = resolve_from_repo_root(str(configs_root))
     tasks_overrides_dir = configs_root_path / "tasks_overrides" / task
 
@@ -107,6 +117,7 @@ def load_experiment_config(
         embeddings_profile=emb_profile,
         configs_root_path=configs_root_path,
         tasks_overrides_dir=tasks_overrides_dir,
+        finetune_init=init_mode_for_merge,
     )
 
     task_in_yaml = merged.get("task")

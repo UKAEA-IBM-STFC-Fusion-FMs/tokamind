@@ -21,7 +21,8 @@ scripts_mast/configs/
   common/
     embeddings.yaml
     pretrain.yaml
-    finetune.yaml
+    finetune_warmstart.yaml    # complete warmstart finetune config
+    finetune_scratch.yaml      # complete scratch finetune config
     eval.yaml
 
   tasks_overrides/
@@ -65,10 +66,16 @@ python scripts_mast/run_eval.py \
 ```
 
 ## Merge Order
-For `pretrain` and `finetune`, merge order is:
+For `pretrain`, merge order is:
 1. `common/embeddings.yaml` (shared embedding defaults + tuning objective)
-2. `common/<phase>.yaml` (phase runtime defaults)
-3. `tasks_overrides/<task>/<phase>_overrides.yaml` (task/phase-specific edits, optional)
+2. `common/pretrain.yaml` (pretrain runtime defaults)
+3. `tasks_overrides/<task>/pretrain_overrides.yaml` (task-specific edits, optional)
+4. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` (task/profile embedding edits, required)
+
+For `finetune`, merge order is:
+1. `common/embeddings.yaml` (shared embedding defaults)
+2. `common/finetune_warmstart.yaml` **or** `common/finetune_scratch.yaml` (complete init-mode config, selected automatically from `--init`)
+3. `tasks_overrides/<task>/finetune_overrides.yaml` (task-specific edits, optional; applies to both init modes)
 4. `tasks_overrides/<task>/embeddings_overrides/<profile>.yaml` (task/profile embedding edits, required)
 
 For `eval`, merge order is:
@@ -96,24 +103,35 @@ When a source model is used, the loader resolves and stores:
 ### Pretrain
 - Uses `model` and `preprocess` directly from merged config.
 - Builds embeddings according to profile + runtime tuning settings.
+- `data.split` sets the split strategy (`random` or `temporal`, default `random`).
 
 ### Finetune
-- Uses explicit model semantics from `common/finetune.yaml`:
-  - `model_scratch`
-  - `finetune_model_overrides`
-  - `warmstart.model_overrides`
-- If `--init scratch`:
-  - `model = deep_merge(model_scratch, finetune_model_overrides)`
-  - `preprocess.chunk` and `preprocess.trim_chunks` are used from merged finetune config.
-- If `--init warmstart`:
-  - `model = deep_merge(source_model, finetune_model_overrides, warmstart.model_overrides)`
-  - `preprocess.chunk` and `preprocess.trim_chunks` are inherited from source run config.
-- Embeddings are resolved by `embeddings.mode`:
-  - `source`: stage only task-used source DCT3D artifacts into current run, then inherit and/or retune by role
-  - `config`: ignore source embedding artifacts and use merged config directly
+Finetune data/preprocess/collate/loader plus embedding/train/model configuration is owned by the init-mode files:
+- `data`, `preprocess`, `collate`, and `loader` — duplicated in `finetune_scratch.yaml` and `finetune_warmstart.yaml` for self-contained run recipes
+- `embeddings.role_mode` and finetune `embeddings.tuning` — defined in `finetune_scratch.yaml` or `finetune_warmstart.yaml`
+- `model_scratch` — defined in `finetune_scratch.yaml`: complete scratch model architecture
+- `model_overrides` — defined in `finetune_warmstart.yaml`: overrides applied on top of the source model
+- `train` — defined in `finetune_warmstart.yaml` or `finetune_scratch.yaml`: optimizer, loss, AMP, early stop, and stage schedule
+
+If `--init scratch`:
+- `model = model_scratch`
+- `preprocess.chunk` and `preprocess.trim_chunks` are used from merged finetune config.
+- `data.split` is used directly from config.
+- Stage schedule: single `ft_scratch` stage, all blocks trainable.
+
+If `--init warmstart`:
+- `model = deep_merge(source_model, model_overrides)`
+- `preprocess.chunk` and `preprocess.trim_chunks` are used from the current merged finetune config, not inherited from the source run.
+- `data.split` is inherited from source run. If the finetune config specifies a different split, a warning is logged and the source split is enforced.
+- Stage schedule: `ft_heads` (backbone + token_encoder frozen) → `ft_full` (all blocks trainable).
+- Embeddings are resolved by `embeddings.role_mode` per role:
+  - `tune`: tune DCT3D coefficients in the current run
+  - `source`: stage task-used source DCT3D artifacts and inherit that role
+  - `config`: ignore source artifacts for that role and use merged config/profile defaults
 
 ### Eval
-- Inherits `model`, `embeddings`, `preprocess.chunk`, and `preprocess.trim_chunks` from source run config.
+- Inherits `model`, `embeddings`, `preprocess.chunk`, `preprocess.trim_chunks`, and `data.split` from source run config.
+- `data.split` must not be set in the eval config — it is always source-authoritative.
 - Uses source run embedding artifacts for codec construction.
 - Applies eval-only controls from merged `eval.*` settings (drops, metrics, traces, amp).
 

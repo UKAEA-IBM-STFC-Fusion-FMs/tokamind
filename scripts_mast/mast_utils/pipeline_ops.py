@@ -42,7 +42,7 @@ Notes
 
 from __future__ import annotations
 
-from typing import Any, Optional, Union
+from typing import Any, Union
 from collections.abc import Mapping, Sequence
 
 import torch
@@ -187,6 +187,7 @@ def build_default_transform(
     cfg_chunks = cfg_prep["chunk"]
     cfg_trim = cfg_prep["trim_chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
+    nan_imputation = (cfg_prep.get("embed_chunks") or {}).get("nan_imputation", "zero")
 
     return ComposeTransforms(
         [
@@ -199,10 +200,12 @@ def build_default_transform(
                 min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
                 min_valid_chunks=cfg_valid_win["min_valid_chunks"],
                 min_valid_outputs=cfg_valid_win["min_valid_outputs"],
+                accept_nan_inputs_actuators=cfg_valid_win.get("accept_nan_inputs_actuators", True),
+                accept_nan_outputs=cfg_valid_win.get("accept_nan_outputs", True),
                 window_stride_sec=cfg_valid_win["window_stride_sec"],
             ),
             TrimChunksTransform(max_chunks=cfg_trim["max_chunks"]),
-            EmbedChunksTransform(signal_specs=signal_specs, codecs=codecs),
+            EmbedChunksTransform(signal_specs=signal_specs, codecs=codecs, nan_imputation=nan_imputation),
             BuildTokensTransform(signal_specs=signal_specs),
             FinalizeWindowTransform(keep_output_native=keep_output_native),
         ]
@@ -218,12 +221,12 @@ def build_default_transform(
 def make_collate_fn(  # NOSONAR - Ignore cognitive complexity
     *,
     signal_specs: SignalSpecRegistry,
-    base_cfg: Optional[Mapping[str, Any]] = None,
+    base_cfg: Mapping[str, Any] | None = None,
     keep_output_native: bool,
     # Below, force-drop lists (mostly used for eval ablations):
-    drop_inputs: Optional[Sequence[str]] = None,
-    drop_actuators: Optional[Sequence[str]] = None,
-    drop_outputs: Optional[Sequence[str]] = None,
+    drop_inputs: Sequence[str] | None = None,
+    drop_actuators: Sequence[str] | None = None,
+    drop_outputs: Sequence[str] | None = None,
 ) -> MMTCollate:
     """
     Create an MMTCollate configured for train/eval.
@@ -239,20 +242,20 @@ def make_collate_fn(  # NOSONAR - Ignore cognitive complexity
     ----------
     signal_specs : SignalSpecRegistry
         SignalSpec registry for the *current task*.
-    base_cfg : Optional[Mapping[str, Any]]
+    base_cfg : Mapping[str, Any] | None
         Base collate configuration (usually cfg_mmt.collate for train). For eval you can pass None.
         Optional. Default: None.
     keep_output_native : bool
         Whether to include native output payloads in batches.
     drop_inputs / drop_actuators / drop_outputs:
         If provided, these signals are *forced dropped* by setting per-signal dropout overrides to 1.0.
-    drop_inputs : Optional[Sequence[str]]
+    drop_inputs : Sequence[str] | None
         List of input signal names to force-drop (p=1.0).
         Optional. Default: None.
-    drop_actuators : Optional[Sequence[str]]
+    drop_actuators : Sequence[str] | None
         List of actuator signal names to force-drop (p=1.0).
         Optional. Default: None.
-    drop_outputs : Optional[Sequence[str]]
+    drop_outputs : Sequence[str] | None
         List of output signal names to force-drop (p=1.0).
         Optional. Default: None.
 

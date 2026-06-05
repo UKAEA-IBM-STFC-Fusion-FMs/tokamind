@@ -14,15 +14,19 @@ collate.
 """
 
 from collections.abc import Mapping, MutableMapping
-from typing import Any
+from typing import TYPE_CHECKING, Any
 import numpy as np
 import logging
 
 import torch
 
+from mmt.data.standardization import destandardize_numpy
 from mmt.train.loop_utils import move_batch_to_device
 from mmt.utils.amp_utils import amp_ctx_for_model
-from .decode import decode_and_destandardize, apply_stats
+from .decode import decode_and_destandardize
+
+if TYPE_CHECKING:
+    from mmt.data.embeddings.torch_decoder import TorchDecoder
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -41,7 +45,7 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
     model: torch.nn.Module,
     device: torch.device,
     stats: Mapping[str, Mapping[str, float]],
-    codecs: Mapping[int, Any],
+    decoders: Mapping[str, TorchDecoder],
     id_to_name: Mapping[int, str],
     amp_enabled: bool = True,
 ) -> tuple[
@@ -71,9 +75,13 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
         Standard evaluation model input.
     device : torch.device
         Standard evaluation device input.
-    stats, codecs, id_to_name : Mapping
-        Output decoding / de-standardization inputs (native-space evaluation).
-    amp_enabled :  bool
+    stats : Mapping[str, Mapping[str, float]]
+        Per-signal stats dict with ``"mean"`` and ``"std"`` keys.
+    decoders : Mapping[str, TorchDecoder]
+        Pre-built per-signal ``TorchDecoder`` instances keyed by signal name.
+    id_to_name : Mapping[int, str]
+        Mapping from signal_id to signal name.
+    amp_enabled : bool
         Whether to enable AMP in the forward pass.
         Optional. Default: True.
 
@@ -184,7 +192,9 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
     # 4) Decode + destandardize predictions
     # ..................................................................................................................
 
-    y_pred_native = decode_and_destandardize(y_pred_std=y_pred_std, y_true_std=y_true_std, stats=stats, codecs=codecs)
+    y_pred_native = decode_and_destandardize(
+        y_pred_std=y_pred_std, y_true_std=y_true_std, stats=stats, decoders=decoders
+    )
 
     # ..................................................................................................................
     # 5) Destandardize ground truth
@@ -197,7 +207,7 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
             y_true_native[name] = arr
             continue
 
-        y_true_native[name] = apply_stats(arr=arr, mean=stats[name]["mean"], std=stats[name]["std"])
+        y_true_native[name] = destandardize_numpy(arr=arr, mean=stats[name]["mean"], std=stats[name]["std"])
 
     if logger.isEnabledFor(logging.DEBUG):
         for name in y_pred_native:

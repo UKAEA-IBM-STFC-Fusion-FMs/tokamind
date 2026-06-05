@@ -22,11 +22,12 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 | TokaMark paper | [arXiv:2602.10132](https://arxiv.org/abs/2602.10132) |
 | TokaMark repository | [UKAEA-IBM-STFC-Fusion-FMs/tokamark](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/tokamark) |
 | VAE-FAIRMAST repository | _coming soon_ |
-| Pretrained models (HuggingFace) | [UKAEA-IBM-STFC/tokamind](https://huggingface.co/UKAEA-IBM-STFC/tokamind) |
+| Pretrained model (HuggingFace) | [UKAEA-IBM-STFC/tokamind-base-v2](https://huggingface.co/UKAEA-IBM-STFC/tokamind-base-v2) |
 
 ## 📚 Documentation
 - [Configuration Guide](docs/config_guide.md)
 - [Configuration Reference](docs/config_reference.md)
+- [Training](docs/training.md)
 - [DCT3D Tuning](docs/tuning_dct3d.md)
 - [Checkpointing and Warmstart](docs/checkpointing_and_warmstart.md)
 - [Evaluation](docs/evaluation.md)
@@ -129,10 +130,9 @@ pip install -e .
 
 ## 🤗 Pretrained Model
 
-Pretrained TokaMind checkpoints (trained on MAST data) are available on HuggingFace:
+Pretrained TokaMind checkpoints (trained on MAST data) are available on HuggingFace: [tokamind-base-v2](https://huggingface.co/UKAEA-IBM-STFC/tokamind-base-v2)
 
-- [tokamind-base-v1](https://huggingface.co/UKAEA-IBM-STFC/tokamind/tree/main/tokamind-base-v1)
-- [tokamind-tiny-v1](https://huggingface.co/UKAEA-IBM-STFC/tokamind/tree/main/tokamind-tiny-v1)
+[//]: # (- [tokamind-tiny-v1]&#40;https://huggingface.co/UKAEA-IBM-STFC/tokamind/tree/main/tokamind-tiny-v1&#41;)
 
 The HuggingFace repository includes:
 - Model weights (`checkpoints/best`)
@@ -143,8 +143,8 @@ To use it, download and place the model under `runs/` so it matches the expected
 
 ```
 runs/
-└── tokamind_base/
-    ├── tokamind_base.yaml
+└── tokamind-base-v2/
+    ├── tokamind-base-v2.yaml
     ├── checkpoints/
     │   └── best
     └── embeddings/
@@ -196,27 +196,35 @@ Configuration is convention-based and merged by phase.
 Base files:
 - `scripts_mast/configs/common/embeddings.yaml`
 - `scripts_mast/configs/common/pretrain.yaml`
-- `scripts_mast/configs/common/finetune.yaml`
+- `scripts_mast/configs/common/finetune_warmstart.yaml`
+- `scripts_mast/configs/common/finetune_scratch.yaml`
 - `scripts_mast/configs/common/eval.yaml`
+
+Key data config knobs:
+- `data.split`: `random` (default) or `temporal` — selects the shot split strategy for pretrain/finetune.
+- `data.subset_of_shots`: limits shot count for faster runs.
 
 Task files:
 - `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` (optional)
 - `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
 
-Finetune model keys in `scripts_mast/configs/common/finetune.yaml`:
-- `model_scratch`: scratch-only base architecture
-- `finetune_model_overrides`: model overrides applied in both scratch and warmstart
-- `warmstart.model_overrides`: warmstart-only model overrides
+Finetune configs are split by init mode:
+- `scripts_mast/configs/common/finetune_warmstart.yaml`: complete warmstart config, embedding policy, training recipe, `model_source`, and `model_overrides`
+- `scripts_mast/configs/common/finetune_scratch.yaml`: complete scratch config, embedding policy, training recipe, and complete `model_scratch`
+
+Task-specific finetune deltas still live in `tasks_overrides/<task>/finetune_overrides.yaml` and apply on top of either init mode.
 
 Details are in:
 - [Configuration Guide](docs/config_guide.md)
 - [Configuration Reference](docs/config_reference.md)
 
 ## 🧩 Embedding Resolution
-DCT3D tuning is integrated in the training scripts and controlled through `embeddings.tune_embeddings`.
+DCT3D tuning is integrated in the training scripts and controlled through `embeddings.role_mode` and `embeddings.tuning`.
+NaN/inf handling for both DCT3D tuning and runtime embedding is controlled by `preprocess.embed_chunks.nan_imputation`.
 
-- Pretrain: `tune_embeddings.roles` selects which roles to tune.
-- Finetune: `embeddings.mode` controls whether embeddings are inherited from source run (`source`) or read directly from config (`config`).
+- `role_mode.<role>=tune`: tune DCT3D coefficients in the current run.
+- `role_mode.<role>=source`: inherit DCT3D coefficients from the source run.
+- `role_mode.<role>=config`: use config/profile defaults without tuning or source artifacts.
 - Eval: embeddings are loaded from the evaluated training run.
 
 Details are in [DCT3D Tuning](docs/tuning_dct3d.md).

@@ -62,7 +62,7 @@ def _pairs_to_names(pairs: Iterable[tuple[str, str]]) -> list[str]:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def build_signals_by_role_from_task_definition(
+def build_signals_by_role_from_task_definition(  # NOSONAR - Ignore cognitive complexity
     cfg_task: Mapping[str, Any],
     dict_metadata: Mapping[str, Any],
 ) -> dict[Role, dict[CanonicalName, Modality]]:
@@ -93,10 +93,11 @@ def build_signals_by_role_from_task_definition(
     ------
     TypeError
         If `cfg_task['sources_and_signals']` is not a mapping (dict).
-        If `cfg_task['sources_and_signals']['{task_key}']` is not a list.
-        If `dict_metadata['{role}']` is not mapping (dict).
+        If `cfg_task['sources_and_signals'][task_key]` is not a list.
+        If `dict_metadata[role]` is not mapping (dict).
     KeyError
-        If a given signal name is missing from `dict_metadata['{role}']`.
+        If `dict_metadata[role]` misses a given signal.
+        If `dict_metadata[role][signal]` misses required key 'values_shape'.
 
     """
 
@@ -120,8 +121,10 @@ def build_signals_by_role_from_task_definition(
             meta = role_meta.get(name)
             if meta is None:
                 raise KeyError(f"Signal {name!r} missing from `dict_metadata['{role}']`.")
+            if "values_shape" not in meta:
+                raise KeyError(f"`dict_metadata[{role!r}][{name!r}]` missing required key 'values_shape'.")
 
-            values_shape = meta.get("values_shape", ())
+            values_shape = meta["values_shape"]
             modality = infer_modality(values_shape=tuple(values_shape))
             role_map[name] = modality
 

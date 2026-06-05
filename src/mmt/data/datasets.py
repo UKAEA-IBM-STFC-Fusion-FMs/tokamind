@@ -44,7 +44,7 @@ outputs.
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import Any, Iterable, Optional
+from typing import Any, Iterable
 import logging
 import os
 import random
@@ -79,7 +79,7 @@ def get_ram_gb() -> float:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _normalize_cache_dtype(dtype: str | None) -> Optional[np.dtype]:
+def _normalize_cache_dtype(dtype: str | None) -> np.dtype | None:
     """
     Normalize a user-provided dtype spec.
 

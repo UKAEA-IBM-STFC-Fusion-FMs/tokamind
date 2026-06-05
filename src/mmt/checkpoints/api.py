@@ -39,7 +39,7 @@ import json
 from json import JSONDecodeError
 import os
 import time
-from typing import Optional, Any, cast
+from typing import Any, cast
 from collections.abc import Callable, Mapping
 
 import torch
@@ -70,7 +70,7 @@ def save_best(
     *,
     epoch: int,
     best_val: float,
-    extra_meta: Optional[Mapping[str, Any]] = None,
+    extra_meta: Mapping[str, Any] | None = None,
 ) -> None:
     """
     Save a strict best snapshot:
@@ -90,7 +90,7 @@ def save_best(
         Epoch number.
     best_val : float
         Best value.
-    extra_meta : Optional[Mapping[str, Any]]
+    extra_meta : Mapping[str, Any] | None
         Additional metadata as mapping (dict).
         Optional. Default: None.
 

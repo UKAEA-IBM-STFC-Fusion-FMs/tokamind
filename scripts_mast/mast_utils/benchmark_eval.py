@@ -41,7 +41,7 @@ import csv
 import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any, Optional, cast
+from typing import Any, cast
 import numpy as np
 
 import torch
@@ -92,13 +92,13 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
     dataloader: DataLoader,
     device: torch.device,
     stats: Mapping[str, Mapping[str, float]],
-    codecs: Mapping[int, Any],
+    decoders: Mapping[str, Any],
     id_to_name: Mapping[int, str],
     run_dir: Path,
     task_name: str,
     amp_enabled: bool,
-    compute_metrics_cfg: Optional[Mapping[str, Any]] = None,
-    traces_cfg: Optional[Mapping[str, Any]] = None,
+    compute_metrics_cfg: Mapping[str, Any] | None = None,
+    traces_cfg: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Run evaluation once and write configured outputs.
 
@@ -110,21 +110,26 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
         Standard evaluation dataloader input.
     device : torch.device
         Standard evaluation device input.
-    stats, codecs, id_to_name : Mapping
-        Output decoding / de-standardization inputs (native-space evaluation).
+    stats : Mapping[str, Mapping[str, float]]
+        Per-signal stats dict with ``"mean"`` and ``"std"`` keys.
+    decoders : Mapping[str, TorchDecoder]
+        Pre-built per-signal ``TorchDecoder`` instances keyed by signal name,
+        as returned by ``build_decoders()``.
+    id_to_name : Mapping[int, str]
+        Mapping from signal_id to signal name.
     run_dir : Path
         Eval run directory (`runs/<train_run>/<eval_id>/`).
     task_name : str
         Benchmark task name (e.g., `task_2-1`) used for output folder naming.
     amp_enabled : bool
         Whether to enable AMP in the forward pass.
-    compute_metrics_cfg : Optional[Mapping[str, Any]]
+    compute_metrics_cfg : Mapping[str, Any] | None
         Supports keys:
           - per_task: bool (benchmark aggregation -> task_metrics.csv)
           - per_shot: bool (benchmark aggregation -> shots_metrics.csv)
           - per_window: bool (keep windows_metrics.csv)
           - per_timestamp: bool (MMT-native per-timestamp CSV)
-    traces_cfg : Optional[Mapping[str, Any]]
+    traces_cfg : Mapping[str, Any] | None
         Same structure as in docs/evaluation.md.
 
     Returns
@@ -199,7 +204,7 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                 model=model,
                 device=device,
                 stats=stats,
-                codecs=codecs,
+                decoders=decoders,
                 id_to_name=id_to_name,
                 amp_enabled=amp_enabled,
             )

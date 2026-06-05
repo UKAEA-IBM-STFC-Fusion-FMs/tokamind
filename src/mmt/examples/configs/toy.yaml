@@ -61,7 +61,7 @@ model:
   # Must be >= toy.positions (positions are used as token "pos")
   max_positions: 8
 
-# Collate config (no dropout by default so behaviour is deterministic)
+# Collate config (no dropout by default so behavior is deterministic)
 collate:
   p_drop_inputs: 0.0
   p_drop_inputs_overrides: {}

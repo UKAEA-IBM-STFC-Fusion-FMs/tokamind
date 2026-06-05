@@ -33,7 +33,7 @@ emb_chunks/ID/pos/mod/role/output_emb/...) so it is safe to insert without chang
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 
 # ======================================================================================================================
@@ -77,18 +77,18 @@ class FinalizeWindowTransform:
         self.keep_output_native = bool(keep_output_native)
 
     # ------------------------------------------------------------------------------------------------------------------
-    def __call__(self, window: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    def __call__(self, window: dict[str, Any] | None) -> dict[str, Any] | None:
         """
         Call method for the class instances to behave like a function.
 
         Parameters
         ----------
-        window : Optional[dict[str, Any]]
+        window : dict[str, Any] | None
             Window on which the transform is applied.
 
         Returns
         -------
-        Optional[dict[str, Any]]
+        dict[str, Any] | None
             Transformed (mutated in-place) window for a valid window, otherwise None.
 
         """

@@ -15,34 +15,11 @@ preprocess:
   trim_chunks:
     max_chunks: 40
 
-# train:
-#   stages:
-#     - name: ft_full
-#       optimizer:
-#         lr:
-#           token_encoder: 0.0
-#           backbone: 2.5e-4
-#           modality_heads: 5e-4
-#           output_adapters: 2.5e-3
-          
-
 loader:
   batch_size: 256    # <- task specific
 
-# train:
-#   stages:
-#     - name: ft_heads
-#       epochs: 30
-
-#       scheduler:
-#         grad_accum_steps: 2     # <- task specific
-
-#       freeze:
-#         token_encoder: true     # <- task specific
-#         backbone: true
-#         modality_heads: false
-#         output_adapters: false
-
-#       optimizer:
-#         lr:
-#           token_encoder: 0.0    # <- task specific
+train:
+  loss:
+    terms:
+      - type: embed_mse
+        weight: 1.0

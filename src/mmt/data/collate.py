@@ -13,12 +13,24 @@ This collate uses explicit PAD semantics (PAD ID/role/mod/pos) so padding/droppe
 signals.
 
 The returned batch dict is the standard input format expected by `MultiModalTransformer.forward()`.
+
+Identity-encoded outputs
+------------------------
+Output signals configured with ``encoder_name: identity`` intentionally have no ``output_emb`` entry in the window
+(``EmbedChunksTransform`` skips the embedding step to avoid duplicating large arrays in memory). The collate handles
+this transparently:
+
+- ``output_native`` is built from ``window["output"]`` when ``keep_output_native=True``, for mapped output
+  signals present in the batch (missing per-window native values are represented as NaN, not supervised zeros).
+- ``output_mask`` is built from ``output_emb`` presence for embedded outputs, and from native value presence for
+  identity outputs — so ``NativeSparseMSELoss`` sees both correctly.
+- ``output_emb`` only contains embedded outputs; ``EmbedMSELoss`` silently ignores signals absent from it.
 """
 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any, Optional, Literal
+from typing import Any, Literal
 import logging
 import numpy as np
 import random
@@ -88,6 +100,33 @@ def _coerce_overrides_to_int_keys(d: Mapping[int, Any] | None, *, name: str) -> 
     return out
 
 
+# ----------------------------------------------------------------------------------------------------------------------
+def _get_native_val(window: dict[str, Any], name: str) -> np.ndarray | None:
+    """
+    Extract the native value array for output signal ``name`` from a window dict.
+
+    Handles both the nested ``{"values": arr}`` form produced by the transform pipeline and a bare array.
+
+    Parameters
+    ----------
+    window : dict[str, Any]
+        Window dict.
+    name : str
+        Output signal name.
+
+    Returns
+    -------
+    np.ndarray | None
+        Value array, or None if absent.
+
+    """
+
+    info = (window.get("output") or {}).get(name)
+    if isinstance(info, dict):
+        return info.get("values")
+    return info  # bare array or None
+
+
 # ======================================================================================================================
 class MMTCollate:
     """
@@ -150,7 +189,6 @@ class MMTCollate:
     - This collate keeps the dtype of token embeddings and output embeddings (e.g., float16 cached windows remain
       float16 through collation).
 
-
     """
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -160,7 +198,7 @@ class MMTCollate:
 
         Parameters
         ----------
-        cfg_collate : cfg_collate: Mapping[str, Any]
+        cfg_collate : Mapping[str, Any]
             Input mapping (dict) to be used to configure the MMTCollate instance.
 
         Returns
@@ -193,9 +231,8 @@ class MMTCollate:
             name="p_drop_outputs_overrides",
         )
 
-        # Optional: output_id -> output_name mapping (used only for output_native).
-        # This mapping should be built once at startup from the SignalSpecRegistry.
-        self.output_id_to_name: Optional[dict[int, str]] = None
+        # Optional: output_id -> output_name mapping (required when keep_output_native=True).
+        self.output_id_to_name: dict[int, str] | None = None
         if self.keep_output_native:
             m = self.cfg.get("output_id_to_name")
             if m is None:
@@ -203,11 +240,16 @@ class MMTCollate:
                     "MMTCollate `cfg_collate['keep_output_native']=True` requires cfg_collate['output_id_to_name'] (a "
                     "dict {output_signal_id: output_name})."
                 )
-
             if not isinstance(m, dict):
                 raise TypeError(f"`cfg_collate['output_id_to_name']` must be a dict, got {type(m).__name__}.")
 
             self.output_id_to_name = {int(k): str(v) for k, v in m.items()}
+
+        # Reverse mapping name → id: used to discover native-only (identity) output sids from
+        # window["output"] keys, which are signal names rather than IDs.
+        self._output_name_to_id: dict[str, int] = (
+            {name: sid for sid, name in self.output_id_to_name.items()} if self.output_id_to_name else {}
+        )
 
     # ------------------------------------------------------------------------------------------------------------------
     def __call__(  # NOSONAR - Ignore cognitive complexity
@@ -230,7 +272,7 @@ class MMTCollate:
         ------
         TypeError
             If a batch element is not a single window dict.
-            If a batch item  does not have a key "output_emb" with mapping (dict) value.
+            If a batch item does not have a key "output_emb" with mapping (dict) value.
         ValueError
             If an empty batch of windows is passed.
             If an inconsistent native output shape is identified.
@@ -248,15 +290,11 @@ class MMTCollate:
             Parameters
             ----------
             i_ : int
-                Start of drop interval.
+                Sample index.
             t_ : int
-                End of drop interval.
+                Token position index.
             kind : Literal["input", "actuator"]
                 Drop kind. Valid options: ["input", "actuator"].
-
-            Returns
-            -------
-            None
 
             Raises
             ------
@@ -277,8 +315,6 @@ class MMTCollate:
             pos_batch[i_, t_] = PAD_POS
 
         # ..............................................................................................................
-
-        # ..............................................................................................................
         # 0) Safety-check + filter None
         # ..............................................................................................................
 
@@ -288,9 +324,8 @@ class MMTCollate:
                 continue
             if not isinstance(item, dict):
                 raise TypeError(
-                    "MMTCollate expects each batch element to be a single window dict, got {type(item)} instead."
+                    f"MMTCollate expects each batch element to be a single window dict, got {type(item)} instead."
                 )
-
             flat_windows.append(item)
 
         B = len(flat_windows)
@@ -298,7 +333,7 @@ class MMTCollate:
             raise ValueError("MMTCollate received an empty batch of windows.")
 
         # ..............................................................................................................
-        # 1) Extract per-window arrays
+        # 1) Extract per-window arrays and discover output signal IDs
         # ..............................................................................................................
 
         emb_lists: list[list[np.ndarray]] = []
@@ -307,13 +342,16 @@ class MMTCollate:
         mod_lists: list[np.ndarray] = []
         role_lists: list[np.ndarray] = []
 
+        # out_dicts[i] = window["output_emb"] — embedded output embeddings keyed by signal_id.
         out_dicts: list[dict[int, Any]] = []
-        all_target_ids: set[int] = set()
+
+        # Signals with an output_emb entry (embed_mse targets).
+        all_emb_sids: set[int] = set()
+        # Signals present in window["output"] (native_sparse_mse targets; superset when identity outputs exist).
+        all_native_sids: set[int] = set()
 
         for w in flat_windows:
             emb_lists.append(w["emb_chunks"])
-
-            # Force signed dtypes (prevents accidental uint wrap).
             pos_lists.append(np.asarray(w["pos"], dtype=np.int32))
             id_lists.append(np.asarray(w["id"], dtype=np.int32))
             mod_lists.append(np.asarray(w["mod"], dtype=np.int16))
@@ -324,16 +362,21 @@ class MMTCollate:
                 raise TypeError(
                     "MMTCollate expects window['output_emb'] to be a dict of the form {signal_id: embedding}."
                 )
-
             out_dicts.append(out_emb)
-            all_target_ids.update(int(k) for k in out_emb.keys())
+            all_emb_sids.update(int(k) for k in out_emb.keys())
+
+            if self.keep_output_native and self._output_name_to_id:
+                for sname in w.get("output") or {}:
+                    sid = self._output_name_to_id.get(sname)
+                    if sid is not None:
+                        all_native_sids.add(int(sid))
 
         # ..............................................................................................................
         # 2) Allocate padded token arrays
         # ..............................................................................................................
 
         lengths = [len(e) for e in emb_lists]
-        L_max = max(lengths)  # NOSONAR # noqa - Ignore lowercase warning
+        L_max = max(lengths)  # NOSONAR # noqa
 
         pos_batch = np.full(shape=(B, L_max), fill_value=PAD_POS, dtype=np.int32)
         id_batch = np.full(shape=(B, L_max), fill_value=PAD_ID, dtype=np.int32)
@@ -349,7 +392,7 @@ class MMTCollate:
         # ..............................................................................................................
 
         for i in range(B):
-            Li = lengths[i]  # NOSONAR # noqa - Ignore lowercase warning
+            Li = lengths[i]  # NOSONAR # noqa
             if Li == 0:
                 continue
             pos_batch[i, :Li] = pos_lists[i]
@@ -368,7 +411,7 @@ class MMTCollate:
                 Li = lengths[i]
                 if Li == 0:
                     continue
-                idxs = np.nonzero(role_batch[i, :Li] == ROLE_CONTEXT)[0]  # noqa - Ignore expected type warning
+                idxs = np.nonzero(role_batch[i, :Li] == ROLE_CONTEXT)[0]  # noqa
                 for t in idxs:
                     sid = int(id_batch[i, int(t)])
                     if sid == PAD_ID:
@@ -387,7 +430,7 @@ class MMTCollate:
                 Li = lengths[i]
                 if Li == 0:
                     continue
-                idxs = np.nonzero(role_batch[i, :Li] == ROLE_ACTUATOR)[0]  # noqa - Ignore expected type warning
+                idxs = np.nonzero(role_batch[i, :Li] == ROLE_ACTUATOR)[0]  # noqa
                 for t in idxs:
                     sid = int(id_batch[i, int(t)])
                     if sid == PAD_ID:
@@ -412,22 +455,19 @@ class MMTCollate:
                 pos_i = pos_batch[i, :Li]
                 order = np.argsort(pos_i)
                 pos_sorted = pos_i[order]
-                split = np.nonzero(np.diff(pos_sorted) != 0)[0] + 1  # noqa - Ignore expected type warning
+                split = np.nonzero(np.diff(pos_sorted) != 0)[0] + 1  # noqa
                 groups = np.split(order, split)
 
                 for idxs in groups:
                     if idxs.size == 0:
                         continue
-
                     roles = role_batch[i, idxs]
 
-                    # Drop input tokens in this chunk-position group.
                     if np.any(roles == ROLE_CONTEXT) and (random.random() < p_drop_inputs_chunks):
                         for t in idxs:
                             if role_batch[i, int(t)] == ROLE_CONTEXT:
                                 _drop_token(i_=i, t_=int(t), kind="input")
 
-                    # Drop actuator tokens in this chunk-position group.
                     if np.any(roles == ROLE_ACTUATOR) and (random.random() < p_drop_actuators_chunks):
                         for t in idxs:
                             if role_batch[i, int(t)] == ROLE_ACTUATOR:
@@ -450,21 +490,16 @@ class MMTCollate:
             if np.any(id_batch[i, :Li] != PAD_ID):
                 continue
 
-            # Prefer restoring the first context token if one existed.
             orig_roles = role_lists[i]
-            candidates = np.nonzero(orig_roles[:Li] == ROLE_CONTEXT)[0]  # noqa - Ignore expected type warning
+            candidates = np.nonzero(orig_roles[:Li] == ROLE_CONTEXT)[0]  # noqa
             if candidates.size == 0:
                 candidates = np.arange(Li)
 
             t_restore = int(candidates[0])
-
-            # Restore original metadata for this token.
             id_batch[i, t_restore] = int(id_lists[i][t_restore])
             mod_batch[i, t_restore] = int(mod_lists[i][t_restore])
             role_batch[i, t_restore] = int(role_lists[i][t_restore])
             pos_batch[i, t_restore] = int(pos_lists[i][t_restore])
-
-            # Mark token as kept (setting both to 1 is safe).
             input_mask[i, t_restore] = 1
             actuator_mask[i, t_restore] = 1
             restored += 1
@@ -477,129 +512,122 @@ class MMTCollate:
             )
 
         # ..............................................................................................................
-        # 7) Output embeddings + dropout
+        # 7) Unified output loop
+        #
+        # One pass over every supervised output signal (embedded or native-only).
+        # For each signal:
+        #   - has_emb  → build output_emb + output_mask from output_emb presence
+        #   - has_native → build output_native in a single scan (no double pass for shape)
+        #   - native-only (identity outputs) → build output_mask from native value presence
         # ..............................................................................................................
 
         p_drop_outputs = float(self.cfg.get("p_drop_outputs", 0.0))
 
         output_emb_batch: dict[int, list[np.ndarray]] = {}
         output_mask_batch_np: dict[int, np.ndarray] = {}
-
-        for sig_id in sorted(all_target_ids):
-            # Find a reference embedding to infer shape + dtype.
-            ref_arr: Optional[np.ndarray] = None
-            for i in range(B):
-                emb = out_dicts[i].get(sig_id)
-                if emb is None:
-                    continue
-                ref_arr = np.asarray(emb).reshape(-1)
-                break
-
-            # Given how all_target_ids is built, this should always exist.
-            if ref_arr is None:
-                continue
-
-            ref_dtype = ref_arr.dtype
-            if ref_dtype not in (np.float16, np.float32):
-                ref_dtype = np.float32
-
-            ref_shape = tuple(ref_arr.shape)
-
-            emb_list: list[np.ndarray] = []
-            mask = np.ones(shape=(B,), dtype=np.int8)
-
-            for i in range(B):
-                emb = out_dicts[i].get(sig_id)
-                if emb is None:
-                    mask[i] = 0
-                    emb_list.append(np.zeros(shape=ref_shape, dtype=ref_dtype))
-                else:
-                    arr = np.asarray(emb, dtype=ref_dtype).reshape(-1)
-                    emb_list.append(arr)
-
-            # Per-output dropout (mask + zero embedding).
-            p = float(self.drop_outputs_overrides.get(sig_id, p_drop_outputs))
-            if p > 0.0:
-                for i in range(B):
-                    if mask[i] == 0:
-                        continue
-                    if random.random() < p:
-                        mask[i] = 0
-                        emb_list[i] = np.zeros(shape=ref_shape, dtype=ref_dtype)
-
-            output_emb_batch[sig_id] = emb_list
-            output_mask_batch_np[sig_id] = mask
-
-        # ..............................................................................................................
-        # 8) Optional: native outputs (eval only)
-        # ..............................................................................................................
-
         output_native_batch_np: dict[int, np.ndarray] = {}
-        if self.keep_output_native:
-            if self.output_id_to_name is None:
-                raise RuntimeError(
-                    "[MMTCollate] `self.output_id_to_name` is None but `self.keep_output_native` is True. "
-                    "This should have been caught in __init__."
+
+        if self.keep_output_native and self.output_id_to_name is None:
+            raise RuntimeError(
+                "[MMTCollate] `self.output_id_to_name` is None but `self.keep_output_native` is True. "
+                "This should have been caught in __init__."
+            )
+
+        all_output_sids = all_emb_sids | all_native_sids
+
+        for sig_id in sorted(all_output_sids):
+            has_emb = sig_id in all_emb_sids
+            has_native = self.keep_output_native and (sig_id in all_native_sids)
+
+            # ----------------------------------------------------------------------------------------------------------
+            # Embedded output: collect embeddings + mask, apply per-output dropout.
+            # ----------------------------------------------------------------------------------------------------------
+            if has_emb:
+                # Infer ref shape/dtype from the first window that has this signal.
+                ref_arr: np.ndarray | None = None
+                for d in out_dicts:
+                    emb = d.get(sig_id)
+                    if emb is not None:
+                        ref_arr = np.asarray(emb).reshape(-1)
+                        break
+
+                if ref_arr is not None:
+                    ref_dtype = ref_arr.dtype if ref_arr.dtype in (np.float16, np.float32) else np.float32
+                    ref_shape_emb = tuple(ref_arr.shape)
+
+                    emb_list: list[np.ndarray] = []
+                    emb_mask = np.ones(B, dtype=np.int8)
+
+                    for i, d in enumerate(out_dicts):
+                        emb = d.get(sig_id)
+                        if emb is None:
+                            emb_mask[i] = 0
+                            emb_list.append(np.zeros(ref_shape_emb, dtype=ref_dtype))
+                        else:
+                            emb_list.append(np.asarray(emb, dtype=ref_dtype).reshape(-1))
+
+                    # Per-output dropout.
+                    p = float(self.drop_outputs_overrides.get(sig_id, p_drop_outputs))
+                    if p > 0.0:
+                        for i in range(B):
+                            if emb_mask[i] and random.random() < p:
+                                emb_mask[i] = 0
+                                emb_list[i] = np.zeros(ref_shape_emb, dtype=ref_dtype)
+
+                    output_emb_batch[sig_id] = emb_list
+                    output_mask_batch_np[sig_id] = emb_mask
+
+            # ----------------------------------------------------------------------------------------------------------
+            # Native output: single scan — collect values and infer shape together.
+            # Also builds output_mask for native-only (identity) outputs.
+            # ----------------------------------------------------------------------------------------------------------
+            if has_native:
+                out_name = self.output_id_to_name.get(sig_id)  # type: ignore[union-attr]
+                if out_name is None:
+                    continue
+
+                ref_shape_nat: tuple[int, ...] | None = None
+                native_vals: list[np.ndarray | None] = []
+
+                for w in flat_windows:
+                    val = _get_native_val(w, out_name)
+                    if val is None:
+                        native_vals.append(None)
+                        continue
+                    arr = np.asarray(val, dtype=np.float32)
+                    if ref_shape_nat is None:
+                        ref_shape_nat = tuple(arr.shape)
+                    elif tuple(arr.shape) != ref_shape_nat:
+                        raise ValueError(
+                            f"Inconsistent native output shape for output={out_name!r} (signal_id={sig_id}): "
+                            f"expected {ref_shape_nat}, got {tuple(arr.shape)}."
+                        )
+                    native_vals.append(arr)
+
+                # Skip if this signal is entirely absent from the batch.
+                if ref_shape_nat is None:
+                    continue
+
+                output_native_batch_np[sig_id] = np.stack(
+                    [v if v is not None else np.full(ref_shape_nat, np.nan, dtype=np.float32) for v in native_vals],
+                    axis=0,
                 )
 
-            for sig_id in sorted(all_target_ids):
-                out_name = self.output_id_to_name.get(sig_id)
-                if not out_name:
-                    # If mapping is incomplete, skip rather than crashing.
-                    continue
-
-                # Infer shape from the first present value in this batch.
-                ref_shape: Optional[tuple[int, ...]] = None
-                for i in range(B):
-                    w = flat_windows[i]
-                    out_group = w.get("output") or {}
-                    out_info = out_group.get(out_name)
-
-                    val = None
-                    if isinstance(out_info, dict):
-                        val = out_info.get("values", None)
-                    elif out_info is not None:
-                        val = out_info
-
-                    if val is None:
-                        continue
-
-                    arr = np.asarray(val)
-                    ref_shape = tuple(arr.shape)
-                    break
-
-                # If this output is missing everywhere in the batch, skip.
-                if ref_shape is None:
-                    continue
-
-                per_sig_vals: list[np.ndarray] = []
-                for i in range(B):
-                    w = flat_windows[i]
-                    out_group = w.get("output") or {}
-                    out_info = out_group.get(out_name)
-
-                    val = None
-                    if isinstance(out_info, dict):
-                        val = out_info.get("values", None)
-                    elif out_info is not None:
-                        val = out_info
-
-                    if val is None:
-                        arr = np.zeros(shape=ref_shape, dtype=np.float32)
-                    else:
-                        arr = np.asarray(val, dtype=np.float32)
-                        if tuple(arr.shape) != ref_shape:
-                            raise ValueError(
-                                f"Inconsistent native output shape for output={out_name!r} (signal_id={sig_id}): "
-                                f"expected {ref_shape}, got {tuple(arr.shape)}."
-                            )
-
-                    per_sig_vals.append(arr)
-
-                output_native_batch_np[sig_id] = np.stack(per_sig_vals, axis=0)
+                # Native-only (identity) outputs have no output_emb entry, so their output_mask
+                # must be built here from value presence rather than embedding presence.
+                # Per-output dropout is applied to the mask (no embedding to zero out, but
+                # NativeSparseMSELoss gates on the mask so setting mask[i]=0 is sufficient).
+                if not has_emb:
+                    nat_mask = np.array([1 if v is not None else 0 for v in native_vals], dtype=np.int8)
+                    p = float(self.drop_outputs_overrides.get(sig_id, p_drop_outputs))
+                    if p > 0.0:
+                        for i in range(B):
+                            if nat_mask[i] and random.random() < p:
+                                nat_mask[i] = 0
+                    output_mask_batch_np[sig_id] = nat_mask
 
         # ..............................................................................................................
-        # 9) Convert arrays to torch
+        # 8) Convert arrays to torch
         # ..............................................................................................................
 
         pos_t = torch.from_numpy(pos_batch).long()
@@ -612,7 +640,7 @@ class MMTCollate:
         actuator_mask_t = torch.from_numpy(actuator_mask.astype(bool))
 
         # ..............................................................................................................
-        # 10) Pack embeddings by signal_id
+        # 9) Pack token embeddings by signal_id
         # ..............................................................................................................
 
         emb_by_sid_np: dict[int, list[np.ndarray]] = {}
@@ -649,23 +677,19 @@ class MMTCollate:
             emb_by_sid_t[sid_i] = torch.from_numpy(stacked)
             emb_index_t[sid_i] = torch.as_tensor(emb_index_np[sid_i], dtype=torch.long)
 
-        # Outputs: dense tensors of shape (B, D).
-        output_emb_t: dict[int, torch.Tensor] = {}
-        output_mask_t: dict[int, torch.Tensor] = {}
-
-        for sig_id, emb_list in output_emb_batch.items():
-            emb_arr = np.stack(emb_list, axis=0)
-            output_emb_t[sig_id] = torch.from_numpy(emb_arr)
-            output_mask_t[sig_id] = torch.from_numpy(output_mask_batch_np[sig_id].astype(bool))
-
-        # Native outputs (optional).
+        # Output tensors — all keyed by signal_id.
+        output_emb_t: dict[int, torch.Tensor] = {
+            sig_id: torch.from_numpy(np.stack(emb_list, axis=0)) for sig_id, emb_list in output_emb_batch.items()
+        }
+        output_mask_t: dict[int, torch.Tensor] = {
+            sig_id: torch.from_numpy(mask_np.astype(bool)) for sig_id, mask_np in output_mask_batch_np.items()
+        }
         output_native_t: dict[int, torch.Tensor] = {}
         if self.keep_output_native:
-            for sig_id, arr in output_native_batch_np.items():
-                output_native_t[sig_id] = torch.from_numpy(arr)
+            output_native_t = {sig_id: torch.from_numpy(arr) for sig_id, arr in output_native_batch_np.items()}
 
         # ..............................................................................................................
-        # 11) Assemble final batch dict
+        # 10) Assemble final batch dict
         # ..............................................................................................................
 
         batch_out: dict[str, Any] = {

@@ -4,9 +4,8 @@ Codec utilities for the embedding pipeline.
 This module provides:
 - small shape helpers (e.g., inferring (H, W) from non-time value shapes),
 - a lightweight embedding-dimension estimator for a given encoder + signal shape,
-- a factory to build per-signal codec instances from the SignalSpec registry.
-
-The utilities here are intentionally simple and mirror the behaviour of the corresponding codec implementations
+- a factory to build per-signal codec instances from the SignalSpec registry,
+- a factory to build per-signal differentiable TorchDecoder instances for training and eval.
 
 VAE support assumes the refactored VAE_fairmast package (`vae_pipeline`) and the trained VAE artifacts
 under: vae_pipeline/data/VAEs/<MODEL_DIR>.
@@ -15,17 +14,27 @@ under: vae_pipeline/data/VAEs/<MODEL_DIR>.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, TYPE_CHECKING
 from collections.abc import Mapping
 import numpy as np
 
-from .dct3d_codec import DCT3DCodec
-from .identity_codec import IdentityCodec
-from .vae_codec import VAECodec, read_vae_model_meta
-from typing import TYPE_CHECKING
+from .torch_decoder import TorchDecoder
+from .dct3d import DCT3DCodec
+from .identity import IdentityCodec
+from .vae import VAECodec, read_vae_model_meta
 
 if TYPE_CHECKING:
     from ..signal_spec import SignalSpecRegistry
+
+__all__ = [
+    "TorchDecoder",
+    "build_torch_decoder",
+    "build_codecs",
+    "build_decoders",
+    "compute_embedding_dim_for_encoder",
+    "load_coeff_indices",
+    "infer_hw_from_values_shape",
+]
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -34,8 +43,8 @@ def infer_hw_from_values_shape(values_shape: tuple[int, ...]) -> tuple[int, int]
     Map values_shape (excluding time) to (H, W).
 
     Conventions:
-      - () or (1,)     -> (1, 1)
-      - (C,) with C>1  -> (C, 1)
+      - ( ) or (1, )     -> (1, 1)
+      - (C, ) with C>1  -> (C, 1)
       - (H, W)         -> (H, W)
 
     Parameters
@@ -132,7 +141,7 @@ def compute_embedding_dim_for_encoder(  # NOSONAR - Ignore cognitive complexity
     """
     Compute the encoded dimension for a single chunk of a signal.
 
-    Must mirror the codec behaviour (without executing the transform).
+    Must mirror the codec behavior (without executing the transform).
 
     Parameters
     ----------
@@ -171,7 +180,7 @@ def compute_embedding_dim_for_encoder(  # NOSONAR - Ignore cognitive complexity
         If VAE `conv2d` model does not satisfy input_mode="time".
         If VAE `conv2d` channel mismatch is detected.
         If VAE `conv2d` time mismatch is detected.
-        If VAE VAE `model_type`not in ["linear", "conv1d", "conv2d"].
+        If VAE `model_type` not in ["linear", "conv1d", "conv2d"].
 
     """
 
@@ -426,3 +435,120 @@ def build_codecs(  # NOSONAR - Ignore cognitive complexity
             raise ValueError(f"Unknown encoder_name={spec.encoder_name!r} for signal {spec.name!r}.")
 
     return codecs
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def build_torch_decoder(
+    codec: Any,
+    original_shape: tuple[int, ...],
+) -> TorchDecoder:
+    """
+    Build a differentiable :class:`~mmt.data.embeddings.base.TorchDecoder` for the given codec.
+
+    The decoder is an ``nn.Module`` — call ``.to(device)`` on it (or on a parent module that
+    contains it) to move any registered buffers (e.g., DCT3D scatter indices) to the correct
+    device before training.
+
+    Parameters
+    ----------
+    codec : DCT3DCodec | IdentityCodec | VAECodec
+        Fully initialized encoder instance.
+    original_shape : tuple[int, ...]
+        Per-sample output shape (without batch dimension), e.g. ``(T,)``, ``(C, T)``,
+        ``(H, W, T)``. Must match the per-sample shape of ``output_native`` in the
+        collated batch. Passed to all decoder types; for VAE it is used to reshape
+        the raw decoder output to this contract (handling singleton dims such as
+        ``(1, T)`` → ``(T,)`` for scalar timeseries).
+
+    Returns
+    -------
+    TorchDecoder
+        Decoder instance ready for use in training losses and eval.
+
+    Raises
+    ------
+    NotImplementedError
+        If no TorchDecoder is registered for the given codec type.
+
+    """
+
+    # Lazy imports avoid circular dependencies at module load time
+    from .dct3d import DCT3DTorchDecoder
+    from .identity import IdentityTorchDecoder
+    from .vae import VAETorchDecoder
+
+    if isinstance(codec, DCT3DCodec):
+        return DCT3DTorchDecoder(codec=codec, original_shape=original_shape)
+
+    if isinstance(codec, IdentityCodec):
+        return IdentityTorchDecoder(original_shape=original_shape)
+
+    if isinstance(codec, VAECodec):
+        return VAETorchDecoder(vae_codec=codec, original_shape=original_shape)
+
+    raise NotImplementedError(
+        f"No TorchDecoder registered for codec type {type(codec).__name__!r}. "
+        "Implement a TorchDecoder subclass and register it in build_torch_decoder()."
+    )
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def build_decoders(
+    registry: "SignalSpecRegistry",
+    codecs: dict[int, Any],
+    role: str = "output",
+) -> dict[int, TorchDecoder]:
+    """
+    Build a TorchDecoder for every signal of ``role`` in the registry.
+
+    The ``original_shape`` passed to each decoder matches the per-sample shape of
+    ``output_native[signal_id]`` in the collated batch:
+
+    - timeseries (``modality == "timeseries"``): ``(T,)`` — values stored as 1D, the leading
+      ``C=1`` dimension in ``values_shape`` is dropped.
+    - profile: ``(C, T)`` = ``values_shape + (n_samples,)``
+    - video: ``(H, W, T)`` = ``values_shape + (n_samples,)``
+
+    Parameters
+    ----------
+    registry : SignalSpecRegistry
+        Registry produced by ``build_signal_specs()``.
+    codecs : dict[int, Any]
+        Per-signal codec instances keyed by ``signal_id``, as returned by ``build_codecs()``.
+    role : str
+        Which role to build decoders for.  Defaults to ``"output"``.
+
+    Returns
+    -------
+    dict[int, TorchDecoder]
+        Mapping of ``signal_id → TorchDecoder`` for all specs of the given role.
+
+    Raises
+    ------
+    KeyError
+        If a codec is missing for a spec in the registry.
+    NotImplementedError
+        If no TorchDecoder is registered for a codec type (propagated from
+        :func:`build_torch_decoder`).
+
+    """
+
+    decoders: dict[int, TorchDecoder] = {}
+    for spec in registry.specs_for_role(role):
+        if spec.signal_id not in codecs:
+            raise KeyError(
+                f"No codec found for signal_id={spec.signal_id} (name={spec.name!r}, role={spec.role!r}). "
+                "Ensure build_codecs() was called for the same registry."
+            )
+        n_samples = spec.native_shape[2]
+        # Time series values are stored as (T,) in output_native, not (1, T).
+        # Profile and video keep their spatial dims: (C, T) and (H, W, T).
+        if spec.modality == "timeseries":
+            original_shape: tuple[int, ...] = (n_samples,)
+        else:
+            original_shape = spec.values_shape + (n_samples,)
+        decoders[spec.signal_id] = build_torch_decoder(
+            codec=codecs[spec.signal_id],
+            original_shape=original_shape,
+        )
+    return decoders

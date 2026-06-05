@@ -22,23 +22,26 @@ import logging
 import math
 import time
 from collections.abc import Mapping, MutableMapping
-from typing import Any, Hashable, Optional
+from typing import TYPE_CHECKING, Any, Hashable
 
 import torch
-from torch import Tensor, dtype as torch_dtype
+from torch import Tensor
+
+if TYPE_CHECKING:
+    from torch import dtype as torch_dtype
 from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.amp.grad_scaler import GradScaler
 
 from mmt.utils.amp_utils import amp_ctx_for_model
-from .losses import compute_loss_pred_space
+from .losses import LossAggregator
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 
 logger = logging.getLogger("mmt.Train")
 
-# Max gradient norm for clipping (matches original loop.py behaviour)
+# Max gradient norm for clipping (matches original loop.py behavior)
 _MAX_GRAD_NORM = 1.0
 
 # How many batch-level timing lines to show at INFO during the *first* global epoch.
@@ -205,7 +208,7 @@ def move_batch_to_device(  # NOSONAR - Ignore cognitive complexity
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def backbone_lr(optimizer: torch.optim.Optimizer) -> Optional[float]:
+def backbone_lr(optimizer: torch.optim.Optimizer) -> float | None:
     """Return the current learning rate of the backbone param group (for logging)."""
     for g in optimizer.param_groups:
         if g.get("group_type") == "backbone":
@@ -239,13 +242,18 @@ def log_train_setup(
     logger.info("Params       : total=%d, trainable=%d", n_params, n_trainable)
     logger.info("Train loader : %d batches/epoch", train_loader_len)
 
-    # Loss weights (do not change across stages)
+    # Loss config (does not change across stages)
     loss_cfg = train_cfg.get("loss", {})
-    output_weights = loss_cfg.get("output_weights")
-    if isinstance(output_weights, dict) and output_weights:
-        logger.info("Loss weights : %r", output_weights)
+    terms = loss_cfg.get("terms", [])
+    if terms:
+        for t in terms:
+            logger.info("Loss term    : type=%s weight=%s", t.get("type"), t.get("weight", 1.0))
     else:
-        logger.info("Loss weights : (uniform across outputs)")
+        output_weights = loss_cfg.get("output_weights")
+        if isinstance(output_weights, dict) and output_weights:
+            logger.info("Loss weights : %r", output_weights)
+        else:
+            logger.info("Loss weights : (uniform across outputs)")
 
     logger.info("Stages:")
     for s in stages:
@@ -273,19 +281,19 @@ def log_train_setup(
 def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     model,
     loader,
-    optimizer: Optional[Optimizer],
-    scheduler: Optional[LRScheduler],
-    scaler: Optional[GradScaler],
+    optimizer: Optimizer | None,
+    scheduler: LRScheduler | None,
+    scaler: GradScaler | None,
     *,
     device: torch.device,
     amp_enabled: bool,
-    output_weights: Mapping[Hashable, float],
+    loss_aggregator: LossAggregator,
     grad_accum_steps: int,
     train: bool,
     global_step: int,
-    max_batches: Optional[int] = None,
-    epoch_global: Optional[int] = None,
-) -> tuple[float, int]:
+    max_batches: int | None = None,
+    epoch_global: int | None = None,
+) -> tuple[float, dict[str, float], int]:
     """
     Run one epoch over a DataLoader, in either train or eval mode.
 
@@ -296,8 +304,10 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
 
     Returns
     -------
-    tuple[float, int]
-        Tuple (avg_loss, global_step).
+    tuple[float, dict[str, float], int]
+        Tuple (avg_loss, avg_term_logs, global_step).
+        ``avg_term_logs`` contains epoch-averaged values for each ``<term>/total`` key produced by ``LossAggregator``.
+        Useful for per-term breakdown when multiple loss terms are active.
 
     Raises
     ------
@@ -318,6 +328,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     model.train(train)
 
     running_loss = 0.0
+    running_term_logs: dict[str, float] = {}
     n_batches = 0
 
     t_before_next = time.perf_counter()
@@ -332,24 +343,16 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                 break
 
             t0 = time.perf_counter()
-            batch = move_batch_to_device(batch, device)
+            batch = move_batch_to_device(batch=batch, device=device)
             t1 = time.perf_counter()
 
-            output_mask = batch["output_mask"]
-
             # ----------------------- FORWARD -----------------------
-            with amp_ctx_for_model(model, enable=amp_enabled):
+            with amp_ctx_for_model(model=model, enable=amp_enabled):
                 out = model(batch)
                 preds = out.get("pred", {})
 
-            # Compute loss outside autocast. The loss function itself forces
-            # float32 computation for AMP stability.
-            loss_t, loss_logs = compute_loss_pred_space(
-                preds=preds,
-                y_true=batch["output_emb"],
-                output_mask=output_mask,
-                output_weights=output_weights,
-            )
+            # Compute loss outside autocast. The loss functions force float32 for AMP stability.
+            loss_t, loss_logs = loss_aggregator.compute(preds=preds, batch=batch)
 
             # Optional: per-output loss logging (enable with logger level DEBUG).
             if loss_logs and logger.isEnabledFor(logging.DEBUG):
@@ -404,7 +407,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
 
                     if (scaler is not None) and scaler.is_enabled():
                         scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
+                        torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=_MAX_GRAD_NORM)
 
                         prev_scale = scaler.get_scale()
                         scaler.step(optimizer)
@@ -414,7 +417,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                         did_step = scaler.get_scale() >= prev_scale
 
                     else:
-                        torch.nn.utils.clip_grad_norm_(model.parameters(), _MAX_GRAD_NORM)
+                        torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=_MAX_GRAD_NORM)
                         optimizer.step()
 
                     optimizer.zero_grad(set_to_none=True)
@@ -430,6 +433,9 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                 t4 = time.perf_counter()
 
             running_loss += float(loss_t.detach().cpu())
+            for k, v in loss_logs.items():
+                if k.endswith("/weighted") and math.isfinite(v):
+                    running_term_logs[k] = running_term_logs.get(k, 0.0) + v
             n_batches += 1
 
             _maybe_log_batch_timing(
@@ -443,9 +449,10 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                 dt_opt=(t4 - t3) if train else None,
             )
 
-            # update t before next loading
+            # Update t before next loading
             t_before_next = time.perf_counter()
 
     avg_loss = running_loss / max(1, n_batches)
+    avg_term_logs = {k: v / max(1, n_batches) for k, v in running_term_logs.items()}
 
-    return avg_loss, global_step
+    return avg_loss, avg_term_logs, global_step

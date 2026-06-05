@@ -17,21 +17,3 @@ preprocess:
 
 loader:
   batch_size: 256    # <- task specific
-
-# train:
-#   stages:
-#     - name: ft_heads
-#       epochs: 30
-
-#       scheduler:
-#         grad_accum_steps: 2     # <- task specific
-
-#       freeze:
-#         token_encoder: true     # <- task specific
-#         backbone: true
-#         modality_heads: false
-#         output_adapters: false
-
-#       optimizer:
-#         lr:
-#           token_encoder: 0.0    # <- task specific

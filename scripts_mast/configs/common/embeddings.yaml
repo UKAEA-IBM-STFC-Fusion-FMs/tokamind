@@ -1,7 +1,7 @@
 # Shared embeddings configuration.
 #
 # - defaults: baseline encoder settings by (role, modality)
-# - tune_embeddings: DCT3D tuning controls used by pretrain/finetune flows
+# - tuning: DCT3D tuning controls used by pretrain/finetune flows
 #
 # Task-specific overrides belong in:
 #   scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml
@@ -50,7 +50,7 @@ embeddings:
   # Runtime-only run-local values. Do not commit tuned run artifacts here.
   per_signal_overrides: {}
 
-  tune_embeddings:
+  tuning:
     n_shots: 100
     max_windows: 15000
 

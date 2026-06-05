@@ -574,7 +574,7 @@ class MultiModalTransformer(nn.Module):
 
     # ------------------------------------------------------------------------------------------------------------------
     def load_token_encoder_state_dict(self, state: Mapping, strict: bool = True) -> tuple[Any, Any]:
-        """Load token encoder state dictionary, , and return missing and unexpected keys."""
+        """Load token encoder state dictionary, and return missing and unexpected keys."""
         # Same API pattern as backbone/heads/adapters:
         missing, unexpected = self.tokens.load_state_dict(state_dict=state, strict=strict)
         return missing, unexpected

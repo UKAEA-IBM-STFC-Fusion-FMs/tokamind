@@ -16,7 +16,6 @@ data:
   local_path:   # used only when local: true
   subset_of_shots: null   # None / null → uses all shots
 
-  keep_output_native: true
   cache:
     enable: false
     dtype: float16          # or float32; default behavior if omitted is “no cast”
@@ -31,8 +30,9 @@ preprocess:
     min_valid_inputs_actuators: 1
     min_valid_outputs: 1
     min_valid_chunks: 1
+    accept_nan_inputs_actuators: true
+    accept_nan_outputs: true
     window_stride_sec: null  # if null we evaluate on all the possible windows
-
 
 loader:
   batch_size: 512

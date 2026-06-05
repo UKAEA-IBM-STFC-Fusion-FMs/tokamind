@@ -1,11 +1,10 @@
-# Use this file to override parameters from the shared embeddings.yaml
-# tune_embeddings: block for this specific task. It is merged at load time
-# when --emb_profile dct3d is passed to the entry script.
+# Use this file to override DCT3D tuning parameters from the shared embeddings.yaml.
+# It is merged at load time when --emb_profile dct3d is passed to the entry script.
 #
-# embeddings.mode (finetune only):
-#   source (default) - copy source run embeddings, inherit or retune per role
-#   config           - ignore source artifacts; use current config as-is
-#                      (set this in vae.yaml or other non-dct3d profiles)
+# embeddings.role_mode (finetune only):
+#   tune   - tune DCT3D coefficients in this run
+#   source - inherit DCT3D coefficients from the source run
+#   config - use config/profile defaults without tuning or source artifacts
 #
 # Typical uses:
 #   - Re-tune specific roles while inheriting others from the source model
@@ -16,19 +15,18 @@
 #
 # Example - re-tune only output, inherit input/actuator from source model:
 #   embeddings:
-#     mode: source
-#     tune_embeddings:
-#       roles:
-#         output: true
+#     role_mode:
+#       input: source
+#       actuator: source
+#       output: tune
 #
 # Example - full re-tune with custom thresholds:
 #   embeddings:
-#     mode: source
-#     tune_embeddings:
-#       roles:
-#         input: true
-#         actuator: true
-#         output: true
+#     role_mode:
+#       input: tune
+#       actuator: tune
+#       output: tune
+#     tuning:
 #       objective:
 #         thresholds:
 #           output: 0.990
@@ -39,3 +37,8 @@
 # Tuned indices are generated at training time and saved to
 # runs/<run_id>/embeddings/ alongside model weights.
 
+#embeddings:
+#  tuning:
+#    objective:
+#      max_budget:
+#        output: 9216

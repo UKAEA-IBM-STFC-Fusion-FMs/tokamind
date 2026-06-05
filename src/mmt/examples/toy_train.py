@@ -18,7 +18,7 @@ Run
 Notes
 -----
 - This example depends only on `mmt/` (no scripts_mast/, no FAIR MAST).
-- We set all dropout probabilities to 0.0 in the toy config to avoid PAD/drop edge cases and keep behaviour
+- We set all dropout probabilities to 0.0 in the toy config to avoid PAD/drop edge cases and keep behavior
 deterministic.
 """
 
@@ -33,7 +33,7 @@ import numpy as np
 import yaml
 
 import torch
-import torch.nn.functional as F
+import torch.nn.functional as F  # noqa - Ignore lowercase warning
 from torch.utils.data import DataLoader, Dataset
 
 from mmt.data import MMTCollate, SignalSpec
@@ -285,6 +285,8 @@ def _build_signal_specs(cfg: Mapping[str, Any]) -> SignalSpecRegistry:
                 encoder_kwargs={},
                 signal_id=sid,
                 embedding_dim=D,
+                values_shape=(),
+                native_shape=(1, 1, D),
             )
         )
         sid += 1
@@ -299,6 +301,8 @@ def _build_signal_specs(cfg: Mapping[str, Any]) -> SignalSpecRegistry:
                 encoder_kwargs={},
                 signal_id=sid,
                 embedding_dim=D,
+                values_shape=(),
+                native_shape=(1, 1, D),
             )
         )
         sid += 1
@@ -313,6 +317,8 @@ def _build_signal_specs(cfg: Mapping[str, Any]) -> SignalSpecRegistry:
                 encoder_kwargs={},
                 signal_id=sid,
                 embedding_dim=D,
+                values_shape=(),
+                native_shape=(1, 1, D),
             )
         )
         sid += 1

@@ -54,7 +54,7 @@ logging, saving results). The registry bridges those worlds consistently across 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional, cast
+from typing import Any, cast
 from collections.abc import Mapping
 import logging
 
@@ -96,6 +96,12 @@ class SignalSpec:
         Unique integer identifier **per (role, name)**. This ID is used in the token pipeline and metadata arrays.
     embedding_dim : int
         Dimension of the codec output for a single chunk.
+    values_shape : tuple[int, ...]
+        Spatial shape of the signal values, without the time axis (e.g., `()` for scalar timeseries, `(C,)` for a
+        profile, `(H, W)` for a video frame). Matches the shape of `window['output'][name]['values']` as stored in the
+        dataset.
+    native_shape : tuple[int, int, int]
+        Canonical 3-D shape `(H, W, T)` used internally by codecs. Derived from `values_shape` and `dt`.
 
     Notes
     -----
@@ -111,6 +117,8 @@ class SignalSpec:
     encoder_kwargs: dict[str, Any]
     signal_id: int
     embedding_dim: int
+    values_shape: tuple[int, ...]
+    native_shape: tuple[int, int, int]
 
     # ------------------------------------------------------------------------------------------------------------------
     @property
@@ -189,6 +197,7 @@ class SignalSpecRegistry:
         ValueError
             If a duplicate signal ID is identified for different specs items.
             If a duplicate entry is identified for a (role, name) key for different specs items.
+
         """
 
         self._specs: list[SignalSpec] = list(specs)
@@ -221,12 +230,12 @@ class SignalSpecRegistry:
         return list(self._specs)
 
     # ------------------------------------------------------------------------------------------------------------------
-    def get_by_id(self, signal_id: int) -> Optional[SignalSpec]:
+    def get_by_id(self, signal_id: int) -> SignalSpec | None:
         """Return specifications by signal ID key."""
         return self._by_id.get(signal_id)
 
     # ------------------------------------------------------------------------------------------------------------------
-    def get(self, role: str, name: str) -> Optional[SignalSpec]:
+    def get(self, role: str, name: str) -> SignalSpec | None:
         """Return specifications by role-name key."""
         return self._by_role_name.get((role, name))
 
@@ -281,15 +290,15 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
 
     Parameters
     ----------
-    embeddings_cfg:
+    embeddings_cfg : Mapping[str, Any]
         Embedding configuration dictionary (defaults + optional per-signal overrides).
         Expected to follow the structure used in mmt/configs/embeddings_*.yaml.
 
-    signals_by_role:
+    signals_by_role : Mapping[str, Mapping[str, str]]
         Mapping of role -> {canonical_signal_name -> modality}.
         role must be one of {"input", "actuator", "output"}.
 
-    dict_metadata:
+    dict_metadata : Mapping[str, Mapping[str, Any]]
         Mapping of role -> {canonical_signal_name -> meta}.
         For each (role, name), meta must include:
           - "dt": float
@@ -297,16 +306,27 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
         Additionally, for role == "output", meta must include:
           - "sec_length": float  (target window length in seconds)
 
-    chunk_length_sec:
+    chunk_length_sec : float
         Chunk length used for input/actuator chunking (seconds). This is used to derive chunk counts/strides and to
         validate embeddings.
-    log_summary:
+
+    log_summary : bool
         If True, print the grouped SignalSpec summary to `mmt.SignalSpec` logger.
+        Optional. Default: True.
 
     Returns
     -------
     SignalSpecRegistry
         Registry containing all SignalSpecs with stable IDs, roles, modalities, and embedding parameters.
+
+    Raises
+    ------
+    KeyError
+        If `dict_metadata` misses role.
+        If `dict_metadata[role]` misses a given signal.
+        If `dict_metadata[role][signal]` misses required key 'values_shape'.
+        If no default embedding settings for specified role and modality.
+        If missing `encoder_name` for specified role and modality.
 
     """
 
@@ -327,8 +347,12 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
             if role_meta is None:
                 raise KeyError(f"`dict_metadata` missing role={role!r}")
             meta = role_meta.get(name)
+            if meta is None:
+                raise KeyError(f"`dict_metadata[{role!r}]` missing signal {name!r}.")
+            if "values_shape" not in meta:
+                raise KeyError(f"`dict_metadata[{role!r}][{name!r}]` missing required key 'values_shape'.")
 
-            values_shape = tuple(meta.get("values_shape", ()))
+            values_shape = tuple(meta["values_shape"])
             dt = float(meta.get("dt"))
 
             # ..........................................................................................................
@@ -337,13 +361,13 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
             role_defaults = defaults.get(role, {})
             modality_defaults = role_defaults.get(modality)
             if modality_defaults is None:
-                raise KeyError(f"No default embedding settings for role={role}, modality={modality}")
+                raise KeyError(f"No default embedding settings for role={role}, modality={modality}.")
 
             encoder_name = modality_defaults.get("encoder_name")
             encoder_kwargs = dict(modality_defaults.get("encoder_kwargs", {}) or {})
 
             if encoder_name is None:
-                raise KeyError(f"Missing encoder_name for role={role}, modality={modality}")
+                raise KeyError(f"Missing `encoder_name` for role={role}, modality={modality}.")
 
             # ..........................................................................................................
             # Apply per-signal overrides
@@ -390,6 +414,8 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
                 encoder_kwargs=encoder_kwargs,
                 signal_id=next_id,
                 embedding_dim=int(embedding_dim),
+                values_shape=values_shape,
+                native_shape=native_shape,
             )
             specs.append(spec)
             next_id += 1
@@ -464,10 +490,9 @@ def _log_signal_spec_summary(
             encoder_kwargs = spec.encoder_kwargs if isinstance(spec.encoder_kwargs, dict) else {}
             native_shape = "-"
             if native_shape_by_key is not None:
-                native_shape_by_key = cast(dict, native_shape_by_key)
-                ns = native_shape_by_key.get((spec.role, spec.name))
+                ns = cast(dict, native_shape_by_key).get((spec.role, spec.name))
                 if ns is not None:
-                    native_shape = str(tuple(ns))
+                    native_shape = str(tuple(ns))  # type: ignore[arg-type]
             logger.info(
                 "  id=%d | name=%s | modality=%s | encoder=%s | native_shape=%s | encoded_dim=%d | expl_energy=%s",
                 int(spec.signal_id),
