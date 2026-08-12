@@ -1,0 +1,54 @@
+# DCT3D embedding profile.
+#
+# Normal DCT3D runs tune rank-mode artifacts instead of using hand-authored
+# role/modality defaults. Optional per-signal overrides are kept only as a
+# manual escape hatch for exceptional signals.
+
+embeddings:
+  dct3d:
+    # Optional manual per-signal DCT3D overrides.
+    # Leave empty for normal runs. Use only when a signal needs a fixed/manual
+    # encoder config instead of the tuned artifact.
+#    per_signal_overrides: {}
+#      output: # <- role
+#        equilibrium-psi: # <- signal name within that role
+#          encoder_name: identity
+
+    tuning:
+      common:
+        n_shots: 100
+        max_windows: 15000
+
+        guardrails:
+          enable: true
+          timeseries:
+            min_unique_t: 5
+          profile:
+            min_unique_h: 10
+            min_unique_t: 5
+          video:
+            min_unique_h: 10
+            min_unique_w: 10
+            min_unique_t: 5
+
+      pretrain:
+        objective:
+          thresholds:
+            input: 0.999
+            actuator: 0.999
+            output: 0.995
+          max_budget:
+            input: 4096
+            actuator: 4096
+            output: 4096
+
+      finetune:
+        objective:
+          thresholds:
+            input: 0.999
+            actuator: 0.999
+            output: 0.999
+          max_budget:
+            input: 4096
+            actuator: 4096
+            output: 8192

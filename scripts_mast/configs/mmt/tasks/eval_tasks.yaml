@@ -1,0 +1,321 @@
+# Task-specific evaluation overrides. Evaluation otherwise uses every valid
+# window from the shared phase configuration.
+
+tasks:
+
+  # Match the group-4 finetuning batch size. These long-horizon MHD targets
+  # have substantially larger native and embedded output tensors.
+
+  task_4-1: &task_4_eval
+    loader:
+      batch_size: 256
+
+#    # Keep group-4 CRPS evaluation tractable.
+#    preprocess:
+#      valid_windows:
+#        window_stride_sec: 0.005
+
+  task_4-2:
+    <<: *task_4_eval
+
+  task_4-3:
+    <<: *task_4_eval
+
+  task_4-4:
+    <<: *task_4_eval
+
+  task_4-5:
+    <<: *task_4_eval
+
+  # ====================================================================================================================
+  # GS tasks
+  # Enable equation/operator diagnostics, smoothness, full-grid psi-error maps, and topology where applicable.
+  # ====================================================================================================================
+  
+  task_1-3-data:
+    eval:
+      compute_metrics:
+        # This psi-only task reports Delta* psi error; self-consistency and RHS-current errors are unavailable.
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-3-strong:
+    eval:
+      compute_metrics:
+        # This psi-only task reports Delta* psi error; self-consistency and RHS-current errors are unavailable.
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-4-data:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-4-strong:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-4-weak:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-5-data:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-5-strong:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-5-weak:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-6-data:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-6-strong:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_1-6-weak:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-3-data:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-3-strong:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-4-data:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-4-strong:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-4-weak:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-5-data:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-5-strong:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-5-weak:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-6-data:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-6-strong:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-6-weak:
+    eval:
+      compute_metrics:
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true

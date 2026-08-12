@@ -1,0 +1,183 @@
+# Scratch-specific FINETUNE configuration.
+#
+# Complete self-contained finetune config loaded by:
+#   python scripts_mast/run_finetune.py --init scratch ...
+#
+# Task-specific deltas still belong in:
+#   scripts_mast/configs/mmt/tasks/finetune_tasks.yaml
+#
+# Contains:
+#   - data / preprocess / collate / loader defaults
+#   - train schedule
+#   - scratch model definition
+
+seed: 54
+
+runtime:
+  debug_logging: false
+
+# Optional run folder name under runs/. If null, loader generates one.
+run_id: null
+
+
+data:
+  local: false  # true = load from local_path (dev/laptop); false = stream from remote HPC store
+  local_path:   # used only when local: true
+  subset_size: null   # None / null → uses all shots
+  split: random  # random | temporal
+
+  cache:
+    enable: true
+    dtype: float16
+    num_workers: 64
+    max_windows:
+      train: null
+      val: null
+
+
+preprocess:
+  # Task-specific finetune_tasks.yaml can override these defaults.
+  chunks:
+    input:
+      chunk_length: 0.005
+      stride: 0.005
+      max_chunks: 50
+    actuator:
+      chunk_length: 0.005
+      stride: 0.005
+      max_chunks: 50
+    output:
+      max_chunks: 1
+
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    accept_nan_inputs_actuators: true
+    accept_nan_outputs: true
+    window_stride_sec: 0.005
+
+  embed_chunks:
+    nan_imputation: interpolate  # zero | interpolate | null
+
+
+collate:
+  p_drop_inputs: 0.05
+  p_drop_inputs_overrides: {}
+#    pf_active-solenoid_current: 0.1
+  p_drop_outputs: 0.0
+  p_drop_outputs_overrides: {}
+  p_drop_actuators: 0.0
+  p_drop_actuators_overrides: {}
+  p_drop_inputs_chunks: 0.05
+  p_drop_actuators_chunks: 0.0
+
+
+# For cached mode, loader.num_workers=0 (or at most 1) is usually best.
+loader:
+  batch_size: 512
+  num_workers: 0
+  shuffle_train: true
+  drop_last: false
+  batches_per_epoch: null  # required only when data.cache.enable=false
+
+train:
+  # Run-level behavior (not per-stage).
+  resume: false
+
+  early_stop:
+    patience: 10
+    delta: 0.0
+
+  amp:
+    enable: true
+
+  loss:
+    output_weights:
+#      summary-ip: 1.2
+
+    terms:
+      - type: native_sparse_mse   # data.keep_output_native is set automatically when this term is present
+        weight: 1.0
+#      - type: embed_mse
+#        weight: 1.0
+#        outputs:
+#          include:              # or use exclude; include/exclude are mutually exclusive
+#            - <output_signal_name>
+#      - type: embed_gaussian_crps
+#        weight: 1.0
+#      - type: embed_gaussian_crps
+#        weight: 1.0
+#      - type: native_sparse_sample_crps
+#        weight: 1.0
+#        n_samples: 16
+
+  optimizer:
+    use_adamw: true
+
+  stages:
+    - name: ft_scratch
+      epochs: 20  # 20
+
+      scheduler:
+        grad_accum_steps: 1
+        warmup_steps_fraction: 0.02
+
+      optimizer:
+        lr:
+          token_encoder: 5e-3
+          backbone: 1e-3
+          modality_heads: 5e-3
+          output_adapters: 5e-3
+        wd:
+          token_encoder: 0.01
+          backbone: 0.01
+          modality_heads: 0.01
+          output_adapters: 0.01
+
+      freeze:
+        token_encoder: false
+        backbone: false
+        modality_heads: false
+        output_adapters: false
+
+# Scratch: model = model_scratch
+model_scratch:
+  name: mmt
+  backbone:
+    d_model: 192
+    n_layers: 4
+    n_heads: 6
+    dim_ff: 768
+    dropout: 0.05
+    activation: gelu
+
+  modality_heads:
+    timeseries:
+      hidden: 192
+      out_dim: 192
+    profile:
+      hidden: 192
+      out_dim: 192
+    video:
+      hidden: 192
+      out_dim: 192
+
+  output_adapters:
+    residual:
+      enable: false  # predict a correction added to the latest same-name input state
+      zero_init: false  # false lets scratch residual models send gradients through the backbone from step 1
+    type: deterministic  # deterministic | gaussian
+    gaussian:
+      raw_scale_bias_init: -1.0
+    hidden_dim:
+      default: 0
+      bucketed:
+        enable: true
+        rules:
+          - {max_out_dim: 64, hidden: 0}
+          - {max_out_dim: 512, hidden: 32}
+          - {max_out_dim: 4096, hidden: 64}
+          - {max_out_dim: 8192, hidden: 128}
+          - {max_out_dim: null, hidden: d_model}
+      manual: {}  # {output_name: hidden_int, ...} (always wins)

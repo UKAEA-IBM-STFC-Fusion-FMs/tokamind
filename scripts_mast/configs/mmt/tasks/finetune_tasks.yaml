@@ -1,0 +1,983 @@
+# Task-specific finetuning overrides for MMT.
+# Tasks omitted here use the shared phase defaults unchanged.
+
+tasks:
+
+  # ====================================================================================================================
+  # Standard TokaMark tasks
+  # ====================================================================================================================
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_3-2:
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_3-3:
+    preprocess:
+      chunks:
+        input:
+          max_chunks: 21
+        actuator:
+          max_chunks: 21
+
+  # --------------------------------------------------------------------------------------------------------------------
+  # Long-horizon MHD tasks use a smaller batch and coarser training-window sampling. Evaluation retains the shared
+  # all-window default.
+
+  task_4-1:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_4-2:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_4-3:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_4-4:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_4-5:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+
+  # ====================================================================================================================
+  # Grad-Shafranov loss experiments
+  # ====================================================================================================================
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-3-data:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+          - type: grad_shafranov_residual
+            weight: 0.0
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            rhs_input:
+              origin: derived_j_tor  # Select from: derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005  # 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-3-strong:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+          - type: grad_shafranov_residual
+            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.0
+              lhs_gt: 1.0
+              rhs_gt: 0.0
+            rhs_input:
+              origin: derived_j_tor  # Select from: derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-4-data:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+          - type: grad_shafranov_residual
+            weight: 0.0
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-4-strong:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+          - type: grad_shafranov_residual
+            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0.0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-4-weak:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
+          - type: grad_shafranov_weak_form
+            weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+  # Experimental weak-form two-stage schedule. It reuses `ft_scratch` to replace the shared stage, then appends the
+  # GS-loss stage.
+
+  task_1-4-weak-two-stage:
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+          loss:
+            terms:
+              - type: native_sparse_mse
+                weight: 1.0
+
+        - name: gs_loss
+          epochs: 50
+
+          loss:
+            terms:
+              - type: native_sparse_mse
+                weight: 1.0
+              - type: grad_shafranov_weak_form
+                weight: 21e-3
+                grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+                grad_shafranov_weights:
+                  no_gt: 0.5
+                  lhs_gt: 0.25
+                  rhs_gt: 0.25
+                plot_check:
+                  type: save_plots  # Select from: show_plots | save_plots | <empty>
+                  probability: 0.0005
+
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.02
+
+          optimizer:
+            lr:
+              token_encoder: 5e-3
+              backbone: 1e-3
+              modality_heads: 5e-3
+              output_adapters: 5e-3
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+
+          freeze:
+            token_encoder: false
+            backbone: false
+            modality_heads: false
+            output_adapters: false
+
+  # --------------------------------------------------------------------------------------------------------------------
+  # task_1-5: extension of task_1-4with the full group output set added. Same loss configuration as their task_1-4
+  # counterpart.
+
+  task_1-5-data:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+          - type: grad_shafranov_residual
+            weight: 0.0
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-5-strong:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+          - type: grad_shafranov_residual
+            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0.0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-5-weak:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
+          - type: grad_shafranov_weak_form
+            weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+  # task_1-6: thomson_scattering added in input, magnetics removed, same output set as task_1-4.
+
+  task_1-6-data:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+          - type: grad_shafranov_residual
+            weight: 0.0
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-6-strong:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+          - type: grad_shafranov_residual
+            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0.0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_1-6-weak:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
+          - type: grad_shafranov_weak_form
+            weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-3-data:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+          - type: grad_shafranov_residual
+            weight: 0.0
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            rhs_input:
+              origin: derived_j_tor  # Select from: derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-3-strong:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+          - type: grad_shafranov_residual
+            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.0
+              lhs_gt: 0.5
+              rhs_gt: 0.1
+            rhs_input:
+              origin: derived_j_tor  # Select from: derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-4-data:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+          - type: grad_shafranov_residual
+            weight: 0.0
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-4-strong:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+          - type: grad_shafranov_residual
+            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0.0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-4-weak:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
+          - type: grad_shafranov_weak_form
+            weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch      
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+  # task_2-5: extension of task_2-4 with the full group output set added. Same loss configuration as their task_2-4
+  # counterpart.
+
+  task_2-5-data:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+          - type: grad_shafranov_residual
+            weight: 0.0
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-5-strong:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+          - type: grad_shafranov_residual
+            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0.0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-5-weak:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
+          - type: grad_shafranov_weak_form
+            weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+  # task_2-6: thomson_scattering added in input, magnetics removed, same output set as task_2-4.
+
+  task_2-6-data:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 1.0
+          - type: grad_shafranov_residual
+            weight: 0.0
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-6-strong:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+          - type: grad_shafranov_residual
+            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0.0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-6-weak:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
+          - type: grad_shafranov_weak_form
+            weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse  # Select from: l2 | mse
+            grad_shafranov_weights:
+              no_gt: 0.5
+              lhs_gt: 0.5
+              rhs_gt: 0
+            plot_check:
+              type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------

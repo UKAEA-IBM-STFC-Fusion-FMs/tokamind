@@ -1,0 +1,79 @@
+# Default configuration for EVAL phase.
+#
+# Model to evaluate is now specified via CLI: --model_source <run_id_or_path>
+#
+# Outputs are automatically saved under:
+#   runs/<model_id>/eval/
+
+seed: 54
+
+runtime:
+  debug_logging: false
+
+
+data:
+  local: false  # true = load from local_path (dev/laptop); false = stream from remote HPC store
+  local_path:   # used only when local: true
+  subset_size: null   # None / null → uses all shots
+
+  cache:
+    enable: false
+    dtype: float16          # or float32; default behavior if omitted is “no cast”
+    num_workers: 64
+    max_windows:
+      train: null
+      val: null
+
+
+preprocess:
+  valid_windows:
+    min_valid_inputs_actuators: 1
+    min_valid_outputs: 1
+    min_valid_chunks: 1
+    accept_nan_inputs_actuators: true
+    accept_nan_outputs: true
+    window_stride_sec: null  # if null we evaluate on all the possible windows
+
+loader:
+  batch_size: 512
+  num_workers: 32
+  drop_last: false
+  batches_per_epoch: null   # ignored in evaluation
+
+
+eval:
+
+  amp:
+    enable: true
+
+  # list of inputs/actuators/outputs you want to drop for evaluation
+  # null: evaluate the full model
+  drop:
+    inputs: null # ["pf_active-coil_current"]
+    actuators: null
+    outputs: null # ["pf_active-solenoid_current", "summary-ip"]
+
+  compute_metrics:
+    per_task: true
+    per_shot: true
+    per_window: false
+    per_timestamp: false
+    # Native-space CRPS diagnostic. enable=true writes crps_*_metrics.csv files for the requested granularities
+    # (eval-only; does not affect the tokamark point metrics). n_samples (>= 2) tunes the sampled estimator for a
+    # Gaussian head; for a deterministic head it is ignored and CRPS reduces to MAE.
+    crps:
+      enable: false
+      n_samples: 16
+    # LCFS / X-point flux-topology metric (eval-only; writes topology_shots.csv + topology_task.csv). It scores
+    # predicted equilibrium-psi against source EFIT geometry (LCFS boundary, X-point) fetched post-batch from the
+    # source Zarr; requires data.local_path to point at the equilibrium stores. Off by default (needs a local
+    # source store) — enable it in the task override for equilibrium-psi tasks. The metric owns its reference
+    # dependency set, so no auxiliary_fields list is needed here.
+    gs_topology:
+      enable: false
+
+  traces:
+    enable: false
+    n_max: 2
+    signals: null # ["pf_active-coil_current"]      # null → save all outputs
+    times_indexes: # [0, 1]                         # null → save full horizon

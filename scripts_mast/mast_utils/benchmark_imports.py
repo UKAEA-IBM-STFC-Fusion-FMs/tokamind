@@ -1,0 +1,99 @@
+"""
+Centralized imports from the benchmark package (tokamark).
+
+Purpose
+-------
+This module is intentionally strict: it FAILS FAST at import time if:
+- the benchmark package is not installed / importable, OR
+- the benchmark refactored and moved/renamed required symbols.
+
+This makes benchmark refactors a "single-file fix": update ONLY this module to match the new benchmark API.
+
+Recommended usage
+-----------------
+Instead of importing benchmark symbols directly in run_*.py, do:
+
+    from scripts_mast.mast_utils.benchmark_imports import (
+        initialize_MAST_dataset,
+        initialize_TokaMark_dataset,
+        TokaMarkDataset,
+        get_train_test_val_shots,
+        get_task_metadata,
+        benchmark_get_task_config,
+        WindowMetricsAccumulator,
+        compute_metrics,
+        compute_summary_metrics
+    )
+
+Notes
+-----
+- The benchmark now provides window-level iterables via `initialize_TokaMark_dataset` and `TokaMarkDataset`.
+"""
+
+from __future__ import annotations
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# 1) Make the "package not importable" error explicit and readable.
+
+try:
+    import tokamark  # noqa: F401
+except ModuleNotFoundError as e:
+    raise ModuleNotFoundError(
+        "Benchmark package 'tokamark' is not importable. Install the benchmark package (or ensure it's on PYTHONPATH)."
+    ) from e
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+# 2) Import the exact symbols we rely on. If benchmark refactors, this block breaks and the error points here
+# (single-file fix).
+
+try:
+    from tokamark.data import initialize_MAST_dataset, initialize_TokaMark_dataset
+    from tokamark.tools.TokaMark_dataset import TokaMarkDataset
+    from tokamark.data_split import get_train_test_val_shots
+    from tokamark.tasks import get_task_metadata
+    from tokamark.tasks import get_task_config as benchmark_get_task_config
+    from tokamark.tools.path import (
+        RANDOM_SPLIT_TOKAMARK_DATA_SPLITS_FILE,
+        TEMPORAL_SPLIT_TOKAMARK_DATA_SPLITS_FILE,
+        RANDOM_SPLIT_SIGNALS_STATS_FILE,
+        TEMPORAL_SPLIT_SIGNALS_STATS_FILE,
+    )
+    from MAST_tools.utils.path_utils import (
+        RANDOM_SPLIT_OUTLIER_METADATA_FILE,
+        TEMPORAL_SPLIT_OUTLIER_METADATA_FILE,
+    )
+    from tokamark.evaluator import (
+        WindowMetricsAccumulator,
+        compute_metrics,
+        compute_summary_metrics,
+    )
+except ImportError as e:
+    raise ImportError(
+        "Failed to import required symbols from benchmark package 'tokamark'.\n"
+        "This likely means the benchmark repo refactored its Python API.\n"
+        "Update scripts_mast/mast_utils/benchmark_imports.py to match the new locations/names.\n"
+        f"Original error: {type(e).__name__}: {e}"
+    ) from e
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+
+__all__ = [
+    "initialize_MAST_dataset",
+    "initialize_TokaMark_dataset",
+    "TokaMarkDataset",
+    "get_train_test_val_shots",
+    "get_task_metadata",
+    "benchmark_get_task_config",
+    "RANDOM_SPLIT_TOKAMARK_DATA_SPLITS_FILE",
+    "TEMPORAL_SPLIT_TOKAMARK_DATA_SPLITS_FILE",
+    "RANDOM_SPLIT_SIGNALS_STATS_FILE",
+    "TEMPORAL_SPLIT_SIGNALS_STATS_FILE",
+    "RANDOM_SPLIT_OUTLIER_METADATA_FILE",
+    "TEMPORAL_SPLIT_OUTLIER_METADATA_FILE",
+    "WindowMetricsAccumulator",
+    "compute_metrics",
+    "compute_summary_metrics",
+]

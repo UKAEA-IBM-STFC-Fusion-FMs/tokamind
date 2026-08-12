@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tokamind"
+version = "0.1.0"
+description = "Multi-modal transformer for plasma fusion models"
+readme = "README.md"
+requires-python = ">=3.11"
+license-files = ["LICENSE.md"]
+authors = [
+  { name = "IBM Research" }
+]
+
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Intended Audience :: Science/Research",
+  "License :: OpenMDW",
+]
+
+dependencies = [
+    "torch>=2.10",
+    "numpy>=2.4",
+    "PyYAML>=6.0",
+    "psutil>=7.2",
+    "scipy>=1.17",
+    "freegs>=0.8.2",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pre-commit>=3.8",
+  "pytest>=8.0",
+  "ruff>=0.6",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["mmt*"]
