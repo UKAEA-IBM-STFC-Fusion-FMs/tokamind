@@ -193,6 +193,43 @@ tasks:
 
   # --------------------------------------------------------------------------------------------------------------------
 
+  task_1-3-weak:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9
+          - type: grad_shafranov_weak_form
+            weight: 0.1
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse
+            grad_shafranov_weights:
+              no_gt: 0.0
+              lhs_gt: 1.0
+              rhs_gt: 0.0
+            rhs_input:
+              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor
+              calculation_method: GS_operator
+            plot_check:
+              type: save_plots
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
   task_1-4-data:
     embeddings:
       dct3d:
@@ -292,6 +329,9 @@ tasks:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
+              calculation_method: GS_operator  
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -333,6 +373,9 @@ tasks:
                   no_gt: 0.5
                   lhs_gt: 0.25
                   rhs_gt: 0.25
+                rhs_input:
+                  origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
+                  calculation_method: GS_operator  
                 plot_check:
                   type: save_plots  # Select from: show_plots | save_plots | <empty>
                   probability: 0.0005
@@ -462,6 +505,9 @@ tasks:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
+              calculation_method: GS_operator  
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -571,6 +617,9 @@ tasks:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
+              calculation_method: GS_operator  
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -647,6 +696,43 @@ tasks:
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
+              probability: 0.0005
+      stages:
+        - name: ft_scratch
+          epochs: 50
+
+  # --------------------------------------------------------------------------------------------------------------------
+
+  task_2-3-weak:
+    embeddings:
+      dct3d:
+        tuning:
+          finetune:
+            objective:
+              thresholds:
+                output: 0.999  # Put what you want
+              max_budget:
+                input: 4096
+                actuator: 4096
+                output: 8192  # Put what you want
+    train:
+      loss:
+        terms:
+          - type: native_sparse_mse
+            weight: 0.9
+          - type: grad_shafranov_weak_form
+            weight: 0.1
+            grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+            loss_type: mse
+            grad_shafranov_weights:
+              no_gt: 0.0
+              lhs_gt: 1.0
+              rhs_gt: 0.0
+            rhs_input:
+              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor
+              calculation_method: GS_operator
+            plot_check:
+              type: save_plots
               probability: 0.0005
       stages:
         - name: ft_scratch
@@ -753,6 +839,9 @@ tasks:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
+              calculation_method: GS_operator  
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -864,6 +953,9 @@ tasks:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
+              calculation_method: GS_operator  
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -973,6 +1065,9 @@ tasks:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
+            rhs_input:
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
+              calculation_method: GS_operator
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005

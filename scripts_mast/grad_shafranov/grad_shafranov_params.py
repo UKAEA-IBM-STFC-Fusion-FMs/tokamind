@@ -575,7 +575,13 @@ def compute_limiter_mask(  # NOSONAR
 
     # ..................................................................................................................
 
-    limiter_mask_rz = np.ones_like(a=R_matrix, dtype=np.float32,) * min_value
+    limiter_mask_rz = (
+        np.ones_like(
+            a=R_matrix,
+            dtype=np.float32,
+        )
+        * min_value
+    )
     contour = convert_coord_index(R_mat=R_matrix, Z_mat=Z_matrix, points=limiter_shape)
 
     # Create an empty image to store the masked array
@@ -584,31 +590,12 @@ def compute_limiter_mask(  # NOSONAR
 
     if plot_shape_and_mask:
         fig_ = plt.figure(figsize=(6, 6))
-        fig_.suptitle(
-            t="Limiter mask and shape",
-            fontsize=16,
-            y=0.98
-        )
+        fig_.suptitle(t="Limiter mask and shape", fontsize=16, y=0.98)
         gs_ = GridSpec(nrows=1, ncols=1)
 
         ax_ = fig_.add_subplot(gs_[:, 0], projection="3d")
-        ax_.plot_surface(
-            X=R_matrix,
-            Y=Z_matrix,
-            Z=limiter_mask_rz,
-            cmap="autumn_r",
-            lw=0.5,
-            rstride=1,
-            cstride=1
-        )
-        ax_.plot(
-            xs=limiter_shape[:, 0],
-            ys=limiter_shape[:, 1],
-            zs=-0.1,
-            zdir='z',
-            lw=3,
-            color='0.0'
-        )
+        ax_.plot_surface(X=R_matrix, Y=Z_matrix, Z=limiter_mask_rz, cmap="autumn_r", lw=0.5, rstride=1, cstride=1)
+        ax_.plot(xs=limiter_shape[:, 0], ys=limiter_shape[:, 1], zs=-0.1, zdir="z", lw=3, color="0.0")
         plt.show()
 
     return limiter_mask_rz
@@ -650,8 +637,6 @@ if __name__ == "__main__":
         limiter_shape=MAST_LIM_SHAPE_NUMPY_RZ,
         # plot_shape_and_mask=True,
     )
-
-
 
     BASE_J_TOR_LIM_MASK_RZ = compute_limiter_mask(
         R_matrix=GS_ctx.R_matrix,

@@ -16,6 +16,9 @@ from mmt.train.losses.constants import (
     EMBED_MSE_LOSS_TYPE,
     EMBED_SPACE_LOSS_TYPES,
     GRAD_SHAFRANOV_LOSS_TYPE,
+    GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR,
+    GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR,
+    GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY,
     GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE,
     NATIVE_SPACE_LOSS_TYPES,
 )
@@ -292,13 +295,21 @@ def resolve_loss_output_filters(
                     f"{path}.terms[{term_index}] ({term_type}) must include 'equilibrium-psi' in its outputs."
                 )
             if term_type == GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE:
-                j_tor_ids = {sid for sid, name in sid_to_name.items() if name == "equilibrium-j_tor"}
-                if not j_tor_ids:
-                    raise ValueError(f"{term_type} requires model output 'equilibrium-j_tor'.")
-                if selected_ids.isdisjoint(j_tor_ids):
-                    raise ValueError(
-                        f"{path}.terms[{term_index}] ({term_type}) must include 'equilibrium-j_tor' in its outputs."
-                    )
+                rhs_input_cfg = term_def.get("rhs_input") or {}
+                rhs_origin = str(
+                    rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY, GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR)
+                )
+                if rhs_origin != GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR:
+                    j_tor_ids = {sid for sid, name in sid_to_name.items() if name == "equilibrium-j_tor"}
+                    if not j_tor_ids:
+                        raise ValueError(
+                            f"{term_type} with rhs_input.origin={rhs_origin!r} requires model output "
+                            "'equilibrium-j_tor'."
+                        )
+                    if selected_ids.isdisjoint(j_tor_ids):
+                        raise ValueError(
+                            f"{path}.terms[{term_index}] ({term_type}) must include 'equilibrium-j_tor' in its outputs."
+                        )
 
         supervised_ids.update(selected_ids)
         term_filters.append(None if raw_filter is None else selected_ids)

@@ -378,6 +378,7 @@ def build_loss_aggregator(
                 raise ValueError(f"Loss term '{GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE}' requires signal_stats.")
 
             plot_check_cfg = term_def.get("plot_check") or {}
+            rhs_input_cfg = term_def.get("rhs_input") or {}
             weak_loss_type_raw = term_def.get("loss_type") or "mse"
             if weak_loss_type_raw not in {"l2", "mse"}:
                 raise ValueError(f"Invalid weak-form GS loss_type={weak_loss_type_raw!r}. Expected 'l2' or 'mse'.")
@@ -392,6 +393,7 @@ def build_loss_aggregator(
                         output_name_to_id=output_name_to_id,
                         grad_shafranov_params_file=term_def.get("grad_shafranov_params_file"),
                         grad_shafranov_weights=weak_gs_weights,
+                        rhs_input=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY),
                         loss_type=weak_loss_type,
                         output_weights=ow if ow else None,
                         output_filter=output_filter,
