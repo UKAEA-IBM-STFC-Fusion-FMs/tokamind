@@ -60,6 +60,20 @@ tasks:
         gs_topology:
           enable: true
 
+  task_1-3-weak:
+    eval:
+      compute_metrics:
+        # This psi-only task reports Delta* psi error; self-consistency and RHS-current errors are unavailable.
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
   task_1-4-data:
     eval:
       compute_metrics:
@@ -180,6 +194,7 @@ tasks:
   task_2-3-data:
     eval:
       compute_metrics:
+        # This psi-only task reports Delta* psi error; self-consistency and RHS-current errors are unavailable.
         gs_metrics:
           enable: true
         smoothness:
@@ -193,6 +208,21 @@ tasks:
   task_2-3-strong:
     eval:
       compute_metrics:
+        # This psi-only task reports Delta* psi error; self-consistency and RHS-current errors are unavailable.
+        gs_metrics:
+          enable: true
+        smoothness:
+          enable: true
+          sigma: 2.0
+        psi_error_map:
+          enable: true
+        gs_topology:
+          enable: true
+
+  task_2-3-weak:
+    eval:
+      compute_metrics:
+        # This psi-only task reports Delta* psi error; self-consistency and RHS-current errors are unavailable.
         gs_metrics:
           enable: true
         smoothness:
