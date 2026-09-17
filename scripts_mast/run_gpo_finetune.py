@@ -64,6 +64,8 @@ from mmt.checkpoints import load_best_weights
 from mmt.data import build_decoders
 from mmt.train import train_finetune
 from mmt.train.loop_utils import move_batch_to_device
+from mmt.checkpoints.strict import inspect_resume, training_signature
+from mmt.models.blocks import MODEL_BLOCKS
 from mmt.utils import sdpa_math_only_ctx, validate_config
 
 log = logging.getLogger("mmt.GPO")
@@ -150,6 +152,19 @@ class _GpoBatchInjector:
                 f"output_signal_id_map keys: {sorted(signal_id_map.keys())}. "
                 "Check that --task and --model_source match the dataset used for collection."
             )
+
+    @property
+    def checkpoint_loader(self) -> torch.utils.data.DataLoader:
+        """
+        Expose the underlying MAST loader for checkpointing its independent RNG streams.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            Wrapped MAST loader. The checkpoint utilities capture its loader/sampler generators; the injector
+            itself has no independent random generator.
+        """
+        return self._mast_loader
 
     def __len__(self) -> int:
         return len(self._mast_loader)
@@ -365,7 +380,15 @@ def main() -> None:
         "collection_digest": digest(cc),
         "pairs_dir": str(gpo_dir.resolve()),
     }
+    # Include pair/source identity in the strict training checkpoint signature.
+    cfg_mmt.train["resume_identity"] = digest(cfg_mmt.raw["gpo_provenance"])
     save_run_snapshot(cfg_mmt, resume=resume_requested)
+    if resume_requested:
+        inspect_resume(
+            cfg_mmt.paths["run_dir"],
+            signature=training_signature(cfg_mmt.train, cfg_mmt.loader),
+            block_names=MODEL_BLOCKS[cfg_mmt.raw["model"]["name"]],
+        )
     if resume_requested:
         cfg_mmt.train["resume"] = True
     device, _ = init_run_context(cfg_mmt=cfg_mmt, phase="finetune")

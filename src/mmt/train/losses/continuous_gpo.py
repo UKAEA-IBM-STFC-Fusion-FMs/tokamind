@@ -431,6 +431,9 @@ class ContinuousGPOLoss(BaseLoss):
             else:
                 logs[f"sft/{sig_id}"] = 0.0
 
+            logs[f"count/{sig_id}"] = int(mask.sum())
+            logs[f"loss/{sig_id}"] = float(term_loss.detach().cpu())
+            logs[f"pref_acc/{sig_id}"] = float((d_w < d_l).float().mean().cpu())
             logs[f"gpo/{sig_id}"] = float(gpo_loss.detach().cpu())
             logs[f"margin/{sig_id}"] = float(margin.mean().detach().cpu())
             # d_w: mean distance to ground truth on pair windows.

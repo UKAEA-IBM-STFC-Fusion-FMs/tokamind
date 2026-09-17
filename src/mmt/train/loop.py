@@ -54,7 +54,6 @@ from __future__ import annotations
 import logging
 import math
 import os
-import re
 from collections.abc import Mapping
 from typing import Any, cast
 
@@ -73,6 +72,9 @@ from mmt.train.loop_utils import (
 from mmt.train.scheduler import build_optimizer_and_scheduler, apply_stage_freeze_policy
 from mmt.checkpoints import save_best, save_latest, resume_from_latest
 from mmt.utils.amp_utils import get_amp_config
+from mmt.train.metrics import select_metric
+from mmt.checkpoints.rng import capture_loader_state, restore_loader_state
+from mmt.checkpoints.strict import training_signature
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -152,6 +154,10 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     resume_flag = train_cfg["resume"]
     early_patience = int(train_cfg["early_stop"]["patience"])
     early_delta = float(train_cfg["early_stop"]["delta"])
+    checkpoint_metric = str(train_cfg.get("checkpoint_metric", "objective"))
+    if checkpoint_metric not in {"mse", "objective"}:
+        raise ValueError(f"Unknown checkpoint metric: {checkpoint_metric!r}")
+    signature = training_signature(train_cfg, loader_cfg)
 
     output_specs = list(getattr(model, "output_specs", []))
     output_name_to_id = {str(spec.name): int(spec.signal_id) for spec in output_specs}
@@ -194,6 +200,9 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     # Device, AMP, scaler
     # ..................................................................................................................
 
+    if train_batches_per_epoch < 1:
+        raise ValueError("Training loader must contain at least one batch.")
+
     device, amp_enabled, amp_dtype = get_amp_config(model=model, enable=amp_enabled)
     use_scaler = (device.type == "cuda") and amp_enabled and (amp_dtype == torch.float16)
     scaler = torch.amp.GradScaler(device="cuda", enabled=use_scaler)
@@ -228,47 +237,36 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     start_stage_idx = 0
     start_epoch_in_stage = 1
 
-    if resume_flag:
-        try:
-            # Load model weights and resume metadata (optimizer/scheduler/scaler restored later per stage)
-            start_epoch_global, best_so_far, meta = resume_from_latest(  # NOSONAR - Unused variable
-                run_dir=run_dir,
-                model=model,
-                optimizer=None,
-                scheduler=None,
-                scaler=None,
-                map_location=str(device),
-            )
-            best_val = float(best_so_far)
-            global_step = int(meta.get("global_step", 0))
-            bad_epochs = int(meta.get("bad_epochs", 0))
-            start_stage_idx = int(meta.get("stage_index", 0))
-            last_epoch_in_stage = int(meta.get("epoch_in_stage", 0))
-            start_epoch_in_stage = last_epoch_in_stage + 1
-            if start_epoch_in_stage < 1:
-                start_epoch_in_stage = 1
-
-            logger.info(
-                f"[resume] Loaded model weights and metadata: stage_idx={start_stage_idx}, "
-                f"last_epoch_in_stage={last_epoch_in_stage}, "
-                f"next_epoch_in_stage={start_epoch_in_stage}, "
-                f"best_val={best_val:.6f}, global_step={global_step}"
-            )
-        except Exception as e:
-            logger.warning(f"[resume] Failed to resume from latest checkpoint: {e!s}. Starting from scratch.")
-            resume_flag = False
-
-    # ..................................................................................................................
-    # History structure
-    # ..................................................................................................................
-
     history: dict[str, Any] = {"stages": {}}
+    if resume_flag:
+        _, best_so_far, meta = resume_from_latest(
+            run_dir=run_dir,
+            model=model,
+            map_location=str(device),
+            signature=signature,
+        )
+        best_val = float(best_so_far)
+        global_step = meta["global_step"]
+        bad_epochs = meta["bad_epochs"]
+        start_stage_idx = meta["stage_index"]
+        start_epoch_in_stage = meta["epoch_in_stage"] + 1
+        if start_stage_idx >= len(stages) or start_epoch_in_stage > int(stages[start_stage_idx]["epochs"]) + 1:
+            raise ValueError("Resume stage/epoch is incompatible with the training schedule.")
+        state = meta["_training_state"]
+        history = state["history"]
+        restore_loader_state(train_loader, state["loaders"]["train"])
+        restore_loader_state(val_loader, state["loaders"]["val"])
+        if meta.get("training_complete"):
+            history.update(best_val=best_val, epochs_run=meta["epoch"], global_step=global_step)
+            return history
+        logger.info("[resume] stage=%s next_epoch=%s step=%s", start_stage_idx, start_epoch_in_stage, global_step)
 
     # ..................................................................................................................
     # Stage loop
     # ..................................................................................................................
 
     total_epochs_run = 0
+    warned_unresumable_loaders: set[str] = set()
 
     for stage_idx, stage in enumerate(stages):
         if stage_idx < start_stage_idx:
@@ -315,23 +313,17 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
 
         # ---- Resume optimizer/scheduler/scaler state if resuming in this stage ----
         if resume_flag and stage_idx == start_stage_idx:
-            try:
-                # Restore optimizer/scheduler/scaler state (model already loaded above).
-                _, _, _ = resume_from_latest(
-                    run_dir=run_dir,
-                    model=model,
-                    optimizer=optimizer,
-                    scheduler=scheduler,
-                    scaler=scaler,
-                    map_location=str(device),
-                    load_model=False,  # Skip model loading (already done).
-                )
-                logger.info(f"[resume] Restored optimizer, scheduler, and scaler state for stage '{name}'")
-            except Exception as e:
-                logger.warning(
-                    f"[resume] Failed to restore optimizer/scheduler/scaler state: {e!s}. "
-                    f"Continuing with fresh optimizer/scheduler."
-                )
+            resume_from_latest(
+                run_dir=run_dir,
+                model=model,
+                optimizer=optimizer,
+                scheduler=scheduler,
+                scaler=scaler,
+                map_location=str(device),
+                load_model=False,
+                signature=signature,
+            )
+            logger.info("[resume] Restored optimizer, scheduler, scaler and RNG for stage '%s'", name)
 
         logger.info(f"----- Stage '{name}' (index {stage_idx}) -----")
         logger.info(f"  epochs={epochs}, grad_accum={grad_accum_steps}")
@@ -339,7 +331,12 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
 
         # A new stage can optimize a different loss scale, so compare validation only within matching loss configs.
         first_epoch_in_stage = start_epoch_in_stage if stage_idx == start_stage_idx else 1
-        if stage_idx > 0 and first_epoch_in_stage <= 1 and stage_loss_keys[stage_idx] != stage_loss_keys[stage_idx - 1]:
+        if (
+            checkpoint_metric == "objective"
+            and stage_idx > 0
+            and first_epoch_in_stage <= 1
+            and stage_loss_keys[stage_idx] != stage_loss_keys[stage_idx - 1]
+        ):
             logger.info(
                 "  loss config changed from previous stage; resetting best validation and early-stop counter "
                 "for this stage."
@@ -349,7 +346,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
             bad_epochs = 0
 
         # Create history list for this stage
-        history["stages"][name] = []
+        history["stages"].setdefault(name, [])
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Epoch loop
@@ -404,9 +401,10 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
             )
 
             # ---------------------------- BEST CHECKPOINT ------------------
-            improved = (val_loss + early_delta) < best_val
+            selection_value = select_metric(checkpoint_metric, val_loss, val_term_logs)
+            improved = (selection_value + early_delta) < best_val
             if improved:
-                best_val = val_loss
+                best_val = selection_value
                 bad_epochs = 0
 
                 save_best(
@@ -418,6 +416,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                         "stage_index": stage_idx,
                         "stage_name": name,
                         "epoch_in_stage": epoch_in_stage,
+                        "checkpoint_metric": checkpoint_metric,
                     },
                 )
 
@@ -433,26 +432,17 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
             logger.info(
                 f"Stage {name} | Epoch {epoch_in_stage}/{epochs} "
                 f"(global={epoch_global}) | step={global_step} | "
-                f"train={train_loss:.6f}, val={val_loss:.6f}, best={best_val:.6f} | "
+                f"train_objective={train_loss:.6f}, val_objective={val_loss:.6f}, "
+                f"selection[{checkpoint_metric}]={selection_value:.6f}, best={best_val:.6f} | "
                 f"no_improve={no_improve_str}"
             )
 
-            # Per-term gradient share (only when multiple terms are active).
-            # Each percentage = w_i * L_i / Σ(w_j * L_j): the actual gradient contribution
-            # after applying term weights. 50%/50% means equal gradient pull.
-            if len(train_term_logs) > 1:
-
-                def _fmt_term_pcts(d: dict) -> str:
-                    w_sum = sum(d.values())
-                    parts = []
-                    for k_, v_ in sorted(d.items()):
-                        name_ = re.sub(r"_\d+/weighted$", "", k_)
-                        pct = 100.0 * v_ / w_sum if w_sum > 0.0 else 0.0
-                        parts.append(f"{name_}={pct:.0f}%")
-                    return "  ".join(parts)
-
-                logger.info("  terms train: %s", _fmt_term_pcts(train_term_logs))
-                logger.info("  terms val:   %s", _fmt_term_pcts(val_term_logs))
+            validation_summary = "  ".join(
+                f"{key}={value:.6g}"
+                for key, value in val_term_logs.items()
+                if key in {"mse", "objective", "pair_window_coverage", "pair_batch_coverage"} or key.endswith("/mean")
+            )
+            logger.info("  validation metrics: %s", validation_summary)
 
             bb_lr = backbone_lr(optimizer=optimizer)
 
@@ -462,6 +452,8 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 "epoch_in_stage": epoch_in_stage,
                 "train_loss": train_loss,
                 "val_loss": val_loss,
+                "checkpoint_metric": checkpoint_metric,
+                "selection_value": selection_value,
                 "lr_backbone": bb_lr,
                 "best_val": best_val,
                 "global_step": global_step,
@@ -474,7 +466,22 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 epoch_record[f"val_{k}"] = v
             history["stages"][name].append(epoch_record)
 
+            # One completion decision controls both the saved flag and the actual exit.
+            early_stop = 0 < early_patience <= bad_epochs
+            training_complete = early_stop or (stage_idx == len(stages) - 1 and epoch_in_stage == epochs)
+
             # ---------------------------- LATEST CHECKPOINT ---------------
+            loader_states = {"train": capture_loader_state(train_loader), "val": capture_loader_state(val_loader)}
+            for loader_name, loader_state in loader_states.items():
+                if "unsupported" in loader_state and loader_name not in warned_unresumable_loaders:
+                    logger.warning(
+                        "[checkpoint] The %s loader cannot be restored: %s "
+                        "Training continues, but checkpoints in %s cannot be resumed.",
+                        loader_name,
+                        loader_state["unsupported"],
+                        run_dir,
+                    )
+                    warned_unresumable_loaders.add(loader_name)
             save_latest(
                 run_dir=run_dir,
                 model=model,
@@ -489,17 +496,26 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                     "stage_index": stage_idx,
                     "stage_name": name,
                     "epoch_in_stage": epoch_in_stage,
+                    "checkpoint_metric": checkpoint_metric,
+                    "training_complete": training_complete,
+                },
+                training_state={
+                    "signature": signature,
+                    "history": history,
+                    "loaders": loader_states,
                 },
             )
 
-            # ---------------------------- EARLY STOP -----------------------
-            if 0 < early_patience <= bad_epochs:
-                logger.info(f"[early_stop] Patience exhausted after {bad_epochs} epochs.")
+            # ---------------------------- TRAINING COMPLETE ----------------
+            if training_complete:
+                if early_stop:
+                    logger.info(f"[early_stop] Patience exhausted after {bad_epochs} epochs.")
                 total_epochs_run += epoch_in_stage
 
                 history["best_val"] = best_val
                 history["epochs_run"] = total_epochs_run
                 history["global_step"] = global_step
+                logger.info(f"Train finished: epochs_run={total_epochs_run}, best_val={best_val:.6f}")
 
                 return history
 

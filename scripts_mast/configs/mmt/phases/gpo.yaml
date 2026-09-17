@@ -64,6 +64,8 @@ train:
   # reference-anchored margin instead of the raw collection-time anchor.
   use_reference_model: true
 
+  checkpoint_metric: mse  # macro-average embedding MSE on all valid validation windows
+
   early_stop:
     patience: 10
     delta: 0.0

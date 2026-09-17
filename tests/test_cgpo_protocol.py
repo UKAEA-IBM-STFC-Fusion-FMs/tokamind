@@ -355,6 +355,16 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
     trainer.main()
     with pytest.raises(FileExistsError, match="already exists"):
         trainer.main()
+    # Resume validation must precede even the construction of expensive MAST datasets.
+    monkeypatch.setenv("GPO_RESUME", "1")
+
+    def forbidden_datasets(**kwargs):
+        """Assert that invalid resume state fails before MAST dataset construction."""
+        pytest.fail("Resume preflight should fail before preparing datasets")
+
+    monkeypatch.setattr(trainer, "build_mast_datasets", forbidden_datasets)
+    with pytest.raises(FileNotFoundError, match="Missing verified resume checkpoint"):
+        trainer.main()
     (root / "checkpoints" / "best" / "fake.pt").write_bytes(b"changed model")
     with pytest.raises(ValueError, match="contract differs"):
         trainer.main()

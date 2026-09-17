@@ -32,7 +32,7 @@ from mmt.train.losses.constants import (
 )
 
 from .base import BaseLoss, LossComputeContext
-from .continuous_gpo import ContinuousGPOLoss, gpo_preference_accuracy
+from .continuous_gpo import ContinuousGPOLoss
 from .embed_mse import EmbedMSELoss
 from .native_sparse_mse import NativeSparseMSELoss
 
@@ -71,6 +71,26 @@ class LossAggregator:
         self._stage_loss_terms = tuple(self._term_configs)
 
     # ------------------------------------------------------------------------------------------------------------------
+    @property
+    def epoch_terms(self) -> list[tuple[str, float, dict[str, float]]]:
+        """
+        Expose the term definitions needed to reduce per-signal observations over an epoch.
+
+        Returns
+        -------
+        list[tuple[str, float, dict[str, float]]]
+            Log prefix, configured term weight and per-signal weights for each loss term. Prefixes match
+            ``compute()``; signal identifiers are strings to match flattened log keys.
+        """
+        return [
+            (
+                f"{type(term).__name__}_{i}" if len(self._terms) > 1 else type(term).__name__,
+                float(weight),
+                {str(k): v for k, v in getattr(term, "_output_weights", {}).items()},
+            )
+            for i, (term, weight) in enumerate(self._terms)
+        ]
+
     @property
     def requires_native_target(self) -> bool:
         """True if any term needs `batch['output_native']`."""
@@ -171,18 +191,6 @@ class LossAggregator:
                     gpo_pair_mask=gpo_pair_mask,
                     ref_preds=ref_preds,
                 )
-                # Preference accuracy: fraction of windows where the current model
-                # prediction is closer to y_w than to y_l.  Pure diagnostic — no
-                # gradient.  Only computed when GPO pairs are present in the batch.
-                if y_w_emb and y_l_emb:
-                    for sig_id, acc in gpo_preference_accuracy(
-                        preds=preds,
-                        y_w_emb=y_w_emb,
-                        y_l_emb=y_l_emb,
-                        output_mask=output_mask,
-                        pair_mask=gpo_pair_mask,
-                    ).items():
-                        term_logs[f"pref_acc/{sig_id}"] = acc
             else:
                 term_loss, term_logs = term.compute(
                     preds=preds,

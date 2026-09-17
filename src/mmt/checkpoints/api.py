@@ -50,6 +50,8 @@ from torch.amp.grad_scaler import GradScaler
 from .block_io import save_model_blocks, load_model_blocks
 from .io import atomic_save, atomic_json_save, torch_load_full, best_or_latest_dir
 from .rng import capture_rng_state, restore_rng_state
+from .strict import inspect_resume, write_manifest
+from mmt.models.blocks import get_named_model_blocks
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -123,6 +125,7 @@ def save_latest(
     best_val_so_far: float,
     bad_epochs: int,
     extra_meta: Mapping[str, Any] | None = None,
+    training_state: Mapping[str, Any] | None = None,
 ) -> None:
     """
     Save a strict "resume point" with model blocks, optimizer/scheduler/scaler, RNG state, and metadata.
@@ -151,12 +154,26 @@ def save_latest(
         Optional mapping (dict) with extra metadata.
         Optional. Default: None.
 
+    training_state : Mapping[str, Any] | None
+        Configuration signature, history and loader RNG states from the training loop. When provided, all
+        optimizer/scheduler/scaler states are required and a versioned integrity manifest is written last.
+        Optional. Default: None. Checkpoints without this state cannot be used for strict resume.
+
     Returns
     -------
     None
 
+    Raises
+    ------
+    ValueError
+        If training_state is provided without an optimizer, scheduler or scaler.
+    OSError
+        If a checkpoint file or its final manifest cannot be written.
+
     """
 
+    if training_state is not None and any(value is None for value in (optimizer, scheduler, scaler)):
+        raise ValueError("Verified resume checkpoints require optimizer, scheduler and scaler state.")
     lat = os.path.join(run_dir, "checkpoints", "latest")
     os.makedirs(name=lat, exist_ok=True)
 
@@ -182,6 +199,12 @@ def save_latest(
         meta.update(extra_meta)
 
     atomic_json_save(obj=meta, path=os.path.join(lat, META_FILENAME))
+    if training_state is not None:
+        atomic_save(obj=training_state, path=os.path.join(lat, "training_state.pt"))
+        files = [f"{name}.pt" for name in get_named_model_blocks(model)]
+        files += ["meta.json", "optimizer.pt", "scheduler.pt", "scaler.pt", "rng.pt", "training_state.pt"]
+        # Written last: partial overwrites fail verification instead of mixing epochs.
+        write_manifest(lat, files, [f"{name}.pt" for name in get_named_model_blocks(model)] + ["meta.json"])
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -194,6 +217,7 @@ def resume_from_latest(
     scaler: GradScaler | None = None,
     map_location: Callable | torch.device | str | dict[str, str] | None = "cpu",
     load_model: bool = True,
+    signature: str | None = None,
 ):
     """
     Strict resume of the *same* run.
@@ -229,6 +253,15 @@ def resume_from_latest(
         If False, skip loading model weights (useful when model was already loaded and only optimizer/scheduler/scaler
         state needs to be restored).
         Optional. Default: True.
+    signature : str | None
+        Expected training/configuration digest checked before model weights are changed.
+        Optional. Default: None.
+
+    Returns
+    -------
+    tuple[int, float, dict[str, Any]]
+        Next global epoch, best validation value and saved metadata. Metadata includes ``_training_state``
+        containing the verified history and loader RNG states for the caller to restore.
 
     Raises
     ------
@@ -241,63 +274,14 @@ def resume_from_latest(
 
     Notes
     -----
-    This function expects run_dir/checkpoints/latest/meta.json to be valid JSON. If it is missing or corrupted, resume
-    fails explicitly.
+    A versioned manifest verifies every latest and best file before loading any model weights.
+    Missing/corrupt state or a changed training signature fails explicitly; legacy checkpoints
+    require a new run. The returned metadata includes `_training_state` for history and loader RNGs.
 
     """
 
-    # ..................................................................................................................
-    def _maybe_load(
-        obj: nn.Module
-        | torch.optim.Optimizer
-        | torch.optim.lr_scheduler.LRScheduler
-        | torch.cuda.amp.GradScaler
-        | None,
-        filename: str,
-    ) -> None:
-        """
-        If possible, load the passed object's state dict.
-
-        Parameters
-        ----------
-        obj : nn.Module | Optimizer | LRScheduler | GradScaler | None
-            Optional object with a `load_state_dict` method.
-        filename : str
-            Target filename.
-
-        Returns
-        -------
-        None
-
-        """
-
-        if obj is None:
-            return
-        p = os.path.join(lat, filename)
-        if os.path.exists(p):
-            state = torch_load_full(path=p, map_location=map_location)
-            obj.load_state_dict(state_dict=state)
-
-    # ..................................................................................................................
-
+    meta, _state = inspect_resume(run_dir, signature=signature, block_names=get_named_model_blocks(model))
     lat = os.path.join(run_dir, "checkpoints", "latest")
-    if not os.path.isdir(lat):
-        raise FileNotFoundError(f"No 'latest' checkpoint found: {lat}.")
-
-    # Load metadata FIRST so that a corrupted meta.json cannot leave the model partially resumed while the caller falls
-    # back to "start from scratch".
-    meta_path = os.path.join(lat, META_FILENAME)
-    if not os.path.exists(meta_path):
-        raise FileNotFoundError(f"Missing resume metadata file: {meta_path}.")
-
-    try:
-        with open(meta_path, "r", encoding="utf-8") as f:
-            meta = json.load(f)
-    except (OSError, JSONDecodeError, UnicodeDecodeError) as e:
-        raise ValueError(f"Failed to parse resume metadata (expected JSON): {meta_path}.") from e
-
-    if not isinstance(meta, dict):
-        raise ValueError(f"Invalid resume metadata (expected a dict): {meta_path}.")
 
     # Now restore the model + training state.
     if load_model:
@@ -308,18 +292,18 @@ def resume_from_latest(
             strict=True,
         )
 
-    _maybe_load(obj=optimizer, filename="optimizer.pt")
-    _maybe_load(obj=scheduler, filename="scheduler.pt")
-    _maybe_load(obj=scaler, filename="scaler.pt")
+    for obj, filename in ((optimizer, "optimizer.pt"), (scheduler, "scheduler.pt"), (scaler, "scaler.pt")):
+        if obj is not None:
+            state = torch_load_full(os.path.join(lat, filename), map_location=map_location)
+            obj.load_state_dict(state_dict=state)
 
     rng_file = os.path.join(lat, "rng.pt")
-    if os.path.exists(rng_file):
-        restore_rng_state(state=torch_load_full(path=rng_file, map_location=map_location))
+    restore_rng_state(torch_load_full(path=rng_file, map_location="cpu"))
 
     start_epoch = int(meta.get("epoch", 0)) + 1
     best_val = float(meta.get("best_val_so_far", float("inf")))
 
-    return start_epoch, best_val, meta
+    return start_epoch, best_val, {**meta, "_training_state": _state}
 
 
 # ----------------------------------------------------------------------------------------------------------------------

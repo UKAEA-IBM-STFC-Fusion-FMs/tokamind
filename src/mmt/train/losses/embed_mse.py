@@ -126,6 +126,8 @@ class EmbedMSELoss(BaseLoss):
             per_out_losses.append(L_o)
             per_out_weights.append(w_o)
             logs[out_key] = float(L_o.detach().cpu())
+            logs[f"loss/{out_key}"] = logs[out_key]
+            logs[f"count/{out_key}"] = int(mask.sum())
 
         if not per_out_losses:
             # ref.sum() * 0.0 is zero but stays in the computation graph, so backward() does not crash when

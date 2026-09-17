@@ -828,6 +828,10 @@ def validate_train_config(  # NOSONAR - Ignore cognitive complexity
     for path, _t in REQUIRED_TRAIN_FIELDS:
         _get_nested(cfg=cfg, path=path)
 
+    metric = cfg["train"].setdefault("checkpoint_metric", "objective")
+    if metric not in {"mse", "objective"}:
+        raise ValueError("train.checkpoint_metric must be 'mse' or 'objective'.")
+
     # Mutual exclusion: resume vs warm-start from other run
     ms = cfg.get("model_source")
     has_warmstart = isinstance(ms, dict) and bool(ms.get("run_dir"))

@@ -36,6 +36,7 @@ from torch.amp.grad_scaler import GradScaler
 from mmt.utils.amp_utils import amp_ctx_for_model
 from mmt.train.losses.base import LossComputeContext
 from .losses import LossAggregator, build_loss_aggregator, resolve_loss_output_filters
+from .metrics import EpochMetrics
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -495,32 +496,16 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     • In streaming mode, pass `max_batches` to define the epoch length.
     • We do **not** do per-batch LR toggling. Missing outputs are already masked inside the loss via `output_mask`.
 
-    GPO-pair-aware averaging
-    ~~~~~~~~~~~~~~~~~~~~~~~~
-    When the loss aggregator contains a ``ContinuousGPOLoss`` term, batches that
-    carry no preference pairs return an exact ``0.0`` from that term.  Averaging
-    those zero-loss batches into the epoch total dilutes the reported validation
-    loss by the fraction of empty batches (17–37% depending on task), causing
-    early stopping to fire on an artificially low number.
-
-    To fix this, ``run_one_epoch`` tracks a parallel accumulator
-    ``(running_gpo_loss, n_gpo_batches)`` that increments **only** for batches
-    where ``batch["y_l_emb"]`` is non-empty (i.e. the batch contains at least one
-    GPO pair).  When at least one such batch was seen in the epoch, the returned
-    ``avg_loss`` — and therefore the value used for early stopping and checkpoint
-    selection — is ``running_gpo_loss / n_gpo_batches`` instead of
-    ``running_loss / n_batches``.  The plain ``n_batches`` average is still logged
-    as ``gpo_diluted_avg`` for reference.
-
-    For non-GPO stages (no ``y_l_emb`` in any batch) ``n_gpo_batches`` stays 0
-    and the behaviour is identical to before: ``running_loss / n_batches``.
+    Epoch reductions accumulate per-signal sums and counts. MSE observes every
+    valid target; preference diagnostics observe valid pairs only. The returned
+    objective reduces each term over the full epoch, then applies term weights.
 
     Returns
     -------
     tuple[float, dict[str, float], int]
         Tuple (avg_loss, avg_term_logs, global_step).
-        ``avg_term_logs`` contains epoch-averaged values for each ``<term>/total`` key produced by ``LossAggregator``.
-        Useful for per-term breakdown when multiple loss terms are active.
+        ``avg_term_logs`` contains per-signal sums, counts and means for MSE and loss terms,
+        plus separate batch/window pair coverage. Terms are reduced before applying weights.
 
     Raises
     ------
@@ -540,18 +525,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
 
     model.train(train)
 
-    running_loss = 0.0
-    running_term_logs: dict[str, float] = {}
-    n_batches = 0
-    # GPO-pair-aware accumulators: only count batches that carry ≥1 preference pair.
-    running_gpo_loss = 0.0
-    n_gpo_batches = 0
-    # Per-pair diagnostic accumulators (pref_acc, margin, d_w) — only over pair batches.
-    running_pair_logs: dict[str, float] = {}
-    # Non-pair embed_mse accumulator — only over batches WITHOUT pairs.
-    # Tracks anchor quality: d(ŷ, y_w) on the unpaired majority.
-    running_nonpair_dw: dict[str, float] = {}
-    n_nonpair_batches = 0
+    metrics = EpochMetrics(loss_aggregator.epoch_terms)
 
     t_before_next = time.perf_counter()
 
@@ -666,40 +640,7 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
 
                 t4 = time.perf_counter()
 
-            loss_val = float(loss_t.detach().cpu())
-            running_loss += loss_val
-            for k, v in loss_logs.items():
-                if k.endswith("/weighted") and math.isfinite(v):
-                    running_term_logs[k] = running_term_logs.get(k, 0.0) + v
-            n_batches += 1
-
-            # GPO-pair-aware accumulation: only count batches with ≥1 pair.
-            # batch["y_l_emb"] is populated by _GpoBatchInjector; it is absent
-            # or empty for MAST windows that had no matching GPO shard row.
-            _y_l_batch = batch.get("y_l_emb")
-            _has_pairs = (
-                bool(_y_l_batch) and any((t.numel() > 0) for t in _y_l_batch.values())
-                if isinstance(_y_l_batch, dict)
-                else False
-            )
-            if _has_pairs:
-                running_gpo_loss += loss_val
-                n_gpo_batches += 1
-                # Accumulate per-pair diagnostics (pref_acc, margin, ref_margin, d_w)
-                # only over batches that actually had pairs — averaging over empty
-                # batches would dilute these metrics to near-zero meaninglessly.
-                for k, v in loss_logs.items():
-                    if math.isfinite(v) and any(
-                        k.find(pat) >= 0 for pat in ("/pref_acc/", "/margin/", "/ref_margin/", "/d_w/")
-                    ):
-                        running_pair_logs[k] = running_pair_logs.get(k, 0.0) + v
-            else:
-                # Non-pair batch: accumulate embed_mse reconstruction distance
-                # to monitor whether the anchor is holding on unpaired windows.
-                n_nonpair_batches += 1
-                for k, v in loss_logs.items():
-                    if math.isfinite(v) and k.find("EmbedMSELoss") >= 0 and k.endswith("/weighted"):
-                        running_nonpair_dw[k] = running_nonpair_dw.get(k, 0.0) + v
+            metrics.update(preds, batch, loss_logs)
 
             _maybe_log_batch_timing(
                 batch_idx=batch_idx,
@@ -715,34 +656,5 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
             # Update t before next loading
             t_before_next = time.perf_counter()
 
-    avg_term_logs = {k: v / max(1, n_batches) for k, v in running_term_logs.items()}
-
-    # Use the pair-only average for early stopping when GPO pairs were seen.
-    # Fall back to the plain average for non-GPO stages (n_gpo_batches == 0).
-    if n_gpo_batches > 0:
-        avg_loss = running_gpo_loss / n_gpo_batches
-        # Record the (already final) diluted average directly into avg_term_logs
-        # so it appears in the history/CSV without an additional division.
-        diluted_avg = running_loss / max(1, n_batches)
-        avg_term_logs["gpo_diluted_avg"] = diluted_avg
-        # Per-pair diagnostic averages (pref_acc, margin, ref_margin, d_w).
-        for k, v in running_pair_logs.items():
-            avg_term_logs[k] = v / n_gpo_batches
-        # Non-pair anchor quality: embed_mse on unpaired batches.
-        if n_nonpair_batches > 0:
-            for k, v in running_nonpair_dw.items():
-                avg_term_logs[k.replace("/weighted", "_nonpair")] = v / n_nonpair_batches
-        # Pair hit rate: fraction of batches that carried ≥1 GPO pair.
-        avg_term_logs["pair_hit_rate"] = n_gpo_batches / max(1, n_batches)
-        if not train:
-            logger.debug(
-                "GPO val loss: pair-only avg=%.6f (%d/%d batches had pairs); diluted avg=%.6f",
-                avg_loss,
-                n_gpo_batches,
-                n_batches,
-                diluted_avg,
-            )
-    else:
-        avg_loss = running_loss / max(1, n_batches)
-
+    avg_loss, avg_term_logs = metrics.finish()
     return avg_loss, avg_term_logs, global_step
