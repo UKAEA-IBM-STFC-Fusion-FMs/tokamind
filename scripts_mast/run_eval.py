@@ -1,5 +1,5 @@
 """
-Evaluation entrypoint for MMT using the convention-based config system.
+Evaluation entrypoint for MMT, with optional verified CGPO test-set provenance.
 
 This script is intentionally thin:
 - parses `--task`,
@@ -22,6 +22,9 @@ from __future__ import annotations
 
 import argparse
 import logging
+import json
+
+import yaml
 from pathlib import Path
 
 from mmt.utils import validate_config, sdpa_math_only_ctx
@@ -79,6 +82,9 @@ def parse_args_eval() -> argparse.Namespace:
         default=None,
         help="Optional eval tag. If provided, outputs are saved under eval_<tag>/ instead of eval/.",
     )
+    parser.add_argument(
+        "--cgpo_protocol", type=Path, help="Pair collection whose official test protocol must be verified."
+    )
     args = parser.parse_args()
 
     return args
@@ -100,14 +106,38 @@ def main() -> None:
     # ..................................................................................................................
 
     args = parse_args_eval()
+    from mast_utils.gpo.protocol import (
+        apply_source_contract,
+        benchmark_manifest,
+        digest,
+        file_digest,
+        source_fingerprint,
+        validate_collection,
+        verified_test_batches,
+    )
+    from mmt.utils.config.experiment.inheritance import load_source_run_config_yaml
+
+    protocol_dir = args.cgpo_protocol
     cfg_mmt = load_experiment_config(
         task=args.task,
         phase="eval",
         model_source=args.model_source,
         tag=args.tag,
+        integration_hook=(
+            lambda merged, phase: apply_source_contract(merged, Path(__file__).parent / "configs", collection=True)
+        )
+        if protocol_dir
+        else None,
+        save_config=not bool(protocol_dir),
     )
     validate_config(cfg=cfg_mmt)
+    source_split = cfg_mmt.data.pop("split", None) if protocol_dir else None
     validate_mast_config(cfg=cfg_mmt)
+    if protocol_dir:
+        cfg_mmt.data["split"] = source_split
+        eval_dir = Path(cfg_mmt.paths["run_dir"])
+        if eval_dir.exists() and any(eval_dir.iterdir()):
+            raise FileExistsError(f"Verified evaluation requires a fresh tag: {eval_dir}")
 
     # ..................................................................................................................
     # Runtime context (device, seed, logging)
@@ -122,6 +152,48 @@ def main() -> None:
 
     # Benchmark task config (with overrides such as subset_size/local)
     cfg_task = load_task_definition(task_key=args.task)
+    evaluation_manifest = None
+    test_counts = {}
+    if protocol_dir:
+        cc = json.loads((protocol_dir / "collection_config.json").read_text())
+        validate_collection(cc, cc["contract"], protocol_dir)
+        contract = cc["contract"]
+        model_dir = Path(cfg_mmt.model_source["run_dir"])
+        source_cfg = load_source_run_config_yaml(model_run_dir=model_dir)
+        checkpoint = source_fingerprint(model_dir)
+        provenance = source_cfg.get("gpo_provenance")
+        if provenance:
+            if provenance.get("collection_digest") != digest(cc):
+                raise ValueError("CGPO model was trained against a different collection.")
+        elif checkpoint != contract["source"]:
+            raise ValueError("Base checkpoint differs from the collected reference.")
+        if (
+            contract["task"] != args.task
+            or contract["task_definition"] != digest(cfg_task)
+            or benchmark_manifest(cfg_data) != contract["split_manifest"]
+        ):
+            raise ValueError("Evaluation task or official test split differs from collection.")
+        if not cfg_eval.get("compute_metrics", {}).get("per_task"):
+            raise ValueError("Verified CGPO evaluation requires per_task metrics.")
+        evaluation_manifest = {
+            "format": "cgpo-evaluation-v1",
+            "task": args.task,
+            "collection_digest": digest(cc),
+            "split_manifest": contract["split_manifest"],
+            "checkpoint": checkpoint,
+            "source_config_digest": file_digest(model_dir / f"{model_dir.name}.yaml"),
+            "test_window_counts": test_counts,
+            "complete": False,
+            "evaluation_contract": digest(
+                {
+                    "model": cfg_mmt.raw["model"],
+                    "preprocess": cfg_mmt.raw["preprocess"],
+                    "cache_dtype": cfg_data["cache"].get("dtype") if cfg_data["cache"]["enable"] else None,
+                    "eval": cfg_eval,
+                    "collate": cfg_mmt.raw.get("collate"),
+                }
+            ),
+        }
 
     # ..................................................................................................................
     # Task metadata + MAST test dataset
@@ -154,6 +226,9 @@ def main() -> None:
         train_run_dir=train_run_dir,
     )
 
+    if evaluation_manifest:
+        evaluation_manifest["embedding_config_digest"] = digest(cfg_mmt.embeddings)
+
     # ..................................................................................................................
     # Window data (test split only)
     # ..................................................................................................................
@@ -171,6 +246,8 @@ def main() -> None:
         phase="eval",
     )
     eval_loader = window_data["test"]["loader"]
+    if evaluation_manifest:
+        eval_loader = verified_test_batches(eval_loader, contract["split_manifest"]["shots"]["test"], test_counts)
 
     # ..................................................................................................................
     # Model
@@ -264,6 +341,20 @@ def main() -> None:
             "and traces are disabled; skipping evaluation."
         )
 
+    if evaluation_manifest:
+        expected = set(contract["split_manifest"]["shots"]["test"])
+        if set(map(int, test_counts)) != expected:
+            raise ValueError(
+                f"Incomplete test coverage; missing shots: {sorted(expected - set(map(int, test_counts)))}"
+            )
+        evaluation_manifest["metrics_digest"] = file_digest(run_dir / "metrics" / args.task / "task_metrics.csv")
+        snapshot = run_dir / "evaluation_config.yaml"
+        with snapshot.open("x") as stream:
+            yaml.safe_dump(cfg_mmt.raw, stream, sort_keys=False)
+        evaluation_manifest["config_digest"] = file_digest(snapshot)
+        evaluation_manifest["complete"] = True
+        with (run_dir / "cgpo_evaluation.json").open("x") as stream:
+            json.dump(evaluation_manifest, stream, indent=2)
     logger.info("Done.")
 
 

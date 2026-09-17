@@ -1,25 +1,10 @@
-# GPO task overrides for the embed_mse-only ablation (v6-embed_mse_only).
-#
-# Purpose: isolate whether the reconstruction anchor (embed_mse) alone is sufficient
-# to drive val loss down.  If val improves → embed_mse works as an anchor and the
-# problem is in the continuous_gpo loss.  If val is flat → the issue is in the
-# training loop itself (optimizer, LR, freezing, etc.).
-#
-# Differences from gpo_tasks.yaml (v6):
-#   • continuous_gpo term REMOVED — only embed_mse is active
-#   • embed_mse weight raised to 1.0 (was 0.1 — it was secondary; now it is the only term)
-#   • use_reference_model: false — no DPO reference model needed (no KL constraint without GPO)
-#   • All other knobs (batch_size, freeze, stages, gpo_dataset filters) kept identical to v6
-#     so that any difference in outcome is attributable to the loss term only.
-#
-# Usage (set GPO_TASKS_YAML before launching run_gpo_finetune.py):
-#   GPO_TASKS_YAML=scripts_mast/configs/mmt/tasks/gpo_tasks_embed_mse_only.yaml \
-#   python scripts_mast/run_gpo_finetune.py --task task_4-2 --tag v6-embed_mse_only ...
-#
-# Or via the cluster script:
-#   GPO_TASK=task_4-2 GPO_TAG=v6-embed_mse_only \
-#   GPO_TASKS_YAML=scripts_mast/configs/mmt/tasks/gpo_tasks_embed_mse_only.yaml \
-#   bash cluster/ccc_gpo_finetune.sh
+# MSE-only CGPO ablation recipes for task_4-1 through task_4-5.
+# Only embed_mse contributes to the training objective; no preference/reference term is used.
+# Select this READ-ONLY input via GPO_TASKS_YAML during calibration. The launcher passes
+# the generated per-run recipe to training; use matching settings/tags for comparison.
+# Source preprocessing/split still take precedence over the historical task entries below.
+# An MSE-only improvement alone does not identify the cause of a CGPO failure.
+# See docs/gpo_runbook.md for immutable calibration, verified evaluation and migration.
 
 tasks:
 
@@ -38,7 +23,7 @@ tasks:
     loader:
       batch_size: 64
     train:
-      use_reference_model: false   # no KL constraint needed without GPO term
+      use_reference_model: false   # no reference needed without GPO term
       gpo_dataset:
         shot_blacklist: [18675, 14013, 14342]
       loss:

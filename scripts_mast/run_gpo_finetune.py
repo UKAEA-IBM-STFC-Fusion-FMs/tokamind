@@ -54,6 +54,9 @@ from mast_utils.gpo import load_collection_config
 from mast_utils.gpo.dataset import GpoPairDataset
 from mast_utils.gpo.protocol import (
     apply_source_contract,
+    config_fingerprint,
+    file_digest,
+    require_config_subset,
     collection_contract,
     digest,
     save_run_snapshot,
@@ -317,6 +320,20 @@ def apply_gpo_config(
     merged.update(_preserve)
     apply_source_contract(merged, configs_root)
 
+    recipe_file = load_yaml(gpo_tasks_path)
+    calibration = recipe_file.get("calibration")
+    if calibration:
+        if calibration.get("format") != "cgpo-calibration-v1" or calibration.get("task") != task:
+            raise ValueError("Invalid calibration format/task; create a new run artifact.")
+        if calibration["inputs"] != config_fingerprint(configs_root):
+            raise ValueError("Configuration inputs changed since calibration; create a new artifact/run tag.")
+        if calibration["recipe_digest"] != digest(task_overrides):
+            raise ValueError("Calibration recipe was modified; create a new artifact/run tag.")
+        for key in ("train", "loader", "collate", "seed"):
+            if key in task_overrides:
+                require_config_subset(task_overrides[key], merged.get(key), key)
+        merged["gpo_calibration"] = {**calibration, "artifact_digest": file_digest(gpo_tasks_path)}
+
 
 def main() -> None:
     args = _parse_args()
@@ -374,6 +391,9 @@ def main() -> None:
     cc = load_collection_config(gpo_dir=gpo_dir)
     expected_contract = collection_contract(cfg_mmt.raw, cfg_task)
     validate_collection(cc, expected_contract, gpo_dir)
+    calibration = cfg_mmt.raw.get("gpo_calibration")
+    if calibration and (calibration["collection_digest"] != digest(cc) or calibration["run_tag"] != args.tag):
+        raise ValueError("Calibration collection/run tag differs from training; create a new artifact/run tag.")
     cfg_mmt.raw["gpo_provenance"] = {
         "protocol": cc["protocol"],
         "collection": cc,
@@ -536,7 +556,7 @@ def main() -> None:
     # Enabled by train.use_reference_model: true in gpo.yaml (default: false for
     # backwards compatibility).  The reference model shares the same architecture
     # and weights as the policy model at t=0; it is kept frozen throughout training
-    # to provide the DPO-style KL constraint:
+    # to provide the reference-relative distance margin:
     #   margin = [d(ŷ,y_l) − d(ŷ_ref,y_l)] − [d(ŷ,y_w) − d(ŷ_ref,y_w)]
     # ------------------------------------------------------------------------------------------------------------------
     use_ref_model: bool = bool(cfg_train.get("use_reference_model", False))

@@ -47,8 +47,9 @@ Thumbs.db
 logs/
 *.log
 
-# Per-user cluster launch scripts (each collaborator runs jobs their own way)
+# Per-user cluster launch scripts (kept outside version control).
 cluster/
+cgpo_artifacts/
 
 # history folders with legacy results
 history/

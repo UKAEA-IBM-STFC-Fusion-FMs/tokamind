@@ -428,6 +428,25 @@ def _validate_loss_terms(cfg: Mapping[str, Any]) -> None:
 
     _validate_loss_terms_block(loss_cfg=global_loss, path="train.loss")
 
+    if train_cfg.get("use_reference_model", False):
+        blocks = [("train.loss", global_loss)] + [
+            (f"train.stages[{i}].loss", stage.get("loss", {}))
+            for i, stage in enumerate(train_cfg.get("stages") or [])
+            if isinstance(stage, Mapping)
+        ]
+        for path, block in blocks:
+            if not isinstance(block, Mapping):
+                continue
+            for term in block.get("terms") or []:
+                if (
+                    isinstance(term, Mapping)
+                    and term.get("type") == "continuous_gpo"
+                    and (term.get("mse_gap_clip") is not None or term.get("log_mse_gap", False))
+                ):
+                    raise ValueError(
+                        f"{path}: mse_gap_clip/log_mse_gap are incompatible with use_reference_model=true."
+                    )
+
     stages = train_cfg.get("stages") or []
     if not isinstance(stages, list):
         return

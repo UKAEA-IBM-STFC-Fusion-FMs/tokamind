@@ -7,7 +7,7 @@ Validate a GPO preference-pair directory before launching training.
 Checks (in order):
   1. metadata.json and collection_config.json are present and consistent.
   2. schema_version == 3 in both files (embedding-space pairs with native diagnostics).
-  3. split == "train" (test split is reserved for evaluation).
+  3. Verified official train/validation shot protocol and shard hashes (test excluded).
   4. At least one .npz shard is present.
   5. Every shard has keys: shot_id, window_index, y_w_emb, y_l_emb, native_nrmse,
      native_nmae, native_mse, embedding_gap, emb_dim. Keys y_w / y_l (schema v1
@@ -65,7 +65,7 @@ def validate_gpo_dir(gpo_dir: Path) -> tuple[list[str], list[str]]:
     if not cc_path.is_file():
         errors.append("MISSING  collection_config.json")
     if errors:
-        return errors  # nothing more to check without these files
+        return errors, warnings  # nothing more to check without these files
 
     meta = _load_json(meta_path)
     cc = _load_json(cc_path)
@@ -86,9 +86,8 @@ def validate_gpo_dir(gpo_dir: Path) -> tuple[list[str], list[str]]:
         errors.append(f"MISMATCH metadata schema_version={meta_sv} != collection_config schema_version={cc_sv}")
 
     # ------------------------------------------------------------------
-    # 3. Split must be "train"
+    # 3. Verify the official shot protocol; legacy row-split collections are rejected.
     # ------------------------------------------------------------------
-    split = cc.get("split") or meta.get("split")
     if cc.get("protocol") == "mast-shot-split-v1":
         from mast_utils.gpo.protocol import validate_collection
 
@@ -96,11 +95,8 @@ def validate_gpo_dir(gpo_dir: Path) -> tuple[list[str], list[str]]:
             validate_collection(cc, cc["contract"], gpo_dir)
         except (KeyError, ValueError) as exc:
             errors.append(f"PROTOCOL {exc}")
-    elif split != "train":
-        errors.append(
-            f"SPLIT    split={split!r} — GPO training requires pairs collected from "
-            "the train split. Re-collect with --split train."
-        )
+    else:
+        errors.append("PROTOCOL Legacy collection: recollect with --split both --val_fraction 0 and a new tag.")
 
     # ------------------------------------------------------------------
     # 4. At least one shard
@@ -108,7 +104,7 @@ def validate_gpo_dir(gpo_dir: Path) -> tuple[list[str], list[str]]:
     shards = sorted(gpo_dir.glob("*.npz"))
     if not shards:
         errors.append("EMPTY    No .npz shard files found in directory.")
-        return errors
+        return errors, warnings
 
     # ------------------------------------------------------------------
     # 5–9. Per-shard checks

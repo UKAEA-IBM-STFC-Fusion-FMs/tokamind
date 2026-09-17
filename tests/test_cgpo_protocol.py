@@ -241,6 +241,8 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
 
     import run_collect_gpo_pairs as collector
     import run_gpo_finetune as trainer
+    import run_eval as evaluator
+    import calibrate_gpo_task as calibrator
     from mast_utils import load_experiment_config
     from mast_utils.gpo import protocol
 
@@ -289,7 +291,7 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
         def forward(self, b):
             return {"pred": {1: torch.ones(1, 2) * self.weight}}
 
-    for module in (collector, trainer):
+    for module in (collector, trainer, evaluator):
         monkeypatch.setattr(module, "init_run_context", lambda **kw: (torch.device("cpu"), logging.getLogger("test")))
         monkeypatch.setattr(module, "build_mast_datasets", lambda **kw: ({}, "train_shots", "val_shots", None))
         monkeypatch.setattr(module, "load_task_definition", lambda **kw: {"name": "task_1-1"})
@@ -300,7 +302,14 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
         monkeypatch.setattr(module, "build_decoders", lambda **kw: {1: torch.nn.Identity()})
         monkeypatch.setattr(module, "extract_signal_stats", lambda **kw: {"a": {"mean": 0.0, "std": 1.0}})
     monkeypatch.setattr(collector, "resolve_eval_embeddings", lambda **kw: (registry, {}))
-    monkeypatch.setattr(trainer, "resolve_finetune_embeddings", lambda **kw: (registry, {}))
+
+    def resolve_training_embeddings(**kw):
+        cfg = kw["cfg_mmt"]
+        Path(cfg.paths["run_dir"], f"{cfg.run_id}.yaml").write_text(yaml.safe_dump(cfg.raw))
+        return registry, {}
+
+    monkeypatch.setattr(trainer, "resolve_finetune_embeddings", resolve_training_embeddings)
+    monkeypatch.setattr(evaluator, "resolve_eval_embeddings", lambda **kw: (registry, {}))
     monkeypatch.setattr(
         collector,
         "_parse_args",
@@ -328,7 +337,42 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
     alternate.write_text(
         "tasks:\n  task_1-1:\n    train:\n      gpo_dataset:\n        native_nrmse_percentiles: null\n        max_pairs_per_shot_percentile: null\n"
     )
-    monkeypatch.setenv("GPO_TASKS_YAML", str(alternate))
+    original_recipe = alternate.read_bytes()
+    import sys
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "calibrate_gpo_task.py",
+            str(pair_path),
+            "--gpo_tasks_yaml",
+            str(alternate),
+            "--output_dir",
+            str(tmp_path / "calibration"),
+            "--run_tag",
+            "corrected",
+            "--no_plots",
+            "--report",
+        ],
+    )
+    command = list(sys.argv)
+    monkeypatch.setattr(sys, "argv", [*command, "--dry_run"])
+    before_dry = set(tmp_path.rglob("*"))
+    with pytest.raises(SystemExit) as dry_status:
+        calibrator.main()
+    assert dry_status.value.code == 0
+    assert set(tmp_path.rglob("*")) == before_dry
+    monkeypatch.setattr(sys, "argv", command)
+    with pytest.raises(SystemExit) as status:
+        calibrator.main()
+    assert status.value.code == 0
+    assert alternate.read_bytes() == original_recipe
+    frozen = tmp_path / "calibration/task_1-1/gpo_tasks.yaml"
+    artifact = yaml.safe_load(frozen.read_text())
+    assert artifact["calibration"]["run_tag"] == "corrected"
+    assert artifact["tasks"]["task_1-1"]["train"]["loss"]["terms"][0]["beta"] == pytest.approx(1.0)
+    monkeypatch.setenv("GPO_TASKS_YAML", str(frozen))
     monkeypatch.delenv("GPO_RESUME", raising=False)
     monkeypatch.setattr(
         trainer,
@@ -349,12 +393,66 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
         assert train_shots == {1, 2}
         assert val_shots == {3}
         assert not train_shots & val_shots
+        best = Path(kw["run_dir"]) / "checkpoints/best"
+        best.mkdir(parents=True)
+        (best / "fake.pt").write_bytes(b"trained model")
         return {"ok": True}
 
     monkeypatch.setattr(trainer, "train_finetune", train)
     trainer.main()
     with pytest.raises(FileExistsError, match="already exists"):
         trainer.main()
+    # Execute both evaluation entrypoints and the strict comparison on a synthetic test shot.
+    from compare_gpo_eval import _compare_task
+
+    gpo_root = root.parent / f"ft-task_1-1-ws-{root.name}-mmt-corrected"
+    monkeypatch.setattr(evaluator, "build_window_data", lambda **kw: {"test": {"loader": [batch(4)]}})
+
+    def benchmark(**kw):
+        assert [s for b in kw["dataloader"] for s in b["shot_id"]] == [4]
+        path = Path(kw["run_dir"]) / "metrics/task_1-1/task_metrics.csv"
+        path.parent.mkdir(parents=True)
+        path.write_text(",NRMSE_mean,NMAE_mean,RMSE_mean,MAE_mean,n_shots\ntask_1-1,1,1,1,1,1\n")
+        return {"metrics_task_dir": str(path.parent)}
+
+    monkeypatch.setattr(evaluator, "evaluate_benchmark_and_diagnostics", benchmark)
+    for model_root in (root, gpo_root):
+        monkeypatch.setattr(
+            evaluator,
+            "parse_args_eval",
+            lambda model_root=model_root: SimpleNamespace(
+                task="task_1-1", model_source=str(model_root), tag="verified", cgpo_protocol=pair_path
+            ),
+        )
+        evaluator.main()
+    comparison = _compare_task(
+        "task_1-1",
+        str(root),
+        str(gpo_root),
+        root.parent,
+        "verified",
+        "verified",
+        ["NRMSE_mean"],
+        False,
+        require_verified_test=True,
+    )
+    assert comparison is not None
+    (gpo_root / "eval_verified/metrics/task_1-1/task_metrics.csv").write_text(",NRMSE_mean,n_shots\ntask_1-1,9,1\n")
+    assert (
+        _compare_task(
+            "task_1-1",
+            str(root),
+            str(gpo_root),
+            root.parent,
+            "verified",
+            "verified",
+            ["NRMSE_mean"],
+            False,
+            require_verified_test=True,
+        )
+        is None
+    )
+
     # Resume validation must precede even the construction of expensive MAST datasets.
     monkeypatch.setenv("GPO_RESUME", "1")
 

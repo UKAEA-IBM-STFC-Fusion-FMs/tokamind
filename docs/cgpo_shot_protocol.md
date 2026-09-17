@@ -2,8 +2,8 @@
 
 This protocol replaces the row-level holdout used by the historical CGPO runs.
 It implements configuration/provenance checks, disjoint supervision, sample-counted
-metrics and strict epoch-boundary resume. Cluster orchestration remains a separate
-follow-up change; this is not yet a declaration that the whole pipeline is validated.
+metrics and strict epoch-boundary resume. The [cluster runbook](gpo_runbook.md) describes
+the immutable calibration artifacts, verified evaluation and simulated LSF orchestration checks.
 
 ## Configuration precedence
 
@@ -103,36 +103,22 @@ nondeterministic GPU kernels is not claimed.
 
 ## Starting a corrected run
 
-Use a new collection tag and a new training tag. Old collections are preserved;
-there is no automatic migration because their provenance cannot be verified.
-From the repository root, with the project environment installed:
+Use new collection/training tags and the [current runbook](gpo_runbook.md). Collection uses
+`--split both --val_fraction 0`; calibration now requires `--output_dir` and `--run_tag` and
+writes `<output_dir>/<task>/gpo_tasks.yaml` plus its summary. Pass this frozen file as
+`GPO_TASKS_YAML` to training. Input recipes are read-only; calibration never patches them.
+Config, collection or objective changes require a new artifact and run tag. Legacy collections
+cannot be automatically migrated because their provenance cannot be verified.
 
-```bash
-BASE=ft-task_1-1-scratch-mmt-dct3d-embed-mse
-python scripts_mast/run_collect_gpo_pairs.py \
-  --task task_1-1 --model_source "$BASE" --split both --tag shots-v1
-python scripts_mast/validate_gpo_pairs.py "runs/$BASE/gpo_pairs_shots-v1"
-python scripts_mast/calibrate_gpo_task.py "runs/$BASE/gpo_pairs_shots-v1" \
-  --dry_run --no_plots
-python scripts_mast/run_gpo_finetune.py \
-  --task task_1-1 --model_source "$BASE" \
-  --gpo_dir "runs/$BASE/gpo_pairs_shots-v1" --tag cgpo-shots-v1
-```
-
-Calibration dry-run inspects training statistics without changing the shared
-recipe. Applying calibration still uses the existing `--gpo_tasks_yaml` option;
-the dedicated calibration-artifact workflow is a later change. Review the
-selected beta/blacklist before launching training.
-
-External cluster launchers that pass `--split train --val_fraction 0.1` are
-incompatible with this protocol. Use the direct commands above until those
-launchers are updated to `--split both --val_fraction 0` and their orchestration
-bugs are fixed. Historical commands in the older runbooks describe legacy runs.
+The external Bash launchers support the full path, including base evaluation and strict
+comparison. `--dry_run` never submits jobs or writes artifacts. `--compare_only` has no
+calibration side effects. Verified evaluation records actual test-shot window counts and
+checkpoint/metric hashes; comparison rejects missing, stale or mismatched proof.
 
 ## Verification
 
 ```bash
-PYTHONPATH=src:scripts_mast python -m pytest -q tests/test_cgpo_protocol.py tests/test_cgpo_metrics_resume.py
+PYTHONPATH=src:scripts_mast python -m pytest -q tests
 ```
 
 Tests cover real configuration resolution for all 14 benchmark tasks, local

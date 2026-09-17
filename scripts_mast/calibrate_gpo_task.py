@@ -1,43 +1,14 @@
 """
-calibrate_gpo_task.py
-=====================
+calibrate_gpo_task.py — Immutable, run-specific CGPO calibration from training shots only.
 
-CPU-only post-collection pipeline step.  For each supplied GPO pairs directory this script:
+Reads the same phase/task/local configuration stack as CGPO training and writes one dedicated task YAML plus
+calibration_summary.json under <output_dir>/<task>/. The shared input recipe is never edited. Existing output
+artifacts are refused. --dry_run computes and reports the plan without writing summaries, plots or reports.
 
-  1. Validates the schema-v3 pair dataset (equivalent to validate_gpo_pairs.py).
-  2. Computes β calibration from the p50 MSE gap per signal
-     (β_opt = 1/p50, IPO target 1/(2β) ≈ p50).
-  3. Determines the shot blacklist (top-N shots ranked by mean MSE gap that
-     exceed a multiple of the dataset mean).
-  4. Writes the calibrated β and shot_blacklist back into
-     ``scripts_mast/configs/mmt/tasks/gpo_tasks.yaml`` under the matching
-     task key, leaving all other task config intact.
-  5. Saves the 4-figure diagnostic PNG set (requires matplotlib) unless
-     ``--no_plots`` is given.
-  6. Writes a per-task calibration JSON summary (always).
-
-The script is safe to re-run: it only touches ``gpo_tasks.yaml`` fields it
-computed (beta, shot_blacklist) and leaves every other key untouched.
-
-Usage
------
-    # Single task (pair dir auto-discovered from run dir):
-    python scripts_mast/calibrate_gpo_task.py \\
-        runs/ft-task_4-2-scratch-mmt-embed_crps/gpo_pairs_v8
-
-    # Multiple tasks at once:
-    python scripts_mast/calibrate_gpo_task.py \\
-        runs/ft-task_4-*/gpo_pairs_v8
-
-    # Dry-run (compute + print, do NOT write gpo_tasks.yaml):
-    python scripts_mast/calibrate_gpo_task.py \\
-        runs/ft-task_4-2-scratch-mmt-embed_crps/gpo_pairs_v8 --dry_run
-
-    # Skip plot generation (headless CI):
-    python scripts_mast/calibrate_gpo_task.py \\
-        runs/ft-task_4-2-scratch-mmt-embed_crps/gpo_pairs_v8 --no_plots
-
-Exit code 0 = all tasks passed; 1 = one or more failures.
+Beta = 1 / median(collection gap), geometrically aggregated across signals, is a scale heuristic. It does not
+estimate reference-relative margins: policy and reference initially coincide, so those margins start at zero.
+For IPO the target is 1/(2 beta), i.e. half the representative gap under this heuristic. MSE-only recipes remain
+MSE-only. Source/pair hashes, recipe hashes, calibration settings and the target run tag are saved for verification.
 """
 
 from __future__ import annotations
@@ -47,6 +18,13 @@ import datetime
 import json
 import logging
 import shutil
+import os
+import re
+
+import yaml
+from mast_utils.gpo.protocol import config_fingerprint, digest, file_digest, source_fingerprint, validate_collection
+from mmt.utils.config.experiment.merge import deep_merge, load_yaml, _load_task_block
+from mmt.utils.config.validator import _validate_loss_terms
 import sys
 from pathlib import Path
 from typing import Any
@@ -65,10 +43,6 @@ log = logging.getLogger("gpo.calibrate")
 # we then take the top BLACKLIST_TOP_N by rank.
 _BLACKLIST_MULTIPLIER = 10.0
 _BLACKLIST_TOP_N = 5  # at most this many shots added (fewer if below threshold)
-
-# Minimum effective-N fraction (Fisher-weighted) below which the current β is
-# flagged as mis-calibrated (warning only).
-_EFF_N_WARN_THRESHOLD = 0.20
 
 # Path to gpo_tasks.yaml relative to the repo root (auto-resolved from this file).
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -177,9 +151,9 @@ def _load_signal(shards: list[Path], max_windows: int, train_shots: set[int] | N
             if max_windows > 0 and total >= max_windows:
                 break
     return {
-        "y_w": np.concatenate(yw_list, axis=0),
-        "y_l": np.concatenate(yl_list, axis=0),
-        "shot_id": np.concatenate(sid_list, axis=0),
+        "y_w": np.concatenate(yw_list, axis=0) if yw_list else np.empty((0, 0)),
+        "y_l": np.concatenate(yl_list, axis=0) if yl_list else np.empty((0, 0)),
+        "shot_id": np.concatenate(sid_list, axis=0) if sid_list else np.empty(0, dtype=np.int64),
     }
 
 
@@ -199,6 +173,8 @@ def _calibrate_signal(
     mse_gap = ((yw - yl) ** 2).mean(axis=1)  # (N,)
     n = len(mse_gap)
 
+    if n == 0 or not np.isfinite(mse_gap).all():
+        raise ValueError("Calibration requires finite, nonempty training-pair gaps for every signal.")
     p50_mse = float(np.percentile(mse_gap, 50))
     beta_opt = float(1.0 / (p50_mse + 1e-30))
 
@@ -257,103 +233,34 @@ def _determine_blacklist(
     return sorted(candidate_set)
 
 
-# ---------------------------------------------------------------------------
-# YAML patch helpers — pure text manipulation to preserve comments
-# ---------------------------------------------------------------------------
-
-
-def _read_yaml_text(path: Path) -> str:
-    return path.read_text(encoding="utf-8")
-
-
-def _patch_yaml_task(
-    yaml_text: str,
-    task_key: str,
-    beta: float,
-    shot_blacklist: list[int],
-) -> str:
+# ----------------------------------------------------------------------------------------------------------------------
+def _effective_recipe(task: str, input_path: Path, configs_root: Path) -> dict:
     """
-    Patch ``beta`` and ``shot_blacklist`` in the YAML text for ``task_key``.
+    Merge phase, selected task and local overrides without creating a run directory.
 
-    Strategy: locate the ``  task_X-Y:`` block, then find and replace
-    (or insert) the ``beta:`` and ``shot_blacklist:`` lines within it.
-    This approach avoids a full YAML round-trip that strips comments.
+    Parameters
+    ----------
+    task : str
+        Collection task identifier.
+    input_path, configs_root : pathlib.Path
+        Input task recipe and configuration root, also used by training.
+
+    Returns
+    -------
+    dict
+        Effective recipe to freeze and calibrate. Missing task entries inherit phase defaults explicitly.
     """
-    lines = yaml_text.splitlines(keepends=True)
-
-    # Find the line where the task block starts (indented by 2 spaces)
-    task_start = None
-    for i, line in enumerate(lines):
-        if line.rstrip() == f"  {task_key}:":
-            task_start = i
-            break
-
-    if task_start is None:
-        log.warning("Task key '%s' not found in gpo_tasks.yaml — skipping patch.", task_key)
-        return yaml_text
-
-    # Find the end of this task block: next line at indent <= 2 that isn't blank/comment
-    task_end = len(lines)
-    for i in range(task_start + 1, len(lines)):
-        stripped = lines[i].rstrip()
-        if stripped and not stripped.startswith("  #") and not stripped.startswith("    "):
-            task_end = i
-            break
-
-    block_lines = lines[task_start:task_end]
-
-    # Patch beta: replace existing `beta:` line inside the block
-    beta_str = f"{beta:.1f}" if beta == int(beta) else f"{beta}"
-    blacklist_str = "[" + ", ".join(str(s) for s in shot_blacklist) + "]"
-
-    block_patched = []
-    for line in block_lines:
-        stripped = line.lstrip()
-        if stripped.startswith("beta:") and "  # " in line:
-            # Preserve trailing comment
-            comment_start = line.index("  # ")
-            prefix = line[: line.index("beta:")]
-            comment = line[comment_start:]
-            block_patched.append(f"{prefix}beta: {beta_str}{comment}")
-        elif stripped.startswith("beta:"):
-            prefix = line[: line.index("beta:")]
-            block_patched.append(f"{prefix}beta: {beta_str}  # auto-calibrated: β_opt=1/p50\n")
-        elif stripped.startswith("shot_blacklist:"):
-            prefix = line[: line.index("shot_blacklist:")]
-            block_patched.append(f"{prefix}shot_blacklist: {blacklist_str}  # auto-calibrated\n")
-        else:
-            block_patched.append(line)
-
-    return "".join(lines[:task_start] + block_patched + lines[task_end:])
-
-
-def _extract_task_key(gpo_dir: Path) -> str | None:
-    """
-    Infer the task key (e.g. ``task_4-2``) from the run directory name above the
-    gpo_pairs* directory.
-
-    Expected layout:
-        runs/ft-<task>-scratch-mmt-<tag>/gpo_pairs_<version>/
-    """
-    run_dir_name = gpo_dir.parent.name  # e.g. ft-task_4-2-scratch-mmt-embed_crps
-    # Strip the "ft-" prefix and find the task token
-    if run_dir_name.startswith("ft-"):
-        rest = run_dir_name[3:]  # task_4-2-scratch-mmt-embed_crps
-        parts = rest.split("-")
-        # task key is "task_X-Y" — find the first occurrence of "task"
-        for i, p in enumerate(parts):
-            if p == "task" and i + 1 < len(parts):
-                # could be task_4-2 (underscore already) or task + 4 + 2
-                next_p = parts[i + 1]
-                if "-" in next_p or next_p.replace("-", "").isdigit():
-                    return f"task_{next_p}"
-    # Fallback: look for task_X-Y anywhere in the name
-    import re
-
-    m = re.search(r"(task_\d+-\d+)", run_dir_name)
-    if m:
-        return m.group(1)
-    return None
+    phase = load_yaml(configs_root / "mmt/phases/gpo.yaml")
+    overrides = _load_task_block(path=input_path, task=task, phase="gpo")
+    if not overrides:
+        log.info("Task %s has no input overrides; freezing the GPO phase defaults explicitly.", task)
+    recipe = deep_merge(base=phase, override=overrides or {})
+    local = configs_root / "local_overrides.yaml"
+    if local.is_file():
+        recipe = deep_merge(base=recipe, override=load_yaml(local))
+    recipe.pop("run_id", None)
+    _validate_loss_terms({"train": recipe["train"]})
+    return recipe
 
 
 # ---------------------------------------------------------------------------
@@ -413,7 +320,7 @@ def _save_plots(gpo_dir: Path, save_dir: Path) -> None:
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
         description=(
-            "Validate GPO pairs, calibrate β and shot_blacklist, patch gpo_tasks.yaml, "
+            "Validate GPO pairs, calibrate β and shot_blacklist into a dedicated run artifact, "
             "and optionally save diagnostic plots."
         ),
         allow_abbrev=False,
@@ -427,19 +334,14 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--dry_run",
         action="store_true",
-        help="Print calibration results but do NOT write gpo_tasks.yaml.",
+        help="Compute calibration without any file or directory writes.",
     )
     p.add_argument(
         "--no_plots",
         action="store_true",
         help="Skip saving the 4-figure diagnostic PNGs.",
     )
-    p.add_argument(
-        "--plots_dir",
-        type=str,
-        default=None,
-        help="Directory to save diagnostic PNGs (default: <gpo_dir>/../gpo_plots/).",
-    )
+
     p.add_argument(
         "--max_windows",
         type=int,
@@ -461,24 +363,14 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--gpo_tasks_yaml",
         type=str,
-        default=str(_GPO_TASKS_YAML),
-        help=f"Path to gpo_tasks.yaml to patch (default: {_GPO_TASKS_YAML}).",
+        default=os.environ.get("GPO_TASKS_YAML", str(_GPO_TASKS_YAML)),
+        help="Read-only task recipe; shared with training via the generated artifact.",
     )
-    p.add_argument(
-        "--summary_json",
-        type=str,
-        default=None,
-        help="Write calibration summary to this JSON file (default: <gpo_dir>/calibration_summary.json).",
-    )
-    p.add_argument(
-        "--report_dir",
-        type=str,
-        default=None,
-        help=(
-            "If given, writes a Markdown calibration report and copies the diagnostic PNGs "
-            "into <report_dir>/gpo_stats/<task>/.  Intended for the reports/ folder."
-        ),
-    )
+
+    p.add_argument("--report", action="store_true", help="Write a Markdown report inside the run artifact.")
+    p.add_argument("--output_dir", required=True, help="New run-specific artifact root, outside configs/.")
+    p.add_argument("--run_tag", required=True, help="Target GPO training tag; must match training --tag.")
+    p.add_argument("--configs_root", default=str(_REPO_ROOT / "scripts_mast/configs"))
     return p.parse_args()
 
 
@@ -521,7 +413,7 @@ def _write_calibration_report(
         f"## gpo_tag=`{gpo_tag}`",
         "",
         f"> **Generated:** {datetime.datetime.now().isoformat(timespec='seconds')}  ",
-        "> **Source:** `scripts_mast/calibrate_gpo_task.py --report_dir`  ",
+        "> **Source:** `scripts_mast/calibrate_gpo_task.py --report`  ",
         f"> **Pair directory:** `{summary['gpo_dir']}`  ",
         "",
         "---",
@@ -569,9 +461,9 @@ def _write_calibration_report(
             "|------|---------|----------|----------------|",
         ]
         for rank, row in enumerate(top_shots[:10], 1):
-            # row is [shot_id, n_windows, mean_mse, p50_mse, p95_mse]
+            # Shot statistics are keyed mappings in the immutable summary.
             if len(row) >= 3:
-                sid, mean_mse = int(row[0]), float(row[2])
+                sid, mean_mse = int(row["shot_id"]), float(row["mean_mse"])
                 dset_mean = s["dataset_mean_mse"]
                 ratio = mean_mse / dset_mean if dset_mean > 0 else float("nan")
                 bl_marker = " ← blacklisted" if sid in summary["shot_blacklist"] else ""
@@ -604,146 +496,139 @@ def _write_calibration_report(
 
 
 def main() -> None:
+    """
+    Validate and calibrate all requested collections, publishing only immutable run artifacts.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    SystemExit
+        Nonzero if any requested task fails; dry-run performs the same validation without writes.
+    """
     args = _parse_args()
-    gpo_tasks_path = Path(args.gpo_tasks_yaml)
+    configs_root = Path(args.configs_root).resolve()
+    output_root = Path(args.output_dir).resolve()
+    input_path = Path(args.gpo_tasks_yaml).resolve()
+    if output_root.is_relative_to(configs_root):
+        raise SystemExit("Calibration output must be outside the shared configuration tree.")
+    if (
+        args.max_windows < 0
+        or args.blacklist_top_n < 0
+        or not np.isfinite(args.blacklist_multiplier)
+        or args.blacklist_multiplier <= 0
+    ):
+        raise SystemExit("Invalid calibration sampling/blacklist settings.")
     all_ok = True
-    yaml_text = _read_yaml_text(gpo_tasks_path) if not args.dry_run else ""
-
+    seen = set()
     for raw_dir in args.gpo_dirs:
-        gpo_dir = Path(raw_dir)
-        log.info("=" * 64)
-        log.info("Processing: %s", gpo_dir)
+        try:
+            gpo_dir = Path(raw_dir).resolve()
+            ok, errors = _validate_dir(gpo_dir)
+            if not ok:
+                raise ValueError("; ".join(errors))
+            cc = json.loads((gpo_dir / "collection_config.json").read_text())
+            validate_collection(cc, cc["contract"], gpo_dir)
+            if source_fingerprint(cc["run_dir"]) != cc["contract"]["source"]:
+                raise ValueError("Source checkpoint/embeddings changed after collection; recollect with a new tag.")
+            task = cc["contract"]["task"]
+            if not re.fullmatch(r"[A-Za-z0-9_.-]+", task) or task in {".", ".."}:
+                raise ValueError(f"Invalid collection task identifier: {task!r}")
+            if task in seen:
+                raise ValueError(f"Duplicate task {task}; provide one collection per task.")
+            seen.add(task)
+            recipe = _effective_recipe(task, input_path, configs_root)
+            train = recipe["train"]
+            term_blocks = [train["loss"]] + [stage["loss"] for stage in train["stages"] if "loss" in stage]
+            preference_terms = [
+                term for block in term_blocks for term in block["terms"] if term["type"] == "continuous_gpo"
+            ]
+            if any(t.get("log_mse_gap") or t.get("mse_gap_clip") is not None for t in preference_terms):
+                raise ValueError(
+                    "Automatic beta calibration requires raw gaps; disable clip/log or use a reviewed recipe."
+                )
+            shots = cc["contract"]["split_manifest"]["shots"]
+            stats = {
+                sig: _calibrate_signal(_load_signal(shards, args.max_windows, set(shots["train"])))
+                for sig, shards in _discover_signals(gpo_dir).items()
+            }
+            beta_opts = [value["beta_opt"] for value in stats.values() if value["p50_mse"] > 1e-8]
+            if not beta_opts:
+                raise ValueError("No positive training-pair gap: calibration is incomplete.")
+            beta = float(np.exp(np.mean(np.log(beta_opts))))
+            if not np.isfinite(beta) or beta <= 0:
+                raise ValueError("Non-finite calibration beta.")
+            for term in preference_terms:
+                term["beta"] = beta
+            dataset = train.setdefault("gpo_dataset", {})
+            blacklist = sorted(
+                set(dataset.get("shot_blacklist") or [])
+                | set(_determine_blacklist(stats, args.blacklist_multiplier, args.blacklist_top_n))
+            )
+            dataset["shot_blacklist"] = blacklist
+            # Local loss overrides must not undo calibrated beta or blacklist during training.
+            from mast_utils.gpo.protocol import require_config_subset
 
-        if not gpo_dir.is_dir():
-            log.error("Directory not found: %s", gpo_dir)
-            all_ok = False
-            continue
-
-        # ---- 1. Validate ----
-        ok, errors = _validate_dir(gpo_dir)
-        if not ok:
-            for e in errors:
-                log.error("  VALIDATION: %s", e)
-            all_ok = False
-            continue
-        log.info("  Validation passed.")
-
-        # ---- 2. Extract task key ----
-        task_key = _extract_task_key(gpo_dir)
-        if task_key is None:
-            log.error("  Cannot infer task key from path '%s'. Expected layout: runs/ft-<task>-*/gpo_pairs*/", gpo_dir)
-            all_ok = False
-            continue
-        log.info("  Task key: %s", task_key)
-
-        # Fit beta and blacklist only on the persisted training shots.
-        cc = json.loads((gpo_dir / "collection_config.json").read_text())
-        if cc.get("protocol") != "mast-shot-split-v1":
-            log.error("Legacy calibration is unsupported for new runs; recollect with --split both.")
-            all_ok = False
-            continue
-        from mast_utils.gpo.protocol import validate_shots
-
-        shots = cc["contract"]["split_manifest"]["shots"]
-        validate_shots(shots)
-
-        # ---- 3. Load data and calibrate ----
-        sig_map = _discover_signals(gpo_dir)
-        signal_stats: dict[str, dict[str, Any]] = {}
-        for sig, shards in sorted(sig_map.items()):
-            arrays = _load_signal(shards, max_windows=args.max_windows, train_shots=set(shots["train"]))
-            stats = _calibrate_signal(arrays)
-            signal_stats[sig] = stats
+            local = configs_root / "local_overrides.yaml"
+            if local.is_file():
+                effective = deep_merge(base=recipe, override=load_yaml(local))
+                require_config_subset(recipe["train"], effective["train"], "train")
+            artifact = {
+                "calibration": {
+                    "format": "cgpo-calibration-v1",
+                    "run_tag": args.run_tag,
+                    "collection_digest": digest(cc),
+                    "inputs": config_fingerprint(configs_root),
+                    "input_recipe": str(input_path),
+                    "input_recipe_digest": file_digest(input_path),
+                    "recipe_digest": digest(recipe),
+                    "task": task,
+                    "max_windows": args.max_windows,
+                    "blacklist_multiplier": args.blacklist_multiplier,
+                    "blacklist_top_n": args.blacklist_top_n,
+                },
+                "tasks": {task: recipe},
+            }
+            summary = {
+                "task": task,
+                "gpo_dir": str(gpo_dir),
+                "beta_calibrated": beta,
+                "beta_geomean_raw": beta,
+                "shot_blacklist": blacklist,
+                "preference_terms": len(preference_terms),
+                "calibration": artifact["calibration"],
+                "signals": {
+                    sig: {**{k: v for k, v in value.items() if k != "shot_rows"}, "top_shots": value["shot_rows"][:10]}
+                    for sig, value in stats.items()
+                },
+            }
+            out = output_root / task
+            if out.exists():
+                raise FileExistsError(f"Calibration artifact already exists: {out}; use a new run tag.")
             log.info(
-                "  Signal %-40s  n=%6d  p50_mse=%.5f  β_opt=%.1f",
-                sig,
-                stats["n_windows"],
-                stats["p50_mse"],
-                stats["beta_opt"],
+                "%s: beta=%g, preference_terms=%d, blacklist=%s; artifact=%s",
+                task,
+                beta,
+                len(preference_terms),
+                blacklist,
+                out / "gpo_tasks.yaml",
             )
-
-        # Geometric mean β across signals (balanced multi-signal tasks)
-        beta_opts = [s["beta_opt"] for s in signal_stats.values() if s["p50_mse"] > 1e-8]
-        if not beta_opts:
-            log.warning("  No valid p50 values — skipping β calibration.")
-            continue
-        beta_geomean = float(np.exp(np.mean(np.log(np.maximum(beta_opts, 1e-6)))))
-        # Round to a clean value: 1, 2, 5, 8, 10, 25, 50, 100, ...
-        _scale = 10 ** int(np.floor(np.log10(max(beta_geomean, 1))))
-        beta_rounded = float(round(beta_geomean / _scale) * _scale)
-        if beta_rounded < 1.0:
-            beta_rounded = 1.0
-
-        # ---- 4. Shot blacklist ----
-        blacklist = _determine_blacklist(
-            signal_stats,
-            multiplier=args.blacklist_multiplier,
-            top_n=args.blacklist_top_n,
-        )
-
-        log.info("  Calibrated β = %.1f  (geomean of β_opt across signals)", beta_rounded)
-        if blacklist:
-            log.info("  Shot blacklist (%d shots): %s", len(blacklist), blacklist)
-        else:
-            log.info("  Shot blacklist: none (no shots exceeded %.0f× dataset mean)", args.blacklist_multiplier)
-
-        # ---- 5. Write calibration summary JSON ----
-        summary = {
-            "task": task_key,
-            "gpo_dir": str(gpo_dir),
-            "beta_calibrated": beta_rounded,
-            "beta_geomean_raw": beta_geomean,
-            "shot_blacklist": blacklist,
-            "signals": {
-                sig: {
-                    "n_windows": s["n_windows"],
-                    "p50_mse": s["p50_mse"],
-                    "beta_opt": s["beta_opt"],
-                    "dataset_mean_mse": s["dataset_mean_mse"],
-                    "top_shots": s["shot_rows"][:10],
-                }
-                for sig, s in signal_stats.items()
-            },
-        }
-        summary_path = Path(args.summary_json) if args.summary_json else gpo_dir / "calibration_summary.json"
-        summary_path.write_text(json.dumps(summary, indent=2), encoding="utf-8")
-        log.info("  Summary written to: %s", summary_path)
-
-        # ---- 6. Patch gpo_tasks.yaml ----
-        if args.dry_run:
-            log.info(
-                "  DRY RUN — would patch gpo_tasks.yaml: %s  beta=%.1f  blacklist=%s", task_key, beta_rounded, blacklist
-            )
-        else:
-            yaml_text = _patch_yaml_task(yaml_text, task_key, beta_rounded, blacklist)
-            log.info("  Patched gpo_tasks.yaml for %s.", task_key)
-
-        # ---- 7. Save diagnostic plots ----
-        plots_dir_path: Path | None = None
-        if not args.no_plots:
-            plots_dir_path = Path(args.plots_dir) if args.plots_dir else gpo_dir.parent / "gpo_plots"
-            _save_plots(gpo_dir, plots_dir_path)
-
-        # ---- 8. Write report (Markdown + copy PNGs) ----
-        if args.report_dir:
-            # Derive gpo_tag from the pair directory name (e.g. gpo_pairs_v8 → v8).
-            dir_name = gpo_dir.name  # e.g. "gpo_pairs_v8"
-            gpo_tag = dir_name.split("_", 2)[-1] if "_" in dir_name else dir_name
-            # The plots_dir here is the task-specific subdirectory inside PLOTS_DIR,
-            # which _save_plots writes into as: <plots_dir>/<suffix>__<run>__<tag>.png
-            # (all flat, not sub-divided further).  Pass it so PNGs are copied.
-            _write_calibration_report(
-                summary=summary,
-                plots_dir=plots_dir_path,
-                report_dir=Path(args.report_dir),
-                gpo_tag=gpo_tag,
-            )
-
-    # Write the (possibly multi-task-patched) YAML once at the end
-    if not args.dry_run and yaml_text:
-        gpo_tasks_path.write_text(yaml_text, encoding="utf-8")
-        log.info("gpo_tasks.yaml updated: %s", gpo_tasks_path)
-
+            if args.dry_run:
+                log.info("DRY RUN: no YAML, summary, plots or reports written.")
+                continue
+            out.mkdir(parents=True, exist_ok=False)
+            with (out / "gpo_tasks.yaml").open("x") as stream:
+                yaml.safe_dump(artifact, stream, sort_keys=False)
+            (out / "calibration_summary.json").write_text(json.dumps(summary, indent=2))
+            if not args.no_plots:
+                _save_plots(gpo_dir, out / "plots")
+            if args.report:
+                _write_calibration_report(summary, out / "plots", out, args.run_tag)
+        except (OSError, ValueError, KeyError, TypeError) as error:
+            log.error("INCOMPLETE calibration for %s: %s", raw_dir, error)
+            all_ok = False
     sys.exit(0 if all_ok else 1)
 
 

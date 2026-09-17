@@ -16,6 +16,8 @@ Key concepts:
 
 from __future__ import annotations
 
+import os
+
 import copy
 import logging
 from collections.abc import Mapping, MutableMapping
@@ -35,7 +37,7 @@ logger = logging.getLogger("mmt.ConfigLoader")
 # ----------------------------------------------------------------------------------------------------------------------
 def resolve_run_id_to_run_dir(run_id: str) -> Path:
     """
-    Resolve a training run ID to <repo_root>/runs/<run_id>.
+    Resolve a training run ID under MMT_RUNS_DIR, defaulting to <repo_root>/runs.
 
     Parameters
     ----------
@@ -68,7 +70,7 @@ def resolve_run_id_to_run_dir(run_id: str) -> Path:
             "e.g., 'pretrain_base'. Do not include 'runs/' or any path separators."
         )
 
-    return (REPO_ROOT / "runs" / p.parts[0]).resolve()
+    return (Path(os.environ.get("MMT_RUNS_DIR", REPO_ROOT / "runs")) / p.parts[0]).resolve()
 
 
 # ----------------------------------------------------------------------------------------------------------------------

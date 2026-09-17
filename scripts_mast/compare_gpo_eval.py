@@ -67,6 +67,7 @@ import argparse
 import datetime
 import json
 import logging
+import math
 import sys
 from pathlib import Path
 from typing import Any
@@ -104,10 +105,7 @@ def _gpo_run_id(
     ``ft-<task>-ws-ft-<task>-scratch-<model_profile>-<base_ft_tag>-<model_profile>-<version>``.
     Note: there is NO 'gpo-' infix — the tag is appended literally.
     """
-    return (
-        f"ft-{task}-ws-ft-{task}-scratch-{model_profile}-{base_ft_tag}"
-        f"-{model_profile}-{version}"
-    )
+    return f"ft-{task}-ws-ft-{task}-scratch-{model_profile}-{base_ft_tag}-{model_profile}-{version}"
 
 
 def _base_run_id(task: str, base_ft_tag: str = "embed_mse", model_profile: str = "mmt") -> str:
@@ -167,16 +165,9 @@ def _read_task_row(csv_path: Path, task: str) -> dict[str, float]:
         return _read_task_row_no_pandas(csv_path, task)
 
     df = pd.read_csv(csv_path, index_col=0)
-    if task not in df.index:
-        # Some task_metrics.csv files use the task name as the only row but
-        # without an explicit index label — fall back to the first row.
-        if len(df) == 1:
-            row = df.iloc[0]
-            log.debug("task_metrics.csv: task %r not in index; using first row.", task)
-        else:
-            raise ValueError(f"Task row {task!r} not found in {csv_path}.\nAvailable index values: {list(df.index)}")
-    else:
-        row = df.loc[task]
+    if task not in df.index or not df.index.is_unique:
+        raise ValueError(f"Expected one unambiguous task row {task!r} in {csv_path}.")
+    row = df.loc[task]
 
     return {k: float(v) for k, v in row.to_dict().items() if not _is_nan(v)}
 
@@ -194,7 +185,7 @@ def _read_task_row_no_pandas(csv_path: Path, task: str) -> dict[str, float]:
             continue
         row_label = cols[0].strip('"')
         values = cols[1:]
-        if row_label == task or len(lines) == 2:
+        if row_label == task:
             result: dict[str, float] = {}
             for h, v in zip(headers[1:], values):
                 try:
@@ -257,6 +248,7 @@ def _compare_task(
     gpo_tag: str | None,
     metric_cols: list[str],
     show_csv: bool,
+    require_verified_test: bool = False,
 ) -> dict[str, Any] | None:
     """
     Load metrics for one task's base and GPO runs, print a comparison table,
@@ -275,6 +267,35 @@ def _compare_task(
 
     if base_metrics is None or gpo_metrics is None:
         return None
+
+    required = list(dict.fromkeys(metric_cols + ["n_shots"]))
+    for label, metrics in (("base", base_metrics), ("GPO", gpo_metrics)):
+        if any(key not in metrics or not math.isfinite(metrics[key]) for key in required):
+            log.error("INCOMPLETE %s metrics for %s: missing/nonfinite requested values", label, task)
+            return None
+    if base_metrics["n_shots"] <= 0 or base_metrics["n_shots"] != gpo_metrics["n_shots"]:
+        log.error("INCOMPLETE comparison for %s: unequal or empty shot counts", task)
+        return None
+    if require_verified_test:
+        from mast_utils.gpo.protocol import validate_evaluation_manifest
+
+        try:
+            base_proof = validate_evaluation_manifest(base_dir, _eval_subdir(base_dir, base_tag), task)
+            gpo_proof = validate_evaluation_manifest(gpo_dir, _eval_subdir(gpo_dir, gpo_tag), task)
+            for key in (
+                "collection_digest",
+                "split_manifest",
+                "test_window_counts",
+                "evaluation_contract",
+                "embedding_config_digest",
+            ):
+                if base_proof[key] != gpo_proof[key]:
+                    raise ValueError(f"Base/GPO evaluation mismatch: {key}")
+            if base_metrics["n_shots"] != len(base_proof["test_window_counts"]):
+                raise ValueError("Task metric shot count differs from verified test coverage.")
+        except (OSError, ValueError, KeyError) as error:
+            log.error("INCOMPLETE verified comparison for %s: %s", task, error)
+            return None
 
     # Build comparison for every requested metric column.
     comparison: dict[str, Any] = {
@@ -482,6 +503,9 @@ def _parse_args() -> argparse.Namespace:
     )
     p.add_argument("--csv", action="store_true", help="Also print the raw CSV row for each run (debug).")
 
+    p.add_argument(
+        "--require_verified_test", action="store_true", help="Reject missing, changed or unequal CGPO test manifests."
+    )
     return p.parse_args()
 
 
@@ -519,16 +543,16 @@ def _write_markdown_report(
 
     # ---- Header ----
     lines += [
-        f"# GPO vs Base Fine-Tune Comparison",
+        "# GPO vs Base Fine-Tune Comparison",
         f"## base_ft_tag=`{base_ft_tag}`  ·  gpo_version=`{gpo_version}`",
-        f"",
+        "",
         f"> **Generated:** {datetime.datetime.now().isoformat(timespec='seconds')}  ",
-        f"> **Source:** `scripts_mast/compare_gpo_eval.py --report_dir`  ",
+        "> **Source:** `scripts_mast/compare_gpo_eval.py --report_dir`  ",
         f"> **Metrics:** {', '.join(display_cols)}  ",
-        f"> **Key:** ✓ improvement · ✗ degradation · ≈ no meaningful change (|Δ| < 0.1%)  ",
-        f"",
-        f"---",
-        f"",
+        "> **Key:** ✓ improvement · ✗ degradation · ≈ no meaningful change (|Δ| < 0.1%)  ",
+        "",
+        "---",
+        "",
     ]
 
     # ---- Summary table ----
@@ -592,16 +616,16 @@ def _write_markdown_report(
 
         lines += [
             f"### {task}",
-            f"",
+            "",
             f"- **Base run:** `{base_id}`",
             f"- **GPO run:**  `{gpo_id}`",
             f"- **Verdict:**  {verdict}",
-            f"",
+            "",
         ]
 
         # Detail table
-        lines.append(f"| Metric | Base | GPO | Δ (GPO−Base) | Δ % |")
-        lines.append(f"|--------|------|-----|--------------|-----|")
+        lines.append("| Metric | Base | GPO | Δ (GPO−Base) | Δ % |")
+        lines.append("|--------|------|-----|--------------|-----|")
 
         all_cols = list(dict.fromkeys(display_cols + ["n_shots"]))
         for col in all_cols:
@@ -624,7 +648,7 @@ def _write_markdown_report(
                 improved = d.get("improved", False)
                 marker = " ✓" if improved else (" ✗" if abs(pct or 0) > 0.1 else "")
                 delta_str = f"{delta:+.6g}" if delta is not None else "—"
-                pct_str = (f"{pct:+.2f}%{marker}" if pct is not None else "—")
+                pct_str = f"{pct:+.2f}%{marker}" if pct is not None else "—"
             else:
                 delta_str = "—"
                 pct_str = "—"
@@ -672,7 +696,9 @@ def main() -> None:
             (
                 task,
                 _base_run_id(task, base_ft_tag=args.base_ft_tag, model_profile=args.model_profile),
-                _gpo_run_id(task, version=args.gpo_version, base_ft_tag=args.base_ft_tag, model_profile=args.model_profile),
+                _gpo_run_id(
+                    task, version=args.gpo_version, base_ft_tag=args.base_ft_tag, model_profile=args.model_profile
+                ),
             )
             for task in args.tasks
         ]
@@ -680,7 +706,9 @@ def main() -> None:
         # Single-task mode: explicit run IDs.
         task = args.task
         base = args.base_run or _base_run_id(task, base_ft_tag=args.base_ft_tag, model_profile=args.model_profile)
-        gpo = args.gpo_run or _gpo_run_id(task, version=args.gpo_version, base_ft_tag=args.base_ft_tag, model_profile=args.model_profile)
+        gpo = args.gpo_run or _gpo_run_id(
+            task, version=args.gpo_version, base_ft_tag=args.base_ft_tag, model_profile=args.model_profile
+        )
         task_pairs = [(task, base, gpo)]
 
     # ---- Save dir ----
@@ -694,6 +722,7 @@ def main() -> None:
     # ---- Run comparisons ----
     all_results: list[dict[str, Any]] = []
     n_ok = 0
+    failed_tasks = []
 
     print("\nGPO vs Base Finetune Evaluation Comparison")
     print(f"Runs root : {runs_root}")
@@ -710,6 +739,7 @@ def main() -> None:
             gpo_tag=gpo_tag,
             metric_cols=args.metrics,
             show_csv=args.csv,
+            require_verified_test=args.require_verified_test,
         )
         if result is not None:
             all_results.append(result)
@@ -722,10 +752,11 @@ def main() -> None:
                 log.info("Saved: %s", out_path)
 
     print()
-    print(f"Compared {n_ok}/{len(task_pairs)} tasks successfully.")
+    failed_tasks = [task for task, _, _ in task_pairs if task not in {r["task"] for r in all_results}]
+    print(f"Compared {n_ok}/{len(task_pairs)} tasks successfully; incomplete={failed_tasks}.")
 
     # ---- Write Markdown report ----
-    if report_dir and all_results:
+    if report_dir:
         report_path = _write_markdown_report(
             results=all_results,
             metric_cols=args.metrics,
@@ -733,6 +764,11 @@ def main() -> None:
             gpo_version=args.gpo_version,
             report_dir=report_dir,
         )
+        if failed_tasks:
+            report_path.write_text(
+                f"> INCOMPLETE: {n_ok}/{len(task_pairs)} tasks; failed/missing: {failed_tasks}\n\n"
+                + report_path.read_text()
+            )
         print(f"Report    : {report_path}")
 
     if n_ok < len(task_pairs):

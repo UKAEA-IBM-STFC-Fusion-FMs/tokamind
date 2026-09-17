@@ -1,3 +1,7 @@
+> Historical implementation notes. Statements below about shared-YAML calibration, reference KL,
+> IPO gradients, old splits or cluster behavior are superseded by [the current runbook](gpo_runbook.md)
+> and [the shot/resume protocol](cgpo_shot_protocol.md). Historical results are not revalidated here.
+
 # GPO Implementation Log
 ## Continuous Generalized Preference Optimization for TokaMind / MAST
 

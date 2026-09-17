@@ -6,8 +6,8 @@
 # How it differs from finetune_scratch.yaml
 # -----------------------------------------
 # • Loss term is continuous_gpo (embedding-space Bradley-Terry).
-# • Smaller learning rates (preference pairs carry weaker gradients).
-# • Shorter schedule (GPO converges fast; longer runs risk reward hacking).
+# • Per-block learning rates for preference fine-tuning.
+# • Short schedule to be assessed on independent validation.
 # • No input-dropout augmentation (pairs are fixed offline data).
 # • data.cache defaults to true for fast iteration on small pair datasets.
 #
@@ -58,7 +58,7 @@ loader:
 train:
   resume: false
 
-  # Enable DPO-style KL constraint via a frozen copy of the base checkpoint.
+  # Enable reference-relative distance margin via a frozen copy of the base checkpoint.
   # When true, _GpoBatchInjector runs a no_grad forward pass on each batch and
   # injects ref_preds into the batch dict; ContinuousGPOLoss then computes the
   # reference-anchored margin instead of the raw collection-time anchor.

@@ -5,47 +5,31 @@ Unlike token-level DPO/IPO the model operates in continuous embedding
 (coefficient) space, so log-probabilities are not available.  Instead we use
 an embedding-space distance proxy.
 
-Without reference model (original, v1/v2)
-------------------------------------------
-    L_GPO = − log σ( β · [ d(ŷ, y_l) − d(ŷ, y_w) ] )
+Margins and objectives
+----------------------
+Without a reference model the implemented margin is the fixed collection gap minus policy error:
 
-With reference model (DPO-style KL constraint, v3+)
------------------------------------------------------
-    margin = [ d(ŷ, y_l) − d(ŷ_ref, y_l) ] − [ d(ŷ, y_w) − d(ŷ_ref, y_w) ]
+    margin = transform(d(y_w, y_l)) - d(ŷ, y_w)
 
-    loss_type="dpo"   (default)
-        L_DPO  = − log σ( β · margin )
-        ∂L/∂margin = β · σ(−β·margin)  → 0 as margin → 0
-        Well-calibrated when β×p50_MSE ≈ 0.7–1.0.
+Here transform applies log1p first, then an optional upper clip. With a frozen reference:
 
-    loss_type="ipo"   (Azar et al., 2023)
-        L_IPO  = ( margin − 1/(2β) )²
-        ∂L/∂margin = 2·( margin − 1/(2β) )  — always non-zero
-        Fixed point: margin = 1/(2β).
-        Use when β×p50_MSE ≪ 0.5 (near-zero starting margin).
+    margin = [d(ŷ, y_l) - d(ŷ, y_w)] - [d(ŷ_ref, y_l) - d(ŷ_ref, y_w)]
 
-    loss_type="slic"  (SLiC — Zhao et al., 2023)
-        L_SLiC = max( 0,  δ − margin )  +  λ_reg · L_reg
-        where δ = 1/(2β) is the hinge target (same anchor as IPO).
-        L_reg is the optional SFT co-loss (sft_weight controls λ_reg).
-        SLiC is a max-margin objective: it pushes the margin above δ but
-        applies no gradient once the constraint is satisfied (margin ≥ δ).
-        This is more conservative than IPO for well-separated pairs.
+This is a relative distance margin, not a KL divergence or an absolute constraint on policy drift.
+The reference cancels at initialization when policy and reference coincide, giving margin=0.
+Collection-gap clip/log options are incompatible with this branch and are rejected.
 
-    loss_type="hinge"
-        L_hinge = max( 0,  1 − margin )
-        Hard margin of 1 unit; no β scaling of the target.
-        Gradient = −1 for all unsatisfied pairs (margin < 1), 0 otherwise.
-        Use when you want a fixed absolute margin regardless of β.
-        Equivalent to a linear SVM loss on the preference margin.
+    DPO:   L = -log σ(β margin),       ∂L/∂margin = -β σ(-β margin).
+           At margin=0 the derivative is -β/2, not zero; it tends to zero as β margin → +∞.
+    IPO:   L = (margin - 1/(2β))²,     ∂L/∂margin = 2(margin - 1/(2β)).
+           Its derivative is zero at the target; overshoot is penalized along the margin direction.
+    SLiC:  L = max(0, 1/(2β) - margin).
+    Hinge: L = max(0, 1 - margin).
 
-    The reference-anchored margin (DPO-style KL constraint) is computed
-    identically for all four variants; ``loss_type`` only selects the
-    objective applied to that margin.
-
-    ŷ_ref is injected into the batch as ``batch["ref_preds"]``
-    (dict[signal_id → Tensor(B, D)]) by ``_GpoBatchInjector`` in
-    ``run_gpo_finetune.py``, which runs a frozen copy of the base model.
+For squared distance, the reference-relative margin is linear in ŷ. Components orthogonal to y_w-y_l
+are unconstrained by any of these margin objectives. IPO does not remove that freedom. The optional
+sft_weight adds MSE on paired windows; a separate embed_mse term anchors every valid output window.
+These are soft penalties whose strength must be selected on validation, not guarantees against drift.
 
 where:
   ŷ        = current model prediction  (embedding, shape B×D)
@@ -123,15 +107,14 @@ class ContinuousGPOLoss(BaseLoss):
 
         ``"dpo"`` (default)
             DPO log-sigmoid loss: ``−log σ(β·margin)``.
-            Gradient = ``β·σ(−β·margin)`` → 0 as margin → 0.
-            Well-calibrated when β×p50_MSE ≈ 0.7–1.0.
+            Gradient = ``−β·σ(−β·margin)``; at margin=0 it is ``−β/2``.
+            The collection-gap beta rule is a scale heuristic, not a reference-margin calibration.
 
         ``"ipo"``
             IPO squared-margin loss: ``(margin − 1/(2β))²``.
-            Gradient = ``2·(margin − 1/(2β))`` — always non-zero.
+            Gradient = ``2·(margin − 1/(2β))``; zero at its target.
             The unique fixed point is margin = 1/(2β).
-            Preferred when β×p50_MSE ≪ 0.5 (near-zero starting margin),
-            e.g. task_4-3 (β×p50 ≈ 0.14) and task_4-5 (β×p50 ≈ 0.11).
+            Does not constrain prediction components orthogonal to the pair direction.
 
         ``"slic"``
             SLiC max-margin loss: ``max(0, δ − margin)`` where δ = 1/(2β).
@@ -155,20 +138,18 @@ class ContinuousGPOLoss(BaseLoss):
 
             L = L_gpo + sft_weight × MSE(ŷ, y_w)
 
-        This anchors the preferred response and prevents reward hacking.
+        This softly penalizes drift from the preferred response on paired windows.
         Default: 0.0 (disabled).
     mse_gap_clip : float | None
         If set, the per-sample collection-time MSE gap ``‖y_w − y_l‖²/D``
-        (stored in the pair shards) is hard-clipped to this value before
-        the GPO loss is computed.  Prevents the few extreme-error pairs from
-        dominating the gradient.  Recommended for task_4-5 (fat tail).
+        is hard-clipped after optional log1p compression, only without a reference model.
+        This changes the margin scale; it is not a general gradient-norm bound.
         Applied to ``d_l_collect = ‖y_w − y_l‖²/D`` used as the Bradley-Terry
         dispreferred distance approximation.  Default: ``None`` (no clip).
     log_mse_gap : bool
         If ``True``, replace the raw collection-time MSE gap with
         ``log(1 + ‖y_w − y_l‖²/D)`` before computing the GPO margin.
-        This compresses the fat tail of task_4-5 without hard discarding
-        any pairs.  Default: ``False``.
+        Valid only without a reference model. Default: ``False``.
     output_filter : set[Hashable] | None
         Optional set of signal IDs supervised by this term.  ``None`` uses all
         signals present in the batch.
@@ -298,9 +279,8 @@ class ContinuousGPOLoss(BaseLoss):
 
                 margin = [d(ŷ, y_l) − d(ŷ_ref, y_l)] − [d(ŷ, y_w) − d(ŷ_ref, y_w)]
 
-            This constrains the update to only reward improvement *relative to
-            the reference*, preventing policy drift.  When ``None``, the
-            unanchored margin ``d(ŷ, y_l) − d(ŷ, y_w)`` is used (v1/v2 behaviour).
+            This measures preference relative to the reference without bounding absolute policy drift.  When ``None``, the
+            surrogate margin ``transform(d(y_w, y_l)) − d(ŷ, y_w)`` is used.
 
         Returns
         -------
@@ -316,6 +296,9 @@ class ContinuousGPOLoss(BaseLoss):
         """
         if not preds:
             raise RuntimeError("ContinuousGPOLoss received empty predictions from the model.")
+
+        if ref_preds is not None and (self._mse_gap_clip is not None or self._log_mse_gap):
+            raise ValueError("mse_gap_clip/log_mse_gap are incompatible with reference predictions.")
 
         # Fall back to y_emb as preferred anchor when y_w_emb not explicitly given.
         effective_y_w: Mapping[Hashable, Tensor] = y_w_emb if (y_w_emb is not None) else y_emb
@@ -374,11 +357,10 @@ class ContinuousGPOLoss(BaseLoss):
             # ------------------------------------------------------------------
             # Compute the GPO margin.
             #
-            # With reference model (DPO-style KL constraint):
+            # With reference model (relative distance margin; not a KL constraint):
             #   margin = [d(ŷ, y_l) − d(ŷ_ref, y_l)] − [d(ŷ, y_w) − d(ŷ_ref, y_w)]
             #
-            #   This only rewards improvement relative to the reference,
-            #   preventing the policy from drifting beyond the base checkpoint.
+            #   Orthogonal prediction drift is unconstrained by this margin.
             #
             # Without reference model (fallback, uses fixed collection-time anchor):
             #   margin = d_l_collect − d_w
@@ -398,13 +380,13 @@ class ContinuousGPOLoss(BaseLoss):
             # Apply the selected preference-optimisation objective.
             #
             # DPO: −log σ(β·margin)
-            #   Gradient ∝ β·σ(−β·margin) → 0 as margin → 0.
-            #   Well-calibrated when β×p50_MSE ≈ 0.7–1.0.
+            #   dL/dmargin = -β·σ(-β·margin); at zero it is -β/2.
+            #   The collection-gap beta rule is a scale heuristic, not a reference-margin calibration.
             #
             # IPO: (margin − 1/(2β))²
-            #   Gradient = 2·(margin − 1/(2β)) — always non-zero.
+            #   Gradient = 2·(margin − 1/(2β)); zero at the target.
             #   Fixed point: margin = 1/(2β).
-            #   Use when β×p50_MSE ≪ 0.5 (near-zero starting margin).
+            #   Its scale and target differ from DPO and must be assessed on validation.
             # ------------------------------------------------------------------
             if self._loss_type == "ipo":
                 # IPO: (margin − 1/(2β))²  — constant gradient at margin=0

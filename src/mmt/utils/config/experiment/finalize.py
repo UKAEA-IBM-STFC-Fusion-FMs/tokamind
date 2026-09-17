@@ -9,6 +9,8 @@ This module handles the final stage of config loading:
 
 from __future__ import annotations
 
+import os
+
 import yaml
 import logging
 from collections.abc import Mapping, MutableMapping
@@ -31,7 +33,7 @@ def compute_paths(
     configs_root: Path,
 ) -> dict[str, str]:
     """
-    Compute output paths for pretrain, finetune, and eval phases.
+    Compute phase output paths, using MMT_RUNS_DIR for training runs when exported.
 
     Parameters
     ----------
@@ -57,7 +59,7 @@ def compute_paths(
 
     """
 
-    global_runs_root = REPO_ROOT / "runs"
+    global_runs_root = Path(os.environ.get("MMT_RUNS_DIR", REPO_ROOT / "runs")).resolve()
 
     if "phase" not in merged:
         raise KeyError("Missing required key 'phase' in `merged`.")
