@@ -121,11 +121,8 @@ def load_collection_config(gpo_dir: str | Path) -> dict[str, Any]:
         )
 
     split = cfg["split"]
-    if split not in ("train", "val", "test"):
-        raise ValueError(
-            f"collection_config.json has unexpected split={split!r}. "
-            "Expected 'train', 'val', or 'test'."
-        )
+    if split not in ("train", "val", "test", "both"):
+        raise ValueError(f"collection_config.json has unexpected split={split!r}. Expected train, val, test, or both.")
 
     return cfg
 
@@ -197,8 +194,18 @@ def reconstruct_dataloader(
     # 1. Rebuild the merged config (eval phase re-reads the saved run YAML
     #    and inherits every representation-defining setting from it).
     # ------------------------------------------------------------------
-    cfg_mmt = load_experiment_config(task=task, phase="eval", model_source=run_id)
+    from .protocol import PROTOCOL, apply_source_contract, collection_contract, validate_collection
+
+    new_protocol = cc.get("protocol") == PROTOCOL
+    kwargs = {}
+    if new_protocol:
+        kwargs["integration_hook"] = lambda merged, phase: apply_source_contract(
+            merged, "scripts_mast/configs", collection=True
+        )
+    cfg_mmt = load_experiment_config(task=task, phase="eval", model_source=cc["run_dir"], save_config=False, **kwargs)
     validate_config(cfg=cfg_mmt)
+    if new_protocol:
+        cfg_mmt.data.pop("split")
     validate_mast_config(cfg=cfg_mmt)
 
     # Apply caller overrides to the loader config.
@@ -220,7 +227,20 @@ def reconstruct_dataloader(
     cfg_model_source = cfg_mmt.raw.get("model_source") or {}
     data_split = cfg_model_source.get("data_split")
 
-    if split == "test":
+    if split == "both":
+        if not new_protocol:
+            raise ValueError("split=both requires a verified CGPO shot protocol.")
+        cfg_data["split"] = data_split
+        validate_collection(cc, collection_contract(cfg_mmt.raw, cfg_task), gpo_dir)
+        dict_task_metadata, train, val, _test = build_mast_datasets(
+            cfg_task=cfg_task,
+            cfg_data=cfg_data,
+            phase="finetune",
+            cfg_model_source=cfg_model_source,
+        )
+        mast_datasets = {"train": train, "val": val}
+        loader_split = "train"
+    elif split == "test":
         dict_task_metadata, _train, _val, mast_split = build_mast_datasets(
             cfg_task=cfg_task,
             cfg_data=cfg_data,
@@ -278,6 +298,23 @@ def reconstruct_dataloader(
         signal_specs=signal_specs,
         codecs=codecs,
         phase="eval",
+        window_test_mode=False if new_protocol else None,
     )
 
+    if split == "both":
+        return _CombinedLoaders(window_data["train"]["loader"], window_data["val"]["loader"])
     return window_data[loader_split]["loader"]
+
+
+class _CombinedLoaders:
+    """Re-iterable view of official train and validation context loaders."""
+
+    def __init__(self, train, val):
+        self.loaders = (train, val)
+
+    def __iter__(self):
+        for loader in self.loaders:
+            yield from loader
+
+    def __len__(self):
+        return sum(len(loader) for loader in self.loaders)

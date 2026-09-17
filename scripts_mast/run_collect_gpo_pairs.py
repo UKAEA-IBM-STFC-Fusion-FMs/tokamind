@@ -3,7 +3,7 @@ Entrypoint for GPO preference-pair dataset collection.
 
 This script mirrors run_eval.py in structure: it loads the same merged config,
 resolves the same embeddings and model weights, and runs one inference pass
-over the train split.  Instead of computing benchmark metrics it writes
+over the official train and validation shot splits. Instead of computing benchmark metrics it writes
 (y_w_emb, y_l_emb) preference pairs to disk for downstream GPO fine-tuning.
 
 Schema v3: pairs are stored in embedding (coefficient) space so the GPO
@@ -39,8 +39,8 @@ Usage
 
 Optional flags
 --------------
-    --split           train|val  (default: train — test is reserved for evaluation)
-    --val_fraction    fraction of windows reserved for GPO validation (default: 0.1)
+    --split           both (official train and validation shots; test excluded)
+    --val_fraction    must be 0; validation uses official MAST shots
     --train_fraction  random fraction of the train split to collect from (default: 1.0 = all)
     --shard_size      windows per .npz shard (default: 2048)
     --multi_signal    joint|independent — multi-output loss strategy (default: joint)
@@ -57,23 +57,24 @@ import math
 import random
 from pathlib import Path
 
-from mmt.utils import validate_config, sdpa_math_only_ctx
-from mmt.checkpoints import load_best_weights
-from mmt.data import build_decoders
-
 from mast_utils import (
-    load_experiment_config,
-    validate_mast_config,
-    load_task_definition,
+    build_mast_datasets,
+    build_model_and_optional_warmstart,
     build_signals_by_role_from_task_definition,
+    build_window_data,
     extract_signal_stats,
     init_run_context,
-    build_mast_datasets,
-    build_window_data,
-    build_model_and_optional_warmstart,
+    load_experiment_config,
+    load_task_definition,
     resolve_eval_embeddings,
+    validate_mast_config,
 )
 from mast_utils.gpo import collect_gpo_pairs
+from mast_utils.gpo.protocol import apply_source_contract, collection_contract
+
+from mmt.checkpoints import load_best_weights
+from mmt.data import build_decoders
+from mmt.utils import sdpa_math_only_ctx, validate_config
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -97,21 +98,18 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--split",
         type=str,
-        default="train",
-        choices=["train", "val"],
+        default="both",
+        choices=["both"],
         help=(
-            "Dataset split to collect pairs from.  Default: train.  "
+            "Collect official train and validation splits together.  "
             "The test split is reserved for evaluation and must not be used here."
         ),
     )
     parser.add_argument(
         "--val_fraction",
         type=float,
-        default=0.1,
-        help=(
-            "Fraction of collected windows held out as GPO validation data.  "
-            "Must be in [0.0, 1.0).  Default: 0.1 (10%%)."
-        ),
+        default=0.0,
+        help=("Must be zero: validation is defined by official MAST shots."),
     )
     parser.add_argument(
         "--train_fraction",
@@ -161,14 +159,10 @@ def main() -> None:
     args = _parse_args()
     log = logging.getLogger("mmt.GPO")
 
-    if not (0.0 <= args.val_fraction < 1.0):
-        raise SystemExit(
-            f"--val_fraction must be in [0.0, 1.0), got {args.val_fraction!r}."
-        )
+    if args.val_fraction != 0.0:
+        raise SystemExit("CGPO uses official MAST validation shots; --val_fraction must be 0.")
     if not (0.0 < args.train_fraction <= 1.0):
-        raise SystemExit(
-            f"--train_fraction must be in (0.0, 1.0], got {args.train_fraction!r}."
-        )
+        raise SystemExit(f"--train_fraction must be in (0.0, 1.0], got {args.train_fraction!r}.")
 
     # ------------------------------------------------------------------------------------------------------------------
     # Config: reuse the eval phase config — same data/preprocess/loader settings.
@@ -178,9 +172,13 @@ def main() -> None:
         phase="eval",
         model_source=args.model_source,
         tag=args.tag,
+        integration_hook=lambda merged, phase: apply_source_contract(merged, "scripts_mast/configs", collection=True),
+        save_config=False,
     )
     validate_config(cfg=cfg_mmt)
+    source_split = cfg_mmt.data.pop("split")
     validate_mast_config(cfg=cfg_mmt)
+    cfg_mmt.data["split"] = source_split
 
     device, _ = init_run_context(cfg_mmt=cfg_mmt, phase="eval")
 
@@ -191,29 +189,16 @@ def main() -> None:
     cfg_task = load_task_definition(task_key=args.task)
 
     # ------------------------------------------------------------------------------------------------------------------
-    # MAST dataset — train split by default (test is reserved for evaluation).
+    # MAST datasets — disjoint train/validation shots; test is reserved for evaluation.
     # ------------------------------------------------------------------------------------------------------------------
-    if args.split == "train":
-        cfg_data_train = {**cfg_data, "split": cfg_mmt.model_source["data_split"]}
-        dict_task_metadata, mast_split, _val, _test = build_mast_datasets(
-            cfg_task=cfg_task,
-            cfg_data=cfg_data_train,
-            phase="finetune",
-            cfg_model_source=cfg_mmt.model_source,
-        )
-        mast_datasets = {"train": mast_split}
-        loader_split = "train"
-    else:
-        # val split: build train+val datasets, discard train.
-        cfg_data_val = {**cfg_data, "split": cfg_mmt.model_source["data_split"]}
-        dict_task_metadata, _train, mast_split, _test = build_mast_datasets(
-            cfg_task=cfg_task,
-            cfg_data=cfg_data_val,
-            phase="finetune",
-            cfg_model_source=cfg_mmt.model_source,
-        )
-        mast_datasets = {"val": mast_split}
-        loader_split = "val"
+    dict_task_metadata, mast_train, mast_val, _test = build_mast_datasets(
+        cfg_task=cfg_task,
+        cfg_data=cfg_data,
+        phase="finetune",
+        cfg_model_source=cfg_mmt.model_source,
+    )
+    mast_datasets = {"train": mast_train, "val": mast_val}
+    protocol_contract = collection_contract(cfg_mmt.raw, cfg_task)
 
     # ------------------------------------------------------------------------------------------------------------------
     # Embeddings + signal specs
@@ -244,8 +229,9 @@ def main() -> None:
         signal_specs=signal_specs,
         codecs=codecs,
         phase="eval",
+        window_test_mode=False,
     )
-    dataloader = window_data[loader_split]["loader"]
+    dataloader = window_data["train"]["loader"]
 
     # ------------------------------------------------------------------------------------------------------------------
     # Optional random subsampling of the train split.
@@ -270,8 +256,12 @@ def main() -> None:
         dataloader = itertools.compress(dataloader, (i in set(kept_indices) for i in range(n_batches_total)))
         log.info(
             "train_fraction=%.2f → keeping %d / %d batches (randomly sampled, seed=42)",
-            args.train_fraction, n_keep, n_batches_total,
+            args.train_fraction,
+            n_keep,
+            n_batches_total,
         )
+
+    dataloader = itertools.chain(dataloader, window_data["val"]["loader"])
 
     # ------------------------------------------------------------------------------------------------------------------
     # Model + checkpoint
@@ -294,9 +284,7 @@ def main() -> None:
     id_decoders = build_decoders(registry=signal_specs, codecs=codecs, role="output")
     all_signal_stats = extract_signal_stats(dict_metadata=dict_task_metadata)
     missing_native_support = [
-        spec.name
-        for spec in output_specs
-        if spec.signal_id not in id_decoders or spec.name not in all_signal_stats
+        spec.name for spec in output_specs if spec.signal_id not in id_decoders or spec.name not in all_signal_stats
     ]
     if missing_native_support:
         raise SystemExit(
@@ -315,7 +303,10 @@ def main() -> None:
     log.info("Writing GPO pairs to: %s", gpo_out_dir)
     log.info(
         "Split: %s | val_fraction: %.2f | train_fraction: %.2f | multi_signal: %s",
-        args.split, args.val_fraction, args.train_fraction, args.multi_signal,
+        args.split,
+        args.val_fraction,
+        args.train_fraction,
+        args.multi_signal,
     )
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -339,6 +330,7 @@ def main() -> None:
             overwrite=args.overwrite,
             native_decoders=native_decoders,
             native_stats=native_stats,
+            protocol_contract=protocol_contract,
         )
 
     log.info("Done.  GPO dataset: %s", result)

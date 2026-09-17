@@ -109,6 +109,7 @@ def load_experiment_config(
     tag: str | None = None,
     finetune_init: Literal["warmstart", "scratch"] | None = None,  # noqa - Ignore expected type warning
     integration_hook: Callable[[MutableMapping[str, Any], str], None] | None = None,
+    save_config: bool = True,
 ) -> ExperimentConfig:
     """
     Load, merge, and persist experiment config for a task+phase run.
@@ -156,6 +157,10 @@ def load_experiment_config(
         Optional integration-owned callback invoked after source inheritance and before path finalization. This allows
         dataset layers to inherit their own config fields without adding dataset semantics to MMT.
         Optional. Default: None.
+
+    save_config : bool
+        Persist the snapshot immediately (default True). Integrations may defer
+        saving until their provenance checks and exclusive run reservation pass.
 
     Returns
     -------
@@ -269,6 +274,7 @@ def load_experiment_config(
         merged=merged,
         phase=phase,
         configs_root_path=configs_root_path,
+        save_config=save_config,
     )
 
     return ExperimentConfig(raw=merged)

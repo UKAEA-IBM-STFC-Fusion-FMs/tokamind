@@ -38,30 +38,33 @@ from pathlib import Path
 from typing import Any
 
 import torch
-
-from mmt.utils import validate_config, sdpa_math_only_ctx
-from mmt.train import train_finetune
-from mmt.data import build_decoders
-from mmt.checkpoints import load_best_weights
-
 from mast_utils import (
-    load_experiment_config,
-    validate_mast_config,
-    load_task_definition,
+    build_mast_datasets,
+    build_model_and_optional_warmstart,
     build_signals_by_role_from_task_definition,
+    build_window_data,
     extract_signal_stats,
     init_run_context,
-    build_mast_datasets,
-    build_window_data,
-    build_model_and_optional_warmstart,
+    load_experiment_config,
+    load_task_definition,
     resolve_finetune_embeddings,
-    make_collate_fn,
+    validate_mast_config,
 )
-from mmt.data import initialize_mmt_dataloader
 from mast_utils.gpo import load_collection_config
 from mast_utils.gpo.dataset import GpoPairDataset
-from mmt.train.loop_utils import move_batch_to_device
+from mast_utils.gpo.protocol import (
+    apply_source_contract,
+    collection_contract,
+    digest,
+    save_run_snapshot,
+    validate_collection,
+)
 
+from mmt.checkpoints import load_best_weights
+from mmt.data import build_decoders
+from mmt.train import train_finetune
+from mmt.train.loop_utils import move_batch_to_device
+from mmt.utils import sdpa_math_only_ctx, validate_config
 
 log = logging.getLogger("mmt.GPO")
 
@@ -251,6 +254,55 @@ def _parse_args() -> argparse.Namespace:
 # ======================================================================================================================
 
 
+def apply_gpo_config(
+    merged: MutableMapping[str, Any], phase: str, *, configs_root: str, task: str, model_profile: str
+) -> None:
+    """Merge gpo.yaml and gpo_tasks.yaml on top of the base finetune-warmstart config."""
+    from pathlib import Path as _Path
+
+    from mmt.utils.config.experiment.merge import _load_task_block, deep_merge, load_yaml
+
+    cr = _Path(configs_root)
+    model_profile_name = str(merged.get("model_profile", model_profile))
+    phases_dir = cr / model_profile_name / "phases"
+    tasks_dir = cr / model_profile_name / "tasks"
+
+    # Preserve keys that were already resolved by inject_cli_overrides_finetune
+    # (e.g. run_id) before merging gpo.yaml, which carries null placeholders.
+    _preserve = {k: merged[k] for k in ("run_id",) if k in merged and merged[k] is not None}
+
+    # Merge GPO phase config (overrides train schedule, loss, freeze).
+    # NOTE: deep_merge merges train.stages lists by stage *name* — it appends any
+    # new stage name rather than replacing the whole list.  gpo.yaml has a single
+    # "gpo" stage; finetune_warmstart.yaml has "ft_heads" + "ft_full".  Without
+    # explicit replacement the merged config would run all three stages (20 extra
+    # epochs before GPO even starts).  We force-replace the stages list after
+    # merging so only the GPO stage runs.
+    gpo_phase_path = phases_dir / "gpo.yaml"
+    if gpo_phase_path.is_file():
+        gpo_phase = load_yaml(gpo_phase_path)
+        merged.update(deep_merge(base=dict(merged), override=gpo_phase))
+        # Force the stages list to only what gpo.yaml specifies.
+        gpo_stages = (gpo_phase.get("train") or {}).get("stages")
+        if gpo_stages is not None:
+            merged.setdefault("train", {})["stages"] = gpo_stages
+
+    # Merge per-task GPO overrides.
+    # GPO_TASKS_YAML env var allows ablations to swap in an alternate tasks file
+    # without modifying code (e.g. GPO_TASKS_YAML=.../gpo_tasks_embed_mse_only.yaml).
+    import os as _os
+
+    _tasks_yaml_override = _os.environ.get("GPO_TASKS_YAML")
+    gpo_tasks_path = _Path(_tasks_yaml_override) if _tasks_yaml_override else tasks_dir / "gpo_tasks.yaml"
+    task_overrides = _load_task_block(path=gpo_tasks_path, task=task, phase="gpo")
+    if task_overrides:
+        merged.update(deep_merge(base=dict(merged), override=task_overrides))
+
+    # Restore any preserved keys that were nulled out by the phase/task yamls.
+    merged.update(_preserve)
+    apply_source_contract(merged, configs_root)
+
+
 def main() -> None:
     args = _parse_args()
 
@@ -263,67 +315,6 @@ def main() -> None:
     # ------------------------------------------------------------------------------------------------------------------
     configs_root = "scripts_mast/configs"
 
-    def _gpo_config_hook(merged: MutableMapping[str, Any], phase: str) -> None:
-        """Merge gpo.yaml and gpo_tasks.yaml on top of the base finetune-warmstart config."""
-        from mmt.utils.config.experiment.merge import load_yaml, deep_merge, _load_task_block
-        from pathlib import Path as _Path
-        from mast_utils.config import _inherit_mast_data_split
-
-        # Run the standard MAST data-split inheritance first.
-        # load_experiment_config uses setdefault for integration_hook, so passing
-        # _gpo_config_hook as the hook prevents _inherit_mast_data_split from
-        # running automatically.  We call it explicitly here so that
-        # model_source["data_split"] and data["split"] are populated before
-        # anything downstream reads them.
-        _inherit_mast_data_split(merged, phase)
-
-        cr = _Path(configs_root)
-        model_profile_name = str(merged.get("model_profile", args.model_profile))
-        phases_dir = cr / model_profile_name / "phases"
-        tasks_dir = cr / model_profile_name / "tasks"
-
-        # Preserve keys that were already resolved by inject_cli_overrides_finetune
-        # (e.g. run_id) before merging gpo.yaml, which carries null placeholders.
-        _preserve = {k: merged[k] for k in ("run_id",) if k in merged and merged[k] is not None}
-
-        # GPO must inherit ALL embeddings (input, actuator AND output) from the source
-        # finetune run.  The standard warmstart policy re-tunes output embeddings, which
-        # produces different encoded_dim values and causes a shape mismatch when
-        # load_best_weights tries to load the source checkpoint into the newly-built model.
-        # Setting this flag routes all roles through the "source" branch in
-        # _resolve_dct3d_signal_policy instead of the output-specific "tune" branch.
-        merged["gpo_inherit_all_embeddings"] = True
-
-        # Merge GPO phase config (overrides train schedule, loss, freeze).
-        # NOTE: deep_merge merges train.stages lists by stage *name* — it appends any
-        # new stage name rather than replacing the whole list.  gpo.yaml has a single
-        # "gpo" stage; finetune_warmstart.yaml has "ft_heads" + "ft_full".  Without
-        # explicit replacement the merged config would run all three stages (20 extra
-        # epochs before GPO even starts).  We force-replace the stages list after
-        # merging so only the GPO stage runs.
-        gpo_phase_path = phases_dir / "gpo.yaml"
-        if gpo_phase_path.is_file():
-            gpo_phase = load_yaml(gpo_phase_path)
-            merged.update(deep_merge(base=dict(merged), override=gpo_phase))
-            # Force the stages list to only what gpo.yaml specifies.
-            gpo_stages = (gpo_phase.get("train") or {}).get("stages")
-            if gpo_stages is not None:
-                merged.setdefault("train", {})["stages"] = gpo_stages
-
-        # Merge per-task GPO overrides.
-        # GPO_TASKS_YAML env var allows ablations to swap in an alternate tasks file
-        # without modifying code (e.g. GPO_TASKS_YAML=.../gpo_tasks_embed_mse_only.yaml).
-        import os as _os
-
-        _tasks_yaml_override = _os.environ.get("GPO_TASKS_YAML")
-        gpo_tasks_path = _Path(_tasks_yaml_override) if _tasks_yaml_override else tasks_dir / "gpo_tasks.yaml"
-        task_overrides = _load_task_block(path=gpo_tasks_path, task=args.task, phase="gpo")
-        if task_overrides:
-            merged.update(deep_merge(base=dict(merged), override=task_overrides))
-
-        # Restore any preserved keys that were nulled out by the phase/task yamls.
-        merged.update(_preserve)
-
     cfg_mmt = load_experiment_config(
         task=args.task,
         phase="finetune",
@@ -333,7 +324,10 @@ def main() -> None:
         tag=args.tag,
         finetune_init="warmstart",
         configs_root=configs_root,
-        integration_hook=_gpo_config_hook,
+        integration_hook=lambda merged, phase: apply_gpo_config(
+            merged, phase, configs_root=configs_root, task=args.task, model_profile=args.model_profile
+        ),
+        save_config=False,
     )
     validate_config(cfg=cfg_mmt)
     validate_mast_config(cfg=cfg_mmt)
@@ -342,11 +336,8 @@ def main() -> None:
     # Set resume only after validation, which correctly rejects a declarative
     # combination of train.resume=true and model_source.
     import os
-    resume_requested = os.environ.get("GPO_RESUME") == "1"
-    if resume_requested:
-        cfg_mmt.train["resume"] = True
 
-    device, _ = init_run_context(cfg_mmt=cfg_mmt, phase="finetune")
+    resume_requested = os.environ.get("GPO_RESUME") == "1"
 
     cfg_data = cfg_mmt.data
     cfg_loader = cfg_mmt.loader
@@ -366,36 +357,19 @@ def main() -> None:
         )
 
     cc = load_collection_config(gpo_dir=gpo_dir)
-    collection_split = cc.get("split", "train")
-    val_fraction = float(cc.get("val_fraction", 0.1))
+    expected_contract = collection_contract(cfg_mmt.raw, cfg_task)
+    validate_collection(cc, expected_contract, gpo_dir)
+    cfg_mmt.raw["gpo_provenance"] = {
+        "protocol": cc["protocol"],
+        "collection": cc,
+        "collection_digest": digest(cc),
+        "pairs_dir": str(gpo_dir.resolve()),
+    }
+    save_run_snapshot(cfg_mmt, resume=resume_requested)
+    if resume_requested:
+        cfg_mmt.train["resume"] = True
+    device, _ = init_run_context(cfg_mmt=cfg_mmt, phase="finetune")
 
-    log.info(
-        "GPO dataset: %s | split=%s val_fraction=%.2f",
-        gpo_dir,
-        collection_split,
-        val_fraction,
-    )
-
-    # ------------------------------------------------------------------------------------------------------------------
-    # MAST datasets — same split used during collection.
-    # cfg_data already contains the correct data.split: _inherit_mast_data_split (called
-    # inside load_experiment_config) copies the source run's split into merged["data"]["split"]
-    # during the config hook, so no manual reconstruction is needed here.
-    #
-    # The MAST context loader must cover the same shots that were used during
-    # pair collection, so that (shot_id, window_index) lookups in _GpoBatchInjector
-    # can find matches.  build_mast_datasets always returns both train and val MAST
-    # datasets; we route them based on collection_split:
-    #
-    #   collection_split="train": GPO pairs come from train shots.
-    #       mast_train_loader → provides context for GPO train pairs (train shots)
-    #       mast_val_loader   → provides context for GPO val pairs (same train shots,
-    #                           val_fraction subset selected by GpoPairDataset)
-    #       Both loaders must cover the same train shots, so use mast_train for both.
-    #
-    #   collection_split="val": GPO pairs come from val shots.
-    #       Both context loaders must cover val shots, so use mast_val for both.
-    # ------------------------------------------------------------------------------------------------------------------
     cfg_model_source = cfg_mmt.raw.get("model_source")
     dict_task_metadata, _mast_train, _mast_val, _mast_test = build_mast_datasets(
         cfg_task=cfg_task,
@@ -403,13 +377,6 @@ def main() -> None:
         phase="finetune",
         cfg_model_source=cfg_model_source,
     )
-
-    if collection_split == "train":
-        # Both GPO train and GPO val pairs were drawn from train shots.
-        mast_context = _mast_train
-    else:
-        # collection_split == "val": both GPO splits were drawn from val shots.
-        mast_context = _mast_val
 
     # ------------------------------------------------------------------------------------------------------------------
     # Signal specs + embeddings
@@ -442,21 +409,11 @@ def main() -> None:
     }
 
     # ------------------------------------------------------------------------------------------------------------------
-    # Window data
-    # Both GPO train and val context loaders are built from the same MAST dataset
-    # (mast_context) because both subsets of GPO pairs come from the same collection
-    # split.  GpoPairDataset handles the train/val split of the pairs internally via
-    # val_fraction; the MAST context just needs to cover all collection shots.
-    #
-    # IMPORTANT: pass only "train" to build_window_data.  Passing the same mast_context
-    # object under both "train" and "val" caused WindowCachedDataset.from_streaming to
-    # iterate the full dataset TWICE — doubling RAM usage and wall-clock time.  Instead
-    # we build the cache once for "train", then reuse the cached WindowCachedDataset to
-    # build a second non-shuffling val DataLoader over the exact same windows.
+    # Separate official MAST shot sets for every loss, including the MSE anchor.
     # ------------------------------------------------------------------------------------------------------------------
     window_data = build_window_data(
         cfg_mmt=cfg_mmt,
-        mast_datasets={"train": mast_context},
+        mast_datasets={"train": _mast_train, "val": _mast_val},
         dict_task_metadata=dict_task_metadata,
         cfg_task=cfg_task,
         signal_specs=signal_specs,
@@ -466,18 +423,7 @@ def main() -> None:
     )
     mast_train_loader = window_data["train"]["loader"]
 
-    # Reuse the already-materialised train WindowCachedDataset for val (no-shuffle, no
-    # drop-last).  This avoids a second full cache pass over the same data.
-    _val_collate = make_collate_fn(signal_specs=signal_specs, keep_output_native=False)
-    mast_val_loader = initialize_mmt_dataloader(
-        dataset=window_data["train"]["dataset"],
-        collate_fn=_val_collate,
-        batch_size=cfg_loader["batch_size"],
-        num_workers=cfg_loader["num_workers"],
-        shuffle=False,
-        drop_last=False,
-        seed=cfg_mmt.seed,
-    )
+    mast_val_loader = window_data["val"]["loader"]
 
     # ------------------------------------------------------------------------------------------------------------------
     # GPO pair datasets — optional per-task dataset filters from config
@@ -490,7 +436,7 @@ def main() -> None:
     #       max_pairs_per_shot_percentile: 90.0     # schema-v3 V8 coverage cap
     _gpo_ds_cfg: dict = cfg_train.get("gpo_dataset") or {}
     _shot_blacklist: set[int] | None = (
-        set(int(s) for s in _gpo_ds_cfg["shot_blacklist"]) if _gpo_ds_cfg.get("shot_blacklist") else None
+        {int(s) for s in _gpo_ds_cfg["shot_blacklist"]} if _gpo_ds_cfg.get("shot_blacklist") else None
     )
     _min_margin_mse: float | None = (
         float(_gpo_ds_cfg["min_margin_mse"]) if _gpo_ds_cfg.get("min_margin_mse") is not None else None
@@ -526,7 +472,19 @@ def main() -> None:
         min_window_index=_min_window_index,
         native_nrmse_percentiles=_native_nrmse_percentiles,
         max_pairs_per_shot_percentile=_max_pairs_per_shot_percentile,
+        filter_state=gpo_train_ds.filter_state,
     )
+
+    import json
+
+    filter_path = gpo_run_dir / "gpo_filters.json"
+    filter_json = json.dumps(gpo_train_ds.filter_state, sort_keys=True, indent=2)
+    if resume_requested:
+        if not filter_path.is_file() or filter_path.read_text() != filter_json:
+            raise ValueError("Training-fitted CGPO filters differ from the saved run.")
+    else:
+        with filter_path.open("x") as stream:
+            stream.write(filter_json)
 
     # ------------------------------------------------------------------------------------------------------------------
     # Model — load best checkpoint from the source finetune run

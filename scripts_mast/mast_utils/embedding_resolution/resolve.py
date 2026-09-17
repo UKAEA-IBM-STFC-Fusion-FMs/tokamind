@@ -84,8 +84,20 @@ def save_config_snapshot(
     """
 
     config_snapshot_path = run_dir / f"{cfg_mmt.run_id}.yaml"
-    with config_snapshot_path.open(mode="w", encoding="utf-8") as f:
-        yaml.safe_dump(cfg_mmt.raw, f, sort_keys=False)
+    if cfg_mmt.raw.get("gpo_provenance"):
+        import copy
+
+        snapshot = copy.deepcopy(cfg_mmt.raw)
+        snapshot["train"]["resume"] = False  # Invocation state, not experiment identity.
+        if config_snapshot_path.exists():
+            if yaml.safe_load(config_snapshot_path.read_text()) != snapshot:
+                raise ValueError("Resolved CGPO configuration differs from the saved run; use a new tag.")
+        else:
+            with config_snapshot_path.open(mode="x", encoding="utf-8") as f:
+                yaml.safe_dump(snapshot, f, sort_keys=False)
+    else:
+        with config_snapshot_path.open(mode="w", encoding="utf-8") as f:
+            yaml.safe_dump(cfg_mmt.raw, f, sort_keys=False)
 
     if logger_inst is not None:
         logger_inst.info("Saved config snapshot -> %s", config_snapshot_path)

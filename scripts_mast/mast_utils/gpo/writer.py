@@ -74,7 +74,16 @@ logger = logging.getLogger("mmt.GPO")
 _SCHEMA_VERSION = 3
 
 _COLLECTION_CONFIG_KEYS = (
-    "run_dir", "run_id", "task", "split", "val_fraction", "pair_sources", "multi_signal",
+    "run_dir",
+    "run_id",
+    "task",
+    "split",
+    "val_fraction",
+    "pair_sources",
+    "multi_signal",
+    "protocol",
+    "contract",
+    "train_fraction",
 )
 
 
@@ -201,13 +210,13 @@ class GpoPairWriter:
         buf = self._buffers.setdefault(output_name, [])
         buf.append(
             {
-                "shot_id":      shot_ids[valid_idx].astype(np.int64),
+                "shot_id": shot_ids[valid_idx].astype(np.int64),
                 "window_index": window_indices[valid_idx].astype(np.int64),
-                "y_w_emb":      y_w_emb[valid_idx].astype(np.float32),
-                "y_l_emb":      y_l_emb[valid_idx].astype(np.float32),
+                "y_w_emb": y_w_emb[valid_idx].astype(np.float32),
+                "y_l_emb": y_l_emb[valid_idx].astype(np.float32),
                 "native_nrmse": _diagnostic_or_nan(native_nrmse)[valid_idx],
-                "native_nmae":  _diagnostic_or_nan(native_nmae)[valid_idx],
-                "native_mse":   _diagnostic_or_nan(native_mse)[valid_idx],
+                "native_nmae": _diagnostic_or_nan(native_nmae)[valid_idx],
+                "native_mse": _diagnostic_or_nan(native_mse)[valid_idx],
                 "embedding_gap": ((y_w_emb - y_l_emb) ** 2).mean(axis=1)[valid_idx].astype(np.float32),
             }
         )
@@ -243,6 +252,20 @@ class GpoPairWriter:
             "schema_version": _SCHEMA_VERSION,
             **{k: self._provenance[k] for k in _COLLECTION_CONFIG_KEYS if k in self._provenance},
         }
+        if collection_config.get("protocol") == "mast-shot-split-v1":
+            from .protocol import file_digest, validate_shots
+
+            shots = collection_config["contract"]["split_manifest"]["shots"]
+            validate_shots(shots)
+            allowed = set(shots["train"]) | set(shots["val"])
+            seen = set()
+            shards = sorted(self._staging_dir.glob("*.npz"))
+            for shard in shards:
+                with np.load(shard, allow_pickle=False) as arrays:
+                    seen.update(int(s) for s in arrays["shot_id"])
+            if seen - allowed or not (seen & set(shots["train"])) or not (seen & set(shots["val"])):
+                raise ValueError("Collection must contain both train and validation pairs, and no other shots.")
+            collection_config["shards"] = {p.name: file_digest(p) for p in shards}
         cc_path = self._staging_dir / "collection_config.json"
         with cc_path.open("w", encoding="utf-8") as f:
             json.dump(collection_config, f, indent=2)
@@ -306,13 +329,13 @@ class GpoPairWriter:
         if (not force) and (total_rows < self._shard_size):
             return
 
-        shot_id      = np.concatenate([b["shot_id"]      for b in buf], axis=0)
+        shot_id = np.concatenate([b["shot_id"] for b in buf], axis=0)
         window_index = np.concatenate([b["window_index"] for b in buf], axis=0)
-        y_w_emb      = np.concatenate([b["y_w_emb"]      for b in buf], axis=0)
-        y_l_emb      = np.concatenate([b["y_l_emb"]      for b in buf], axis=0)
+        y_w_emb = np.concatenate([b["y_w_emb"] for b in buf], axis=0)
+        y_l_emb = np.concatenate([b["y_l_emb"] for b in buf], axis=0)
         native_nrmse = np.concatenate([b["native_nrmse"] for b in buf], axis=0)
-        native_nmae  = np.concatenate([b["native_nmae"]  for b in buf], axis=0)
-        native_mse   = np.concatenate([b["native_mse"]   for b in buf], axis=0)
+        native_nmae = np.concatenate([b["native_nmae"] for b in buf], axis=0)
+        native_mse = np.concatenate([b["native_mse"] for b in buf], axis=0)
         embedding_gap = np.concatenate([b["embedding_gap"] for b in buf], axis=0)
 
         shard_idx = self._shard_counters.get(output_name, 0)

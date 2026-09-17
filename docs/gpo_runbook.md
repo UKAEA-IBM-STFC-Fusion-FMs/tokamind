@@ -1,3 +1,8 @@
+> **Protocol update:** New training requires the verified MAST shot protocol.
+> Follow [CGPO shot protocol](cgpo_shot_protocol.md) for current collection and
+> training commands. The legacy fractional split and cluster commands below
+> must not be used unchanged for new experiments.
+
 # GPO Fine-Tuning Runbook
 
 Step-by-step instructions for running the Continuous GPO pipeline on CCC.

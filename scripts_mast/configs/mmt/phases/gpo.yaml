@@ -23,10 +23,8 @@ run_id: null
 
 
 data:
-  local: false
-  local_path:
-  subset_size: null
-  split: random
+  # Split, subset and preprocessing are inherited strictly from the source.
+  # Machine paths are resolved from local_overrides.yaml last.
 
   cache:
     enable: true
@@ -35,31 +33,6 @@ data:
     max_windows:
       train: null
       val: null
-
-
-preprocess:
-  chunks:
-    input:
-      chunk_length: 0.005
-      stride: 0.005
-      max_chunks: 50
-    actuator:
-      chunk_length: 0.005
-      stride: 0.005
-      max_chunks: 50
-    output:
-      max_chunks: 1
-
-  valid_windows:
-    min_valid_inputs_actuators: 1
-    min_valid_outputs: 1
-    min_valid_chunks: 1
-    accept_nan_inputs_actuators: true
-    accept_nan_outputs: true
-    window_stride_sec: 0.005
-
-  embed_chunks:
-    nan_imputation: interpolate
 
 
 # No stochastic input dropout during GPO — pairs are deterministic offline data.

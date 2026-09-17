@@ -80,8 +80,17 @@ _GPO_TASKS_YAML = _REPO_ROOT / "scripts_mast" / "configs" / "mmt" / "tasks" / "g
 # ---------------------------------------------------------------------------
 
 _REQUIRED_KEYS = frozenset(
-    ["shot_id", "window_index", "y_w_emb", "y_l_emb",
-     "native_nrmse", "native_nmae", "native_mse", "embedding_gap", "emb_dim"]
+    [
+        "shot_id",
+        "window_index",
+        "y_w_emb",
+        "y_l_emb",
+        "native_nrmse",
+        "native_nmae",
+        "native_mse",
+        "embedding_gap",
+        "emb_dim",
+    ]
 )
 
 
@@ -105,8 +114,16 @@ def _validate_dir(gpo_dir: Path) -> tuple[bool, list[str]]:
         errors.append(f"schema_version={meta.get('schema_version')!r} in metadata.json; expected 3")
     if cc.get("schema_version") != 3:
         errors.append(f"schema_version={cc.get('schema_version')!r} in collection_config.json; expected 3")
-    if (cc.get("split") or meta.get("split")) != "train":
+    if (cc.get("split") or meta.get("split")) != "train" and cc.get("protocol") != "mast-shot-split-v1":
         errors.append(f"split={cc.get('split')!r}; must be 'train'")
+
+    if cc.get("protocol") == "mast-shot-split-v1":
+        from mast_utils.gpo.protocol import validate_collection
+
+        try:
+            validate_collection(cc, cc["contract"], gpo_dir)
+        except (KeyError, ValueError) as exc:
+            errors.append(f"PROTOCOL: {exc}")
 
     shards = sorted(gpo_dir.glob("*.npz"))
     if not shards:
@@ -127,6 +144,7 @@ def _validate_dir(gpo_dir: Path) -> tuple[bool, list[str]]:
 # Data loading helpers
 # ---------------------------------------------------------------------------
 
+
 def _discover_signals(gpo_dir: Path) -> dict[str, list[Path]]:
     sig_map: dict[str, list[Path]] = {}
     for s in sorted(gpo_dir.glob("*.npz")):
@@ -136,20 +154,25 @@ def _discover_signals(gpo_dir: Path) -> dict[str, list[Path]]:
     return sig_map
 
 
-def _load_signal(shards: list[Path], max_windows: int) -> dict[str, np.ndarray]:
+def _load_signal(shards: list[Path], max_windows: int, train_shots: set[int] | None = None) -> dict[str, np.ndarray]:
     """Load y_w_emb, y_l_emb, shot_id from shards with optional cap."""
     yw_list, yl_list, sid_list = [], [], []
     total = 0
     for shard in sorted(shards):
         with np.load(shard, allow_pickle=False) as npz:
-            n = len(npz["shot_id"])
+            rows = (
+                np.flatnonzero(np.isin(npz["shot_id"], list(train_shots)))
+                if train_shots is not None
+                else np.arange(len(npz["shot_id"]))
+            )
+            n = len(rows)
             if max_windows > 0 and total + n > max_windows:
                 n = max(0, max_windows - total)
             if n == 0:
-                break
-            yw_list.append(npz["y_w_emb"][:n].astype(np.float32))
-            yl_list.append(npz["y_l_emb"][:n].astype(np.float32))
-            sid_list.append(npz["shot_id"][:n])
+                continue
+            yw_list.append(npz["y_w_emb"][rows[:n]].astype(np.float32))
+            yl_list.append(npz["y_l_emb"][rows[:n]].astype(np.float32))
+            sid_list.append(npz["shot_id"][rows[:n]])
             total += n
             if max_windows > 0 and total >= max_windows:
                 break
@@ -163,6 +186,7 @@ def _load_signal(shards: list[Path], max_windows: int) -> dict[str, np.ndarray]:
 # ---------------------------------------------------------------------------
 # Calibration logic
 # ---------------------------------------------------------------------------
+
 
 def _calibrate_signal(
     arrays: dict[str, np.ndarray],
@@ -187,10 +211,15 @@ def _calibrate_signal(
     shot_rows = []
     for sid, vals in shot_stats.items():
         arr = np.asarray(vals, dtype=np.float32)
-        shot_rows.append({"shot_id": sid, "n_win": len(vals),
-                          "mean_mse": float(arr.mean()),
-                          "p50_mse": float(np.median(arr)),
-                          "p95_mse": float(np.percentile(arr, 95))})
+        shot_rows.append(
+            {
+                "shot_id": sid,
+                "n_win": len(vals),
+                "mean_mse": float(arr.mean()),
+                "p50_mse": float(np.median(arr)),
+                "p95_mse": float(np.percentile(arr, 95)),
+            }
+        )
     shot_rows.sort(key=lambda r: r["mean_mse"], reverse=True)
 
     dataset_mean = float(mse_gap.mean())
@@ -231,6 +260,7 @@ def _determine_blacklist(
 # ---------------------------------------------------------------------------
 # YAML patch helpers — pure text manipulation to preserve comments
 # ---------------------------------------------------------------------------
+
 
 def _read_yaml_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
@@ -319,6 +349,7 @@ def _extract_task_key(gpo_dir: Path) -> str | None:
                     return f"task_{next_p}"
     # Fallback: look for task_X-Y anywhere in the name
     import re
+
     m = re.search(r"(task_\d+-\d+)", run_dir_name)
     if m:
         return m.group(1)
@@ -329,16 +360,20 @@ def _extract_task_key(gpo_dir: Path) -> str | None:
 # Plot generation (optional; wraps visualize_gpo_stats)
 # ---------------------------------------------------------------------------
 
+
 def _save_plots(gpo_dir: Path, save_dir: Path) -> None:
     try:
         import matplotlib
+
         matplotlib.use("Agg")
     except ImportError:
         log.warning("matplotlib not available — skipping plots.")
         return
     try:
         # Import the full visualizer lazily so this script stays fast without it
-        import importlib, os, sys as _sys
+        import importlib
+        import sys as _sys
+
         # Add repo root to path if needed
         repo_root = str(_REPO_ROOT)
         if repo_root not in _sys.path:
@@ -354,8 +389,7 @@ def _save_plots(gpo_dir: Path, save_dir: Path) -> None:
             (vgs._make_figure_quality, "gpo_quality"),
         ]:
             try:
-                kwargs: dict = {"gpo_dir": gpo_dir, "signal_filter": None,
-                                "max_windows": 50_000, "dpi": 120}
+                kwargs: dict = {"gpo_dir": gpo_dir, "signal_filter": None, "max_windows": 50_000, "dpi": 120}
                 if fig_fn is vgs._make_figure_quality:
                     kwargs["beta"] = None
                 fig = fig_fn(**kwargs)
@@ -374,6 +408,7 @@ def _save_plots(gpo_dir: Path, save_dir: Path) -> None:
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def _parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -451,6 +486,7 @@ def _parse_args() -> argparse.Namespace:
 # Report writing
 # ---------------------------------------------------------------------------
 
+
 def _write_calibration_report(
     summary: dict,
     plots_dir: Path | None,
@@ -483,42 +519,41 @@ def _write_calibration_report(
     lines: list[str] = [
         f"# GPO Calibration Report — {task}",
         f"## gpo_tag=`{gpo_tag}`",
-        f"",
+        "",
         f"> **Generated:** {datetime.datetime.now().isoformat(timespec='seconds')}  ",
-        f"> **Source:** `scripts_mast/calibrate_gpo_task.py --report_dir`  ",
+        "> **Source:** `scripts_mast/calibrate_gpo_task.py --report_dir`  ",
         f"> **Pair directory:** `{summary['gpo_dir']}`  ",
-        f"",
-        f"---",
-        f"",
-        f"## Calibrated parameters",
-        f"",
-        f"| Parameter | Value |",
-        f"|-----------|-------|",
+        "",
+        "---",
+        "",
+        "## Calibrated parameters",
+        "",
+        "| Parameter | Value |",
+        "|-----------|-------|",
         f"| Task key | `{task}` |",
         f"| β calibrated | **{summary['beta_calibrated']:.1f}** |",
         f"| β geomean (raw) | {summary['beta_geomean_raw']:.2f} |",
         f"| Shot blacklist | {summary['shot_blacklist'] if summary['shot_blacklist'] else '*(none)*'} |",
-        f"",
-        f"---",
-        f"",
-        f"## Per-signal statistics",
-        f"",
-        f"| Signal | n_windows | p50 MSE | β_opt (1/p50) | dataset mean MSE |",
-        f"|--------|-----------|---------|---------------|-----------------|",
+        "",
+        "---",
+        "",
+        "## Per-signal statistics",
+        "",
+        "| Signal | n_windows | p50 MSE | β_opt (1/p50) | dataset mean MSE |",
+        "|--------|-----------|---------|---------------|-----------------|",
     ]
 
     for sig, s in sorted(summary["signals"].items()):
         lines.append(
-            f"| {sig} | {s['n_windows']:,} | {s['p50_mse']:.5f} | "
-            f"{s['beta_opt']:.1f} | {s['dataset_mean_mse']:.5f} |"
+            f"| {sig} | {s['n_windows']:,} | {s['p50_mse']:.5f} | {s['beta_opt']:.1f} | {s['dataset_mean_mse']:.5f} |"
         )
 
     lines += [
-        f"",
-        f"---",
-        f"",
-        f"## Top-shot outliers (from calibration scan)",
-        f"",
+        "",
+        "---",
+        "",
+        "## Top-shot outliers (from calibration scan)",
+        "",
     ]
 
     any_top = False
@@ -529,14 +564,14 @@ def _write_calibration_report(
         any_top = True
         lines += [
             f"### {sig}",
-            f"",
-            f"| Rank | shot_id | mean MSE | × dataset mean |",
-            f"|------|---------|----------|----------------|",
+            "",
+            "| Rank | shot_id | mean MSE | × dataset mean |",
+            "|------|---------|----------|----------------|",
         ]
         for rank, row in enumerate(top_shots[:10], 1):
             # row is [shot_id, n_windows, mean_mse, p50_mse, p95_mse]
             if len(row) >= 3:
-                sid, n_win, mean_mse = int(row[0]), int(row[1]), float(row[2])
+                sid, mean_mse = int(row[0]), float(row[2])
                 dset_mean = s["dataset_mean_mse"]
                 ratio = mean_mse / dset_mean if dset_mean > 0 else float("nan")
                 bl_marker = " ← blacklisted" if sid in summary["shot_blacklist"] else ""
@@ -551,12 +586,12 @@ def _write_calibration_report(
         pngs = sorted(out_dir.glob("*.png"))
         if pngs:
             lines += [
-                f"---",
-                f"",
-                f"## Diagnostic figures",
-                f"",
-                f"The following PNG files were saved alongside this report:",
-                f"",
+                "---",
+                "",
+                "## Diagnostic figures",
+                "",
+                "The following PNG files were saved alongside this report:",
+                "",
             ]
             for png in pngs:
                 lines.append(f"- `{png.name}`")
@@ -596,22 +631,35 @@ def main() -> None:
         # ---- 2. Extract task key ----
         task_key = _extract_task_key(gpo_dir)
         if task_key is None:
-            log.error("  Cannot infer task key from path '%s'. "
-                      "Expected layout: runs/ft-<task>-*/gpo_pairs*/", gpo_dir)
+            log.error("  Cannot infer task key from path '%s'. Expected layout: runs/ft-<task>-*/gpo_pairs*/", gpo_dir)
             all_ok = False
             continue
         log.info("  Task key: %s", task_key)
+
+        # Fit beta and blacklist only on the persisted training shots.
+        cc = json.loads((gpo_dir / "collection_config.json").read_text())
+        if cc.get("protocol") != "mast-shot-split-v1":
+            log.error("Legacy calibration is unsupported for new runs; recollect with --split both.")
+            all_ok = False
+            continue
+        from mast_utils.gpo.protocol import validate_shots
+
+        shots = cc["contract"]["split_manifest"]["shots"]
+        validate_shots(shots)
 
         # ---- 3. Load data and calibrate ----
         sig_map = _discover_signals(gpo_dir)
         signal_stats: dict[str, dict[str, Any]] = {}
         for sig, shards in sorted(sig_map.items()):
-            arrays = _load_signal(shards, max_windows=args.max_windows)
+            arrays = _load_signal(shards, max_windows=args.max_windows, train_shots=set(shots["train"]))
             stats = _calibrate_signal(arrays)
             signal_stats[sig] = stats
             log.info(
                 "  Signal %-40s  n=%6d  p50_mse=%.5f  β_opt=%.1f",
-                sig, stats["n_windows"], stats["p50_mse"], stats["beta_opt"],
+                sig,
+                stats["n_windows"],
+                stats["p50_mse"],
+                stats["beta_opt"],
             )
 
         # Geometric mean β across signals (balanced multi-signal tasks)
@@ -663,8 +711,9 @@ def main() -> None:
 
         # ---- 6. Patch gpo_tasks.yaml ----
         if args.dry_run:
-            log.info("  DRY RUN — would patch gpo_tasks.yaml: %s  beta=%.1f  blacklist=%s",
-                     task_key, beta_rounded, blacklist)
+            log.info(
+                "  DRY RUN — would patch gpo_tasks.yaml: %s  beta=%.1f  blacklist=%s", task_key, beta_rounded, blacklist
+            )
         else:
             yaml_text = _patch_yaml_task(yaml_text, task_key, beta_rounded, blacklist)
             log.info("  Patched gpo_tasks.yaml for %s.", task_key)

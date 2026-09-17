@@ -27,7 +27,11 @@ batch at training time).
 
 Train / val split
 -----------------
-``collection_config.json`` stores ``val_fraction`` (e.g. 0.1). After all
+New collections use the persisted official MAST shot split (mast-shot-split-v1).
+Validation receives filter_state fitted on training pairs. No validation samples
+contribute to percentile thresholds or pair caps.
+
+For legacy analysis only: ``collection_config.json`` stores ``val_fraction`` (e.g. 0.1). After all
 configured pair filters are applied, rows are globally shuffled with a fixed
 seed and the final ``val_fraction`` becomes the validation set. The split is
 therefore deterministic and is not biased toward particular shard or window
@@ -40,7 +44,7 @@ Usage
     from mast_utils.gpo.dataset import GpoPairDataset
 
     ds_train = GpoPairDataset(gpo_dir="runs/.../gpo_pairs", split="train")
-    ds_val   = GpoPairDataset(gpo_dir="runs/.../gpo_pairs", split="val")
+    ds_val   = GpoPairDataset(gpo_dir="runs/.../gpo_pairs", split="val", filter_state=ds_train.filter_state)
 
     loader_train = DataLoader(ds_train, batch_size=256, shuffle=True)
 
@@ -136,6 +140,7 @@ class GpoPairDataset(Dataset):
         min_window_index: int | None = None,
         native_nrmse_percentiles: tuple[float, float] | None = None,
         max_pairs_per_shot_percentile: float | None = None,
+        filter_state: dict | None = None,
     ) -> None:
         if split not in ("train", "val"):
             raise ValueError(f"split must be 'train' or 'val', got {split!r}.")
@@ -147,6 +152,19 @@ class GpoPairDataset(Dataset):
         # Load collection config to determine val_fraction and schema.
         # ------------------------------------------------------------------
         cc = self._load_collection_config()
+        from .protocol import PROTOCOL, validate_shots
+
+        protocol = cc.get("protocol")
+        if protocol is not None and protocol != PROTOCOL:
+            raise ValueError(f"Unsupported CGPO protocol: {protocol}")
+        shot_splits = None
+        if protocol == PROTOCOL:
+            shot_splits = cc["contract"]["split_manifest"]["shots"]
+            validate_shots(shot_splits)
+            if val_fraction not in (None, 0.0):
+                raise ValueError("A persisted MAST shot split cannot be overridden by val_fraction.")
+            if split == "val" and filter_state is None:
+                raise ValueError("Validation requires filter_state fitted on the training pairs.")
         schema_version = cc.get("schema_version", 1)
 
         if schema_version not in (1, 2, 3):
@@ -163,9 +181,7 @@ class GpoPairDataset(Dataset):
 
         effective_val_fraction = float(val_fraction if val_fraction is not None else cc.get("val_fraction", 0.0))
         if not (0.0 <= effective_val_fraction < 1.0):
-            raise ValueError(
-                f"val_fraction must be in [0.0, 1.0), got {effective_val_fraction!r}."
-            )
+            raise ValueError(f"val_fraction must be in [0.0, 1.0), got {effective_val_fraction!r}.")
 
         self._val_fraction = effective_val_fraction
         self._multi_signal: str = str(cc.get("multi_signal", "joint"))
@@ -193,8 +209,7 @@ class GpoPairDataset(Dataset):
         shard_files = sorted(self._gpo_dir.glob("*.npz"))
         if not shard_files:
             raise FileNotFoundError(
-                f"No .npz shards found in {self._gpo_dir}. "
-                "Run run_collect_gpo_pairs.py to generate the dataset."
+                f"No .npz shards found in {self._gpo_dir}. Run run_collect_gpo_pairs.py to generate the dataset."
             )
 
         if signal_name is not None:
@@ -221,6 +236,8 @@ class GpoPairDataset(Dataset):
         candidates: list[tuple[Path, int, str, int, int, float]] = []
         native_nrmse_by_signal: dict[str, list[float]] = {}
 
+        allowed_shots = set(shot_splits[split]) if shot_splits else set()
+        collection_shots = set(shot_splits["train"]) | set(shot_splits["val"]) if shot_splits else set()
         for shard_path in shard_files:
             # Extract the safe signal name from the filename:
             #   "<safe_signal>__shard_NNNNNN.npz"  →  sname_safe = "<safe_signal>"
@@ -238,14 +255,13 @@ class GpoPairDataset(Dataset):
             need_native_nrmse = self._native_nrmse_percentiles is not None
 
             with np.load(shard_path, allow_pickle=False) as npz:
-                shot_ids_arr    = npz["shot_id"]                  # (B,)
-                window_idx_arr  = npz["window_index"]             # (B,)
+                shot_ids_arr = npz["shot_id"]  # (B,)
+                window_idx_arr = npz["window_index"]  # (B,)
                 n_rows = len(shot_ids_arr)
 
                 if need_embeddings:
-                    yw_arr = npz["y_w_emb"].astype(np.float32)   # (B, D)
-                    yl_arr = npz["y_l_emb"].astype(np.float32)   # (B, D)
-                    D = yw_arr.shape[1]
+                    yw_arr = npz["y_w_emb"].astype(np.float32)  # (B, D)
+                    yl_arr = npz["y_l_emb"].astype(np.float32)  # (B, D)
                     mse_gap_arr = ((yw_arr - yl_arr) ** 2).mean(axis=1)  # (B,)
                 else:
                     mse_gap_arr = None
@@ -255,8 +271,13 @@ class GpoPairDataset(Dataset):
                     native_nrmse_arr = None
 
             for row_idx in range(n_rows):
-                # Filter 1: shot blacklist
+                # Split BEFORE fitting any filters: all signals of a shot stay together.
                 shot_id = int(shot_ids_arr[row_idx])
+                if shot_splits is not None and shot_id not in allowed_shots:
+                    if shot_id not in collection_shots:
+                        raise ValueError(f"Pair shot {shot_id} is outside the train/val manifest.")
+                    continue
+                # Filter 1: shot blacklist
                 window_index = int(window_idx_arr[row_idx])
                 if self._shot_blacklist and shot_id in self._shot_blacklist:
                     n_dropped_blacklist += 1
@@ -275,7 +296,9 @@ class GpoPairDataset(Dataset):
                     native_nrmse_by_signal.setdefault(sname, []).append(native_nrmse)
 
         native_bounds: dict[str, tuple[float, float]] = {}
-        if self._native_nrmse_percentiles is not None:
+        if filter_state is not None:
+            native_bounds = filter_state["native_bounds"]
+        elif self._native_nrmse_percentiles is not None:
             for sname, values in native_nrmse_by_signal.items():
                 lo, hi = np.percentile(np.asarray(values), self._native_nrmse_percentiles)
                 native_bounds[sname] = (float(lo), float(hi))
@@ -298,13 +321,19 @@ class GpoPairDataset(Dataset):
             counts_by_signal: dict[str, list[int]] = {}
             for (sname, _shot_id), rows in rows_by_signal_shot.items():
                 counts_by_signal.setdefault(sname, []).append(len(rows))
-            caps = {
-                sname: max(1, int(np.ceil(np.percentile(counts, self._max_pairs_per_shot_percentile))))
-                for sname, counts in counts_by_signal.items()
-            }
+            caps = (
+                filter_state["caps"]
+                if filter_state is not None
+                else {
+                    sname: max(1, int(np.ceil(np.percentile(counts, self._max_pairs_per_shot_percentile))))
+                    for sname, counts in counts_by_signal.items()
+                }
+            )
             retained_candidates = []
             for (sname, _shot_id), rows in rows_by_signal_shot.items():
                 rows.sort(key=lambda candidate: candidate[4])
+                if sname not in caps:
+                    raise ValueError(f"No training-fitted pair cap for validation signal {sname}")
                 cap = caps[sname]
                 if len(rows) > cap:
                     indices = np.linspace(0, len(rows) - 1, cap, dtype=int)
@@ -314,23 +343,22 @@ class GpoPairDataset(Dataset):
                     selected = rows
                 retained_candidates.extend(selected)
 
-        all_rows = [(path, row_idx, sname) for path, row_idx, sname, _shot_id, _window_index, _native_nrmse in retained_candidates]
+        all_rows = [
+            (path, row_idx, sname)
+            for path, row_idx, sname, _shot_id, _window_index, _native_nrmse in retained_candidates
+        ]
 
-        # Shuffle globally before splitting so the val set is a random sample,
-        # not a positionally-biased tail.  A fixed seed guarantees that the
-        # same rows always land in the same split regardless of how many times
-        # the dataset is instantiated.
-        rng = random.Random(42)
-        rng.shuffle(all_rows)
-
-        n_total = len(all_rows)
-        val_n   = int(round(n_total * effective_val_fraction))
-        train_n = n_total - val_n
-
-        if split == "train":
-            self._index = all_rows[:train_n]
+        self.filter_state = {"native_bounds": native_bounds, "caps": caps}
+        if shot_splits is not None:
+            self._index = all_rows
         else:
-            self._index = all_rows[train_n:]
+            # Legacy readers retain their original semantics for historical analysis.
+            # The training entrypoint rejects these collections explicitly.
+            rng = random.Random(42)
+            rng.shuffle(all_rows)
+            val_n = round(len(all_rows) * effective_val_fraction)
+            train_n = len(all_rows) - val_n
+            self._index = all_rows[:train_n] if split == "train" else all_rows[train_n:]
 
         if n_dropped_blacklist or n_dropped_margin or n_dropped_window or n_dropped_native or n_dropped_shot_cap:
             logger.info(
@@ -368,11 +396,11 @@ class GpoPairDataset(Dataset):
         arrays = self._load_shard(shard_path)
 
         return {
-            "shot_id":      int(arrays["shot_id"][row]),
+            "shot_id": int(arrays["shot_id"][row]),
             "window_index": int(arrays["window_index"][row]),
-            "y_w_emb":      torch.from_numpy(arrays["y_w_emb"][row].copy()),   # (D,)
-            "y_l_emb":      torch.from_numpy(arrays["y_l_emb"][row].copy()),   # (D,)
-            "signal_name":  sname,
+            "y_w_emb": torch.from_numpy(arrays["y_w_emb"][row].copy()),  # (D,)
+            "y_l_emb": torch.from_numpy(arrays["y_l_emb"][row].copy()),  # (D,)
+            "signal_name": sname,
         }
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -413,10 +441,10 @@ class GpoPairDataset(Dataset):
         if key not in self._shard_cache:
             npz = np.load(shard_path, allow_pickle=False)
             self._shard_cache[key] = {
-                "shot_id":      npz["shot_id"],
+                "shot_id": npz["shot_id"],
                 "window_index": npz["window_index"],
-                "y_w_emb":      npz["y_w_emb"],
-                "y_l_emb":      npz["y_l_emb"],
+                "y_w_emb": npz["y_w_emb"],
+                "y_l_emb": npz["y_l_emb"],
             }
         return self._shard_cache[key]
 
@@ -454,7 +482,13 @@ def build_gpo_dataloaders(
     from torch.utils.data import DataLoader
 
     ds_train = GpoPairDataset(gpo_dir=gpo_dir, split="train", signal_name=signal_name, val_fraction=val_fraction)
-    ds_val = GpoPairDataset(gpo_dir=gpo_dir, split="val", signal_name=signal_name, val_fraction=val_fraction)
+    ds_val = GpoPairDataset(
+        gpo_dir=gpo_dir,
+        split="val",
+        signal_name=signal_name,
+        val_fraction=val_fraction,
+        filter_state=ds_train.filter_state,
+    )
 
     train_loader = DataLoader(
         ds_train,

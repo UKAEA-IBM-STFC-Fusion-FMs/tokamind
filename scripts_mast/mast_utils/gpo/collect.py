@@ -121,6 +121,7 @@ def collect_gpo_pairs(
     extra_sources: list[PairSource] | None = None,
     native_decoders: Mapping[str, torch.nn.Module] | None = None,
     native_stats: Mapping[str, Mapping[str, float]] | None = None,
+    protocol_contract: dict | None = None,
 ) -> dict[str, Any]:
     """
     Collect GPO preference pairs from a trained model and write them to disk.
@@ -220,6 +221,11 @@ def collect_gpo_pairs(
         "run_id": run_id,
         "pair_sources": ["model_error"] + [type(s).__name__ for s in (extra_sources or [])],
     }
+
+    if protocol_contract is not None:
+        from .protocol import PROTOCOL
+
+        provenance.update(protocol=PROTOCOL, contract=protocol_contract)
 
     writer = GpoPairWriter(out_dir=out_dir, provenance=provenance, shard_size=shard_size, overwrite=overwrite)
 

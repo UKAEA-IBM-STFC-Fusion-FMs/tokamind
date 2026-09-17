@@ -126,6 +126,7 @@ def finalize_and_save_config(
     *,
     phase: Literal["pretrain", "finetune", "eval"],
     configs_root_path: Path,
+    save_config: bool = True,
 ) -> None:
     """
     Finalize IDs/paths and write the merged config snapshot to disk.
@@ -164,6 +165,8 @@ def finalize_and_save_config(
     else:
         raise ValueError(f"Value for `phase` must be in ['pretrain', 'finetune', 'eval'], got {phase!r}.")
 
+    if not save_config:
+        return
     out_dir.mkdir(parents=True, exist_ok=True)
     config_path = out_dir / config_name
     with config_path.open(mode="w", encoding="utf-8") as f:

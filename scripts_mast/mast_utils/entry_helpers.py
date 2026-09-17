@@ -241,6 +241,7 @@ def build_window_data(  # NOSONAR - Ignore cognitive complexity
     codecs: Mapping[int, Any],
     phase: Literal["pretrain", "finetune", "eval"],
     output_decoders: Mapping[int, Any] | None = None,
+    window_test_mode: bool | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
     Build window iterables, datasets, and dataloaders.
@@ -340,7 +341,7 @@ def build_window_data(  # NOSONAR - Ignore cognitive complexity
             task_metadata=dict_task_metadata,
             config_metadata=cfg_task,
             custom_transform=mmt_transform,
-            test_mode=(phase == "eval"),
+            test_mode=(phase == "eval") if window_test_mode is None else window_test_mode,
             shuffle_windows=shuffle_at_iterable_level,
             shuffle_buffer_size=512,
             verbose=(debug_mode and split_name == "train"),
