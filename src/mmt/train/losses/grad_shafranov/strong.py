@@ -347,7 +347,6 @@ class GradShafranovResidualLoss(BaseLoss):
         self._plot_check_type = self._plot_check_cfg.get("type", None)  # Options: "show_plots", "save_plots", None.
         self._plot_check_probability = float(self._plot_check_cfg.get("probability", 0.0))
 
-        self._use_case_suffix = ""
         self._use_case_suffix_latex = ""
         self._build_plot_strings()
 
@@ -401,36 +400,26 @@ class GradShafranovResidualLoss(BaseLoss):
         """Build the loss-configuration summary shown in diagnostic plots."""
 
         if self._plot_check_type is not None:
-            self._use_case_suffix = "j_tor "
             self._use_case_suffix_latex = r"Output: ($\psi^{pred}$"
             if self.rhs_input == GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR:
-                self._use_case_suffix += "pred,"
-                self._use_case_suffix_latex += r", $j^{pred}_\phi$)"
+                self._use_case_suffix_latex += r", $J^{pred}_\phi$)"
             else:
-                self._use_case_suffix += f"via {self.j_tor_calculation_method}, "
-                self._use_case_suffix_latex += rf"), $j^{{approx}}_\phi$ via {self.j_tor_calculation_method}"
+                self._use_case_suffix_latex += rf"), $J^{{appr}}_\phi$ via {self.j_tor_calculation_method}"
 
-            losses_weights = ""
             losses_weights_latex = ""
             for kk, vv in self._all_losses_weights.items():
-                losses_weights += f" {''.join(i[0].upper() for i in kk.split('_'))}_{str(vv)}"
                 losses_weights_latex += f", w_{''.join(i[0].upper() for i in kk.split('_'))}: {str(vv)}"
 
-            gs_weights = ""
             gs_weights_latex = ""
             if self._all_losses_weights["grad_shafranov_residual"] > 0:
-                gs_weights += ", GSR["
                 gs_weights_latex += ", GSR["
 
                 for kk, vv in self.gs_weights.items():
                     if vv > 0:
-                        gs_weights += f"{kk[0]}_{str(vv)} "
                         gs_weights_latex += f"{kk}: {str(vv)}, "
 
-                gs_weights = gs_weights[:-1] + "]"
                 gs_weights_latex = gs_weights_latex[:-2] + "]"
 
-            self._use_case_suffix += losses_weights + gs_weights
             self._use_case_suffix_latex += losses_weights_latex + gs_weights_latex
 
     # ------------------------------------------------------------------------------------------------------------------
