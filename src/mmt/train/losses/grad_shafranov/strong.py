@@ -2,7 +2,8 @@
 Grad-Shafranov residual loss in native space.
 
 GradShafranovResidualLoss computes physics-informed loss by enforcing the Grad-Shafranov equation: the sparse
-diffemputed in native (destandardized) signal space with NaN-masking for sparse measurements.  # FIXME: Check wording.
+differential operator applied to predicted psi must match the RHS computed from toroidal current (j_tor). Loss is
+computed in native (destandardized) signal space with NaN-masking for sparse measurements.
 
 Key features
 ------------
@@ -20,8 +21,7 @@ Key features
   fixed indices) remain fixed.
 
 Configuration
--------------rential operator applied to predicted psi must match the RHS computed from toroidal current (j_tor). Loss is
-co
+-------------
 Expects config with:
 
 .code-block:: python
@@ -801,7 +801,8 @@ class GradShafranovResidualLoss(BaseLoss):
             ),
         }
         signal_fields_destdized["true"], no_nan_mask = prepare_target_field(
-            signal_fields_stdized["true"], self.signal_stats[signal_key_srt]
+            field=signal_fields_stdized["true"],
+            stats=self.signal_stats[signal_key_srt],
         )
 
         bhwt_shape = stdized_native_data["pred"][signal_key].shape
@@ -1100,7 +1101,7 @@ class GradShafranovResidualLoss(BaseLoss):
         # j_tor (RHS) related
         j_tor_fields_destdized = {"pred": None, "true": None}
         j_tor_no_nan_mask = torch.ones_like(psi_no_nan_mask)
-        if (self._j_tor_key is not None) and (self._j_tor_key in y_native):
+        if (self._j_tor_key in self.required_output_keys) and (self._j_tor_key in y_native):
             j_tor_fields_destdized, j_tor_no_nan_mask, _ = self.get_destdized_fields_for_gs_eq(
                 stdized_native_data=stdized_native_data,
                 key="j_tor",
@@ -1311,7 +1312,7 @@ class GradShafranovResidualLoss(BaseLoss):
         Derive toroidal current j_tor from psi using configured `j_tor_calculation_method`.
 
         Dispatches to either sparse-operator inversion or parametric approximation based on the specified value for
-        `self.j_tor_calculation_method`. Used when `rhs_input="derived_j_tor" to compute RHS from ground-truth psi.
+        `self.j_tor_calculation_method`. Used when `rhs_input="derived_j_tor"` to compute RHS from ground-truth psi.
 
         Parameters
         ----------
