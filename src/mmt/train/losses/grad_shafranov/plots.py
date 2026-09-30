@@ -10,30 +10,46 @@ import matplotlib.pyplot as plt
 from matplotlib import colors, cm, ticker, colormaps
 from matplotlib.gridspec import GridSpec
 from matplotlib.colors import LightSource
+from mpl_toolkits.mplot3d.axes3d import Axes3D
+
+from torch import Tensor
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def plot_surface(ax, plot_data, label_data=None, view_data=None, cmap="autumn_r", lw=0.5, r_stride=1, c_stride=1):
+def plot_surface(
+    ax: Axes3D,
+    plot_data: Mapping[str, Tensor],
+    label_data: Mapping[str, str] | None = None,
+    view_data: Mapping[str, float] | None = None,
+    cmap: str = "autumn_r",
+    lw: float = 0.5,
+    r_stride: int = 1,
+    c_stride: int = 1,
+):
     """
     Draw one tensor-backed `(R, Z, value)` surface on an existing 3D axis.
 
     Parameters
     ----------
-    ax : matplotlib.axes.Axes
+    ax : Axes3D
         Existing 3D axis on which to draw the surface.
     plot_data : Mapping[str, Tensor]
         Mapping containing `x_data`, `y_data`, and `z_data` tensors of matching shape.
     label_data : Mapping[str, str] | None
-        Optional axis labels and `subtitle` for the panel.
+        Axis labels and `subtitle` for the panel.
+        Optional. Default: None.
     view_data : Mapping[str, float] | None
-        Optional camera `elev`, `azim`, and `roll` values.
+        Camera `elev`, `azim`, and `roll` values.
+        Optional. Default: None.
     cmap : str
         Matplotlib color-map name.
         Optional. Default: "autumn_r".
     lw : float
         Surface line width.
+        Optional. Default: 0.5.
     r_stride, c_stride : int
         Row and column sampling strides for the surface.
+        Optional. Default: 1.
 
     Returns
     -------
@@ -72,7 +88,7 @@ def plot_surface(ax, plot_data, label_data=None, view_data=None, cmap="autumn_r"
         facecolors=illuminated_surface,
         alpha=0.75,
     )
-    norm_z = colors.Normalize(vmin=plot_data["z_data"].min(), vmax=plot_data["z_data"].max())
+    norm_z = colors.Normalize(vmin=z_data.min(), vmax=z_data.max())
     map_ax = cm.ScalarMappable(norm=norm_z, cmap=cmap)
 
     if label_data is not None:
@@ -256,9 +272,9 @@ def make_gs_plots(
     s_data = plot_data["signal_data"]
 
     default_subplot_titles = [
-        r"$\mathrm{LHS}^{pred}:L_{mask}{\cdot}\left(-\Delta*\psi^{pred}\right)$",
-        r"$\mathrm{LHS}^{true}:L_{mask}{\cdot}\left(-\Delta*\psi^{true}\right)$",
-        r"$\mathrm{RHS}^{pred}:\mu_{0}{\cdot}R{\cdot}J^{" + j_tor_case[:4] + r"}_{\phi}$",
+        r"$\mathrm{LHS}^{pred}:M{\odot}\left(-\Delta*\psi^{pred}\right)$",
+        r"$\mathrm{LHS}^{true}:M{\odot}\left(-\Delta*\psi^{true}\right)$",
+        r"$\mathrm{RHS}^{pred}:M{\odot}\left(\mu_{0}{\cdot}R{\cdot}J^{" + j_tor_case[:4] + r"}_{\phi}\right)$",
         r"$\mathrm{RHS}^{true}:\mu_{0}{\cdot}R{\cdot}J^{true}_{\phi}$",
         r"$\psi^{pred}$",
         r"$\psi^{true}$",
