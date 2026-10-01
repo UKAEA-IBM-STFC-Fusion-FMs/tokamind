@@ -394,11 +394,12 @@ Top-level location: `train:`
 
 Supported term types:
 
-| Type | Description |
-|---|---|
-| `embed_mse` | MSE in embedding (coefficient) space. No decoding required. NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; DCT3D tuning uses the same policy. The loss trains against the embedding of the imputed signal with no explicit NaN masking. |
-| `native_sparse_mse` | MSE in native standardized space. Decodes predictions back to native space, then explicitly masks out NaN positions from `output_native` before computing the mean. Only observed positions contribute. Requires decoders to be built at startup. |
-| `grad_shafranov_residual` | Grad-Shafranov PDE residual norm in native destandardized space. Requires decoders and Grad-Shafranov term fields (`grad_shafranov_params_file`, `rhs_current`). Must include `equilibrium-psi`. |
+| Type                    | Description                                                                                                                                                                                                                                                                           |
+|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `embed_mse`             | MSE in embedding (coefficient) space. No decoding required. NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; DCT3D tuning uses the same policy. The loss trains against the embedding of the imputed signal with no explicit NaN masking. |
+| `native_sparse_mse`     | MSE in native standardized space. Decodes predictions back to native space, then explicitly masks out NaN positions from `output_native` before computing the mean. Only observed positions contribute. Requires decoders to be built at startup.                                     |
+| `strong_grad_shafranov` | Strong-form Grad-Shafranov PDE in native destandardized space. Requires decoders and Grad-Shafranov term fields (`grad_shafranov_params_file`, `rhs_input`). Must include `equilibrium-psi`.                                                                                          |
+| `weak_grad_shafranov`   | Weak-form Grad-Shafranov PDE in native destandardized space. Requires decoders and Grad-Shafranov term fields (`grad_shafranov_params_file`). Must include `equilibrium-psi`.                                                                                              |
 
 Example:
 ```yaml

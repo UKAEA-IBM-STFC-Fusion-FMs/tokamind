@@ -1,9 +1,9 @@
 """
-Grad-Shafranov residual loss in native space.
+Grad-Shafranov loss in native space.
 
-GradShafranovResidualLoss computes physics-informed loss by enforcing the Grad-Shafranov equation: the sparse
-differential operator applied to predicted psi must match the RHS computed from toroidal current (j_tor). Loss is
-computed in native (destandardized) signal space with NaN-masking for sparse measurements.
+StrongFormGradShafranovLoss computes physics-informed loss by enforcing the strong-form Grad-Shafranov equation: the
+sparse differential operator applied to predicted psi must match the RHS computed from toroidal current (j_tor). Loss
+is computed in native (destandardized) signal space with NaN-masking for sparse measurements.
 
 Key features
 ------------
@@ -117,7 +117,7 @@ DEFAULT_GRAD_SHAFRANOV_WEIGHTS: dict[str, float] = {"no_gt": 0.34, "lhs_gt": 0.3
 
 
 # ======================================================================================================================
-class GradShafranovResidualLoss(BaseLoss):
+class StrongFormGradShafranovLoss(BaseLoss):
     """
     Physics-informed loss enforcing the Grad-Shafranov equilibrium equation in native, destandardized space.
 
@@ -223,7 +223,7 @@ class GradShafranovResidualLoss(BaseLoss):
                 "grad_shafranov_params_file",
                 "grad_shafranov_weights",
                 "rhs_input",
-                "loss_type",
+                "loss_metric",
                 "plot_check",
             },
         )
@@ -264,9 +264,9 @@ class GradShafranovResidualLoss(BaseLoss):
                 f"Supported: {sorted(GRAD_SHAFRANOV_J_TOR_CALCULATION_METHODS)}."
             )
 
-        loss_type = term_def.get("loss_type")
-        if loss_type is not None and loss_type not in {"l2", "mse"}:
-            raise ValueError(f"{path}.loss_type must be 'l2' or 'mse'.")
+        loss_metric = term_def.get("loss_metric")
+        if (loss_metric is not None) and (loss_metric not in {"l2", "mse"}):
+            raise ValueError(f"{path}.loss_metric must be in ['l2', 'mse'], got '{loss_metric}'.")
 
         validate_plot_check_cfg(term_def.get("plot_check"), path)
 
@@ -290,17 +290,17 @@ class GradShafranovResidualLoss(BaseLoss):
         grad_shafranov_weights: dict[Hashable, float] | None = None,
         rhs_input: str | None = None,
         j_tor_calculation_method: str | None = None,
-        loss_type: Literal["l2", "mse"] = "mse",
+        loss_metric: Literal["l2", "mse"] = "mse",
         output_weights: dict[Hashable, float] | None = None,
         output_filter: set[Hashable] | None = None,
         plot_check_cfg: Mapping[str, Any] = None,
     ) -> None:
 
         if not decoders:
-            raise ValueError("GradShafranovResidualLoss requires at least one decoder.")
+            raise ValueError("StrongFormGradShafranovLoss requires at least one decoder.")
 
         if grad_shafranov_params_file is None:
-            raise ValueError("GradShafranovResidualLoss requires grad_shafranov_params_file.")
+            raise ValueError("StrongFormGradShafranovLoss requires grad_shafranov_params_file.")
 
         if not isinstance(grad_shafranov_params_file, (str, Path)):
             raise TypeError(
@@ -327,7 +327,7 @@ class GradShafranovResidualLoss(BaseLoss):
         for gs_weight in self.gs_weights.values():
             if not 0 <= gs_weight <= 1:
                 raise ValueError(
-                    "[GradShafranovResidualLoss] all weights in `grad_shafranov_weights` must be between 0 and 1."
+                    "[StrongFormGradShafranovLoss] All weights in `grad_shafranov_weights` must be between 0 and 1."
                 )
 
         self.rhs_input = rhs_input
@@ -336,11 +336,11 @@ class GradShafranovResidualLoss(BaseLoss):
         self._output_name_to_id = {str(name): sid for name, sid in output_name_to_id.items()}
         self.signal_stats = {str(name): dict(stats) for name, stats in signal_stats.items()}
 
-        if loss_type not in ("l2", "mse"):
+        if loss_metric not in ("l2", "mse"):
             raise ValueError(
-                f"[GradShafranovResidualLoss] Invalid `loss_type`: must be in ['l2', 'mse'], got '{loss_type}'."
+                f"[StrongFormGradShafranovLoss] Invalid `loss_metric`: must be in ['l2', 'mse'], got '{loss_metric}'."
             )
-        self.loss_type = loss_type
+        self.loss_metric = loss_metric
 
         self._plot_check_cfg = plot_check_cfg or {}
         self._all_losses_weights = self._plot_check_cfg.get("all_losses_weights", {"NA": "NA"})
@@ -411,7 +411,7 @@ class GradShafranovResidualLoss(BaseLoss):
                 losses_weights_latex += f", w_{''.join(i[0].upper() for i in kk.split('_'))}: {str(vv)}"
 
             gs_weights_latex = ""
-            if self._all_losses_weights["grad_shafranov_residual"] > 0:
+            if self._all_losses_weights["strong_grad_shafranov"] > 0:
                 gs_weights_latex += ", GSR["
 
                 for kk, vv in self.gs_weights.items():
@@ -680,7 +680,7 @@ class GradShafranovResidualLoss(BaseLoss):
             context=context_info,
             probability=self._plot_check_probability,
             n_fields=psi_fields_gt_destdized.shape[0],
-            diagnostic_name="grad_shafranov_residual",
+            diagnostic_name="strong_grad_shafranov",
         )
         if plot_index is None:
             return
@@ -1028,10 +1028,10 @@ class GradShafranovResidualLoss(BaseLoss):
         # ..............................................................................................................
 
         if not preds:
-            raise RuntimeError("GradShafranovResidualLoss received empty predictions from the model.")
+            raise RuntimeError("StrongFormGradShafranovLoss received empty predictions from the model.")
 
         if not y_native:
-            raise RuntimeError("GradShafranovResidualLoss received predictions with empy native targets.")
+            raise RuntimeError("StrongFormGradShafranovLoss received predictions with empy native targets.")
 
         if self.gs_op_coo is None:
             raise RuntimeError("Grad-Shafranov operator was not loaded.")
@@ -1045,11 +1045,11 @@ class GradShafranovResidualLoss(BaseLoss):
         loss: Tensor = torch.tensor(0).to(self._runtime_device)  # Scalar
         logs: dict[Hashable, float] = {}
 
-        # If the weight for the "grad_shafranov_residual" loss term is not greater than 0 and:
+        # If the weight for the "strong_grad_shafranov" loss term is not greater than 0 and:
         # - Plotting is not needed, then return from here a default value 0 for the loss.
         # - Plotting is needed, calculation of all the required values for plotting is allowed, but calculations to
         #   update the default value 0 of the loss is later disallowed.
-        if (not self._all_losses_weights.get("grad_shafranov_residual", 0) > 0) and (self._plot_check_type is None):
+        if (not self._all_losses_weights.get("strong_grad_shafranov", 0) > 0) and (self._plot_check_type is None):
             return loss, logs  # TODO: Populate logs
 
         # ..............................................................................................................
@@ -1205,8 +1205,8 @@ class GradShafranovResidualLoss(BaseLoss):
         # 6 - Calculate Grad-Shafranov residuals for every (sample, time) field, computed in one vectorized pass.
         # ..............................................................................................................
 
-        # Only update the default loss value 0 if the weight for the "grad_shafranov_residual" loss term is > 0.
-        if self._all_losses_weights.get("grad_shafranov_residual", 0) > 0:
+        # Only update the default loss value 0 if the weight for the "strong_grad_shafranov" loss term is > 0.
+        if self._all_losses_weights.get("strong_grad_shafranov", 0) > 0:
             per_field_losses = self.grad_shafranov_loss(
                 gs_lhs_pred=gs_lhs_pred,
                 gs_rhs_pred=gs_rhs_pred,
@@ -1292,7 +1292,7 @@ class GradShafranovResidualLoss(BaseLoss):
         # Calculate and return the GS loss
 
         gs_loss = {
-            kk: masked_reduce(residual=vv, mask=cleaning_mask, kind=self.loss_type)
+            kk: masked_reduce(residual=vv, mask=cleaning_mask, kind=self.loss_metric)
             for kk, vv in flat_gs_residuals.items()
         }
 

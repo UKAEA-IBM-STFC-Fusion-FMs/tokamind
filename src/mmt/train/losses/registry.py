@@ -10,14 +10,14 @@ from __future__ import annotations
 from mmt.train.losses.constants import (
     ALL_LOSS_TYPES,
     EMBED_MSE_LOSS_TYPE,
-    GRAD_SHAFRANOV_LOSS_TYPE,
-    GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE,
+    STRONG_GRAD_SHAFRANOV_LOSS_TYPE,
+    WEAK_GRAD_SHAFRANOV_LOSS_TYPE,
     NATIVE_SPARSE_MSE_LOSS_TYPE,
 )
 
 from .base import BaseLoss
 from .embed_mse import EmbedMSELoss
-from .grad_shafranov import GradShafranovResidualLoss, WeakFormGradShafranovLoss
+from .grad_shafranov import StrongFormGradShafranovLoss, WeakFormGradShafranovLoss
 from .native_sparse_mse import NativeSparseMSELoss
 
 
@@ -26,8 +26,8 @@ from .native_sparse_mse import NativeSparseMSELoss
 LOSS_REGISTRY: dict[str, type[BaseLoss]] = {
     EMBED_MSE_LOSS_TYPE: EmbedMSELoss,
     NATIVE_SPARSE_MSE_LOSS_TYPE: NativeSparseMSELoss,
-    GRAD_SHAFRANOV_LOSS_TYPE: GradShafranovResidualLoss,
-    GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE: WeakFormGradShafranovLoss,
+    STRONG_GRAD_SHAFRANOV_LOSS_TYPE: StrongFormGradShafranovLoss,
+    WEAK_GRAD_SHAFRANOV_LOSS_TYPE: WeakFormGradShafranovLoss,
 }
 
 

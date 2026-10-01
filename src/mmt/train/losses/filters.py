@@ -15,11 +15,11 @@ from mmt.train.losses.constants import (
     DEFAULT_LOSS_TERMS,
     EMBED_MSE_LOSS_TYPE,
     EMBED_SPACE_LOSS_TYPES,
-    GRAD_SHAFRANOV_LOSS_TYPE,
+    STRONG_GRAD_SHAFRANOV_LOSS_TYPE,
     GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR,
     GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR,
     GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY,
-    GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE,
+    WEAK_GRAD_SHAFRANOV_LOSS_TYPE,
     NATIVE_SPACE_LOSS_TYPES,
 )
 
@@ -284,8 +284,8 @@ def resolve_loss_output_filters(
             )
 
         if term_type in {
-            GRAD_SHAFRANOV_LOSS_TYPE,
-            GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE,
+            STRONG_GRAD_SHAFRANOV_LOSS_TYPE,
+            WEAK_GRAD_SHAFRANOV_LOSS_TYPE,
         }:
             psi_ids = {sid for sid, name in sid_to_name.items() if name == "equilibrium-psi"}
             if not psi_ids:
@@ -294,7 +294,7 @@ def resolve_loss_output_filters(
                 raise ValueError(
                     f"{path}.terms[{term_index}] ({term_type}) must include 'equilibrium-psi' in its outputs."
                 )
-            if term_type == GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE:
+            if term_type == WEAK_GRAD_SHAFRANOV_LOSS_TYPE:
                 rhs_input_cfg = term_def.get("rhs_input") or {}
                 rhs_origin = str(
                     rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY, GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR)
