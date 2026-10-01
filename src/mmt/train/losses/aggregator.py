@@ -11,7 +11,8 @@ terms. Per-output weights (if any) are handled inside each individual term.
 The `build_loss_aggregator` factory supports the following term types:
     • `embed_mse`         — MSE in embedding (coeff) space; no decoding required.
     • `native_sparse_mse` — MSE in native standardized space; requires pre-built torch decoders.
-    • `grad_shafranov_residual` — Grad-Shafranov residual norm in native destandardized space.
+    • `strong_grad_shafranov` — Strong-form Grad-Shafranov in native destandardized space.
+    • `weak_grad_shafranov` — Weak-form Grad-Shafranov in native destandardized space.
 """
 
 from __future__ import annotations
@@ -27,16 +28,16 @@ from mmt.train.losses.constants import (
     ALL_LOSS_TYPES,
     DEFAULT_LOSS_TERMS,
     EMBED_MSE_LOSS_TYPE,
-    GRAD_SHAFRANOV_LOSS_TYPE,
+    STRONG_GRAD_SHAFRANOV_LOSS_TYPE,
     GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY,
     GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY,
-    GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE,
+    WEAK_GRAD_SHAFRANOV_LOSS_TYPE,
     NATIVE_SPARSE_MSE_LOSS_TYPE,
 )
 
 from .base import BaseLoss, LossComputeContext
 from .embed_mse import EmbedMSELoss
-from .grad_shafranov import GradShafranovResidualLoss, WeakFormGradShafranovLoss
+from .grad_shafranov import StrongFormGradShafranovLoss, WeakFormGradShafranovLoss
 from .native_sparse_mse import NativeSparseMSELoss
 
 if TYPE_CHECKING:
@@ -253,18 +254,18 @@ def build_loss_aggregator(
         # ..............................................................................................................
         # Strong Grad-Shafranov loss term
 
-        elif term_type == GRAD_SHAFRANOV_LOSS_TYPE:
+        elif term_type == STRONG_GRAD_SHAFRANOV_LOSS_TYPE:
             if not decoders:
                 raise ValueError(
-                    f"Loss term '{GRAD_SHAFRANOV_LOSS_TYPE}' requires decoders to be provided, "
+                    f"Loss term '{STRONG_GRAD_SHAFRANOV_LOSS_TYPE}' requires decoders to be provided, "
                     "but got None or empty dict. "
                     "Build and pass a dict[signal_id, TorchDecoder] when using this term."
                 )
             if output_name_to_id is None:
-                raise ValueError(f"Loss term '{GRAD_SHAFRANOV_LOSS_TYPE}' requires output_name_to_id.")
+                raise ValueError(f"Loss term '{STRONG_GRAD_SHAFRANOV_LOSS_TYPE}' requires output_name_to_id.")
 
             if signal_stats is None:
-                raise ValueError(f"Loss term '{GRAD_SHAFRANOV_LOSS_TYPE}' requires signal_stats.")
+                raise ValueError(f"Loss term '{STRONG_GRAD_SHAFRANOV_LOSS_TYPE}' requires signal_stats.")
 
             # Config shape (params file presence/type, rhs_input keys/values) is validated up-front in
             # validator._validate_loss_terms, and the constructor backstops direct instantiation; here we just read.
@@ -275,7 +276,7 @@ def build_loss_aggregator(
 
             built.append(
                 (
-                    GradShafranovResidualLoss(
+                    StrongFormGradShafranovLoss(
                         decoders=decoders,
                         signal_stats=signal_stats,
                         output_name_to_id=output_name_to_id,
@@ -283,7 +284,7 @@ def build_loss_aggregator(
                         grad_shafranov_weights=term_def.get("grad_shafranov_weights"),
                         rhs_input=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY),
                         j_tor_calculation_method=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY),
-                        loss_type=term_def.get("loss_type", "mse"),
+                        loss_metric=term_def.get("loss_metric", "mse"),
                         output_weights=ow if ow else None,
                         output_filter=output_filter,
                         plot_check_cfg=plot_check_cfg,
@@ -294,23 +295,23 @@ def build_loss_aggregator(
         # ..............................................................................................................
         # Weak Grad-Shafranov loss term
 
-        elif term_type == GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE:
+        elif term_type == WEAK_GRAD_SHAFRANOV_LOSS_TYPE:
             if not decoders:
-                raise ValueError(f"Loss term '{GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE}' requires decoders.")
+                raise ValueError(f"Loss term '{WEAK_GRAD_SHAFRANOV_LOSS_TYPE}' requires decoders.")
 
             if output_name_to_id is None:
-                raise ValueError(f"Loss term '{GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE}' requires output_name_to_id.")
+                raise ValueError(f"Loss term '{WEAK_GRAD_SHAFRANOV_LOSS_TYPE}' requires output_name_to_id.")
 
             if signal_stats is None:
-                raise ValueError(f"Loss term '{GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE}' requires signal_stats.")
+                raise ValueError(f"Loss term '{WEAK_GRAD_SHAFRANOV_LOSS_TYPE}' requires signal_stats.")
 
             plot_check_cfg = term_def.get("plot_check") or {}
             rhs_input_cfg = term_def.get("rhs_input") or {}
-            weak_loss_type_raw = term_def.get("loss_type") or "mse"
-            if weak_loss_type_raw not in {"l2", "mse"}:
-                raise ValueError(f"Invalid weak-form GS loss_type={weak_loss_type_raw!r}. Expected 'l2' or 'mse'.")
+            weak_loss_metric_raw = term_def.get("loss_metric") or "mse"
+            if weak_loss_metric_raw not in {"l2", "mse"}:
+                raise ValueError(f"Invalid weak-form GS loss_metric={weak_loss_metric_raw!r}. Expected 'l2' or 'mse'.")
 
-            weak_loss_type = cast(Literal["l2", "mse"], weak_loss_type_raw)
+            weak_loss_metric = cast(Literal["l2", "mse"], weak_loss_metric_raw)
             weak_gs_weights = cast(dict[str, float] | None, term_def.get("grad_shafranov_weights"))
             built.append(
                 (
@@ -321,7 +322,7 @@ def build_loss_aggregator(
                         grad_shafranov_params_file=term_def.get("grad_shafranov_params_file"),
                         grad_shafranov_weights=weak_gs_weights,
                         rhs_input=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY),
-                        loss_type=weak_loss_type,
+                        loss_metric=weak_loss_metric,
                         output_weights=ow if ow else None,
                         output_filter=output_filter,
                         plot_check_type=plot_check_cfg.get("type"),

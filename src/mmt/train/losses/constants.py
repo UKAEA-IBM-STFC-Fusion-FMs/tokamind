@@ -17,16 +17,16 @@ from typing import Any
 
 EMBED_MSE_LOSS_TYPE = "embed_mse"
 NATIVE_SPARSE_MSE_LOSS_TYPE = "native_sparse_mse"
-GRAD_SHAFRANOV_LOSS_TYPE = "grad_shafranov_residual"
-GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE = "grad_shafranov_weak_form"
+STRONG_GRAD_SHAFRANOV_LOSS_TYPE = "strong_grad_shafranov"
+WEAK_GRAD_SHAFRANOV_LOSS_TYPE = "weak_grad_shafranov"
 
 # Embedding-space terms operate on output_emb and require no decoder.
 EMBED_SPACE_LOSS_TYPES = frozenset({EMBED_MSE_LOSS_TYPE})
 NATIVE_SPACE_LOSS_TYPES = frozenset(
     {
         NATIVE_SPARSE_MSE_LOSS_TYPE,
-        GRAD_SHAFRANOV_LOSS_TYPE,
-        GRAD_SHAFRANOV_WEAK_FORM_LOSS_TYPE,
+        STRONG_GRAD_SHAFRANOV_LOSS_TYPE,
+        WEAK_GRAD_SHAFRANOV_LOSS_TYPE,
     }
 )
 ALL_LOSS_TYPES = frozenset({*EMBED_SPACE_LOSS_TYPES, *NATIVE_SPACE_LOSS_TYPES})

@@ -136,10 +136,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -149,7 +149,7 @@ tasks:
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
-              probability: 0.0005  # 0.0005
+              probability: 0.0005
       stages:
         - name: ft_scratch
           epochs: 50
@@ -173,10 +173,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.0
               lhs_gt: 1.0
@@ -210,10 +210,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9
-          - type: grad_shafranov_weak_form
+          - type: weak_grad_shafranov
             weight: 0.1
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.0
               lhs_gt: 1.0
@@ -247,10 +247,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -284,10 +284,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -321,17 +321,17 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
-          - type: grad_shafranov_weak_form
+          - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -365,17 +365,18 @@ tasks:
           loss:
             terms:
               - type: native_sparse_mse
-                weight: 1.0
-              - type: grad_shafranov_weak_form
-                weight: 21e-3
+                weight: 1.0 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
+              - type: weak_grad_shafranov
+                weight: 21e-3 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
                 grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
+                loss_metric: mse  # Select from: l2 | mse
                 grad_shafranov_weights:
                   no_gt: 0.5
                   lhs_gt: 0.25
                   rhs_gt: 0.25
                 rhs_input:
                   origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-                  calculation_method: GS_operator  
+                  calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
                 plot_check:
                   type: save_plots  # Select from: show_plots | save_plots | <empty>
                   probability: 0.0005
@@ -403,7 +404,7 @@ tasks:
             output_adapters: false
 
   # --------------------------------------------------------------------------------------------------------------------
-  # task_1-5: extension of task_1-4with the full group output set added. Same loss configuration as their task_1-4
+  # task_1-5: extension of task_1-4 with the full group output set added. Same loss configuration as their task_1-4
   # counterpart.
 
   task_1-5-data:
@@ -423,10 +424,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -460,10 +461,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -497,17 +498,17 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
-          - type: grad_shafranov_weak_form
+          - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -535,10 +536,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -572,10 +573,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -609,17 +610,17 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
-          - type: grad_shafranov_weak_form
+          - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -646,10 +647,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -683,10 +684,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.0
               lhs_gt: 0.5
@@ -720,17 +721,17 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9
-          - type: grad_shafranov_weak_form
+          - type: weak_grad_shafranov
             weight: 0.1
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.0
               lhs_gt: 1.0
               rhs_gt: 0.0
             rhs_input:
               origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots
               probability: 0.0005
@@ -757,10 +758,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -794,10 +795,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -831,17 +832,17 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
-          - type: grad_shafranov_weak_form
+          - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -870,10 +871,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -907,10 +908,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -945,17 +946,17 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
-          - type: grad_shafranov_weak_form
+          - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005
@@ -983,10 +984,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -1020,10 +1021,10 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
-          - type: grad_shafranov_residual
+          - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
@@ -1057,17 +1058,17 @@ tasks:
         terms:
           - type: native_sparse_mse
             weight: 0.9 # -> Sweet spot: 0.9995 (L2), 0.80 (MSE)
-          - type: grad_shafranov_weak_form
+          - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_type: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_plots  # Select from: show_plots | save_plots | <empty>
               probability: 0.0005

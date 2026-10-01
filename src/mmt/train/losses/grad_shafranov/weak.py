@@ -177,7 +177,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             allowed_specific_keys={
                 "grad_shafranov_params_file",
                 "grad_shafranov_weights",
-                "loss_type",
+                "loss_metric",
                 "plot_check",
                 "rhs_input",
             },
@@ -218,9 +218,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
                 f"form; only {GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR!r} (the discrete stiffness operator W) applies."
             )
 
-        loss_type = term_def.get("loss_type")
-        if loss_type is not None and loss_type not in {"l2", "mse"}:
-            raise ValueError(f"{path}.loss_type must be 'l2' or 'mse'.")
+        loss_metric = term_def.get("loss_metric")
+        if (loss_metric is not None) and (loss_metric not in {"l2", "mse"}):
+            raise ValueError(f"{path}.loss_metric must be in ['l2', 'mse'], got '{loss_metric}'.")
 
         validate_plot_check_cfg(term_def.get("plot_check"), path)
 
@@ -244,7 +244,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         grad_shafranov_weights: dict[str, float] | None = None,
         mask_to_plasma: bool = True,
         rhs_input: str | None = None,
-        loss_type: Literal["l2", "mse"] = "mse",
+        loss_metric: Literal["l2", "mse"] = "mse",
         output_weights: dict[Hashable, float] | None = None,
         output_filter: set[Hashable] | None = None,
         plot_check_type: str | None = None,
@@ -274,11 +274,11 @@ class WeakFormGradShafranovLoss(BaseLoss):
                 "(the derived RHS equals W(psi_gt), so the residual carries no gradient). Set rhs_gt: 0.0."
             )
         self.mask_to_plasma = bool(mask_to_plasma)
-        if loss_type not in ("l2", "mse"):
+        if loss_metric not in ("l2", "mse"):
             raise ValueError(
-                f"[WeakFormGradShafranovLoss] Invalid `loss_type`: must be in ['l2', 'mse'], got '{loss_type}'."
+                f"[WeakFormGradShafranovLoss] Invalid `loss_metric`: must be in ['l2', 'mse'], got '{loss_metric}'."
             )
-        self.loss_type = loss_type
+        self.loss_metric = loss_metric
         self.plot_check_type = plot_check_type  # TODO: Unify this into plot_check_cfg
         self.plot_check_probability = float(plot_check_probability or 0.0)  # TODO: Unify this into plot_check_cfg
 
@@ -392,7 +392,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             j_tor_true = W(psi_gt) / mu0,
 
         clamped to non-negative values. This is the weak-form counterpart of
-        `GradShafranovResidualLoss.j_tor_from_psi_via_operator`, which uses the strong-form
+        `StrongFormGradShafranovLoss.j_tor_from_psi_via_operator`, which uses the strong-form
         relation j_tor_true = (mu0 * R)^-1 * (-Delta* psi_gt).
 
         Parameters
@@ -436,7 +436,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             Per-field norms shaped ``(F,)``.
 
         """
-        return masked_reduce(residual=field, mask=mask, kind=self.loss_type)
+        return masked_reduce(residual=field, mask=mask, kind=self.loss_metric)
 
     # ------------------------------------------------------------------------------------------------------------------
     def _decode_and_destandardize_predictions(
@@ -524,7 +524,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             context=context,
             probability=self.plot_check_probability,
             n_fields=psi_fields.shape[0],
-            diagnostic_name="grad_shafranov_weak_form",
+            diagnostic_name="weak_grad_shafranov",
         )
         if field_index is None:
             return

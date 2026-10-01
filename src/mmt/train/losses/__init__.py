@@ -8,7 +8,8 @@ Available loss terms
 --------------------
 • ``EmbedMSELoss``        — MSE in embedding (coeff) space. Default term, no decoding required.
 • ``NativeSparseMSELoss`` — MSE in native standardized space. Requires decoders and ``keep_output_native=True``.
-• ``GradShafranovResidualLoss`` — Grad-Shafranov residual in destandardized native space.
+• ``StrongFormGradShafranovLoss`` — Strong-form Grad-Shafranov loss in destandardized native space.
+• ``WeakFormGradShafranovLoss`` — Weak-form Grad-Shafranov loss in destandardized native space.
 
 Config schema (``train.loss``)
 -------------------------------
@@ -30,7 +31,7 @@ New format (explicit terms)::
           weight: 0.5
           outputs:
             exclude: [output_a, output_b]
-        - type: grad_shafranov_residual
+        - type: strong_grad_shafranov
           weight: 0.1
           rhs_input:
             origin: predicted_j_tor
@@ -57,7 +58,7 @@ from .aggregator import LossAggregator, build_loss_aggregator
 from .base import BaseLoss, LossComputeContext
 from .embed_mse import EmbedMSELoss
 from .filters import resolve_loss_output_filters, resolve_native_loss_output_names
-from .grad_shafranov import GradShafranovResidualLoss, WeakFormGradShafranovLoss
+from .grad_shafranov import StrongFormGradShafranovLoss, WeakFormGradShafranovLoss
 from .native_sparse_mse import NativeSparseMSELoss
 from .registry import LOSS_REGISTRY, get_loss_class
 
@@ -67,7 +68,8 @@ __all__ = [
     "LossComputeContext",
     "EmbedMSELoss",
     "NativeSparseMSELoss",
-    "GradShafranovResidualLoss",
+    "StrongFormGradShafranovLoss",
+    "WeakFormGradShafranovLoss",
     "LossAggregator",
     "DEFAULT_LOSS_TERMS",
     "build_loss_aggregator",
@@ -75,5 +77,4 @@ __all__ = [
     "resolve_native_loss_output_names",
     "LOSS_REGISTRY",
     "get_loss_class",
-    "WeakFormGradShafranovLoss",
 ]

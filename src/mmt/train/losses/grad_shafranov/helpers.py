@@ -1,8 +1,8 @@
 """
 Shared helpers for the Grad-Shafranov residual losses (strong and weak formulations).
 
-Both :class:`~mmt.train.losses.grad_shafranov.GradShafranovResidualLoss` and
-:class:`~mmt.train.losses.grad_shafranov.WeakFormGradShafranovLoss` fold decoded native
+Both :class:`~mmt.train.losses.grad_shafranov.strong.StrongFormGradShafranovLoss` and
+:class:`~mmt.train.losses.grad_shafranov.weak.WeakFormGradShafranovLoss` fold decoded native
 predictions into ``(F, n_r, n_z)`` fields, prepare safe physical target fields, reduce a per-field
 residual to a per-field norm, and translate batch-level output masks to field masks. Those mechanics are
 independent of whether the residual is strong or weak, so they live here as pure functions with a single

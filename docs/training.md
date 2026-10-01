@@ -149,7 +149,7 @@ where caching the embedded and native arrays separately would cause
 significant RAM overhead.
 
 Consequences:
-- Native-space terms (`native_sparse_mse`, `grad_shafranov_residual`) work as normal — they read from `output_native`, which is always present.
+- Native-space terms (`native_sparse_mse`, `strong_grad_shafranov`, `weak_grad_shafranov`) work as normal — they read from `output_native`, which is always present.
 - Embedding-space terms (`embed_mse`) cannot supervise identity-encoded outputs because they have no `output_emb` entry.
 - Startup validation raises if an identity output is explicitly included in an embedding-space term, or if any output is not
   supervised by at least one capable loss term.
@@ -158,7 +158,7 @@ Consequences:
 `data.keep_output_native` is derived automatically by the config validator — do not set it manually:
 - eval phase → always `true`
 - train phase → `true` iff any term in `train.loss.terms` is a native-space loss (`native_sparse_mse`,
-  `grad_shafranov_residual`)
+  `strong_grad_shafranov`, `weak_grad_shafranov`)
 
 This controls whether `FinalizeWindowTransform` retains native output arrays in the window dict so the loss (and eval scoring) can access them.
 
