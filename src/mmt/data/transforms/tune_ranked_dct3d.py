@@ -662,7 +662,8 @@ class TuneRankedDCT3DTransform:
 
         if values is None:
             return
-        if self.signal_specs.get(role, name) is None:
+        spec = self.signal_specs.get(role, name)
+        if spec is None or spec.encoder_name != "dct3d":
             return
 
         x = np.asarray(values)

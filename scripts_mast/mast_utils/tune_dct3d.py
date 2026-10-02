@@ -110,6 +110,16 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
 
     """
 
+    # Profile overrides may select VAE/identity for some or all signals. Only
+    # DCT3D signals need a tuning dataset or coefficient artifacts.
+    signal_specs = SignalSpecRegistry(
+        specs=[s for s in signal_specs.specs if s.role in roles and s.encoder_name == "dct3d"]
+    )
+    if not signal_specs.specs:
+        logger.info("Skipping DCT3D tuning: no DCT3D signals in the requested roles.")
+        return {}
+
+    roles = [role for role in roles if any(s.role == role for s in signal_specs.specs)]
     cfg_data = cfg_mmt.data
     cfg_prep = cfg_mmt.preprocess
     cfg_tune = cfg_mmt.embeddings.get("tuning", {})

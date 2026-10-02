@@ -368,7 +368,7 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
     Strict validation: check signal-level DCT3D parameters for inherited roles.
 
     For each inherited role:
-    1. Role must exist in overrides
+    1. Role must exist in overrides only if it contains DCT3D signals
     2. For each signal in that role with encoder_name='dct3d':
        - Signal must exist in overrides[role]
        - Must have 'encoder_name': 'dct3d'
@@ -403,7 +403,11 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
     """
 
     for role in roles_to_inherit:
-        role_signals = signals_by_role.get(role, [])
+        role_signals = [
+            name
+            for name in signals_by_role.get(role, [])
+            if (spec := signal_specs.get(role, name)) is not None and spec.encoder_name == "dct3d"
+        ]
         if not role_signals:
             # Nothing to inherit/validate for this role in the current task.
             continue
@@ -411,8 +415,8 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
         # Check role exists
         if role not in per_signal_overrides:
             raise ValueError(
-                f"embeddings.role_mode.{role}=source, but source embeddings/dct3d.yaml has no entries for this role. "
-                f"Source model may not have used DCT3D rank-mode tuning for this role. "
+                f"embeddings.role_mode.{role}=source requires DCT3D overrides for signals {role_signals}, "
+                f"but none of these signals were found in the staged source overrides for this role. "
                 f"Use embeddings.role_mode.{role}=config for current config defaults, or "
                 f"embeddings.role_mode.{role}=tune to tune from scratch."
             )
@@ -421,10 +425,6 @@ def _validate_inherited_embeddings_strict(  # NOSONAR - Ignore cognitive complex
 
         # Check each DCT3D signal in this role
         for sig_name in role_signals:
-            spec = signal_specs.get(role, sig_name)
-            if (spec is None) or (spec.encoder_name != "dct3d"):
-                continue  # Skip non-DCT3D signals
-
             # Signal must exist in overrides
             if sig_name not in role_overrides:
                 raise ValueError(
@@ -551,6 +551,7 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
         if run_dir_src:
             source_run_dir = Path(str(run_dir_src))
 
+    dct3d_signals_to_inherit: dict[str, list[str]] = {}
     if roles_to_inherit:
         if source_run_dir is None:
             raise FileNotFoundError(
@@ -558,24 +559,7 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
                 "Use role_mode=tune for scratch retuning or role_mode=config for config defaults."
             )
 
-        src_emb = source_run_dir / "embeddings"
-        source_embeddings_available = stage_task_used_dct3d_artifacts_from_source(
-            source_run_dir=source_run_dir,
-            run_dir=run_dir,
-            signals_by_role=signals_by_role,
-        )
-
-        if not source_embeddings_available:
-            raise FileNotFoundError(
-                f"embeddings.role_mode requires source embeddings at {src_emb} for source roles "
-                f"{roles_to_inherit}. Ensure the source model was trained with DCT3D rank-mode tuning, "
-                "or use role_mode=tune/config for those roles."
-            )
-
-        # Step 2: Load inherited overrides and perform strict validation.
-        per_signal_overrides = load_embeddings_overrides(run_dir=run_dir)
-
-        # Build initial signal_specs for validation (with default config).
+        # Resolve the effective profile before requesting any DCT3D artifacts.
         signal_specs_for_validation = build_signal_specs(
             embeddings_cfg=cfg_mmt.embeddings,
             signals_by_role=signals_by_role,
@@ -583,15 +567,37 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
             chunk_length_sec=cfg_mmt.preprocess["chunk"]["chunk_length"],
             log_summary=False,
         )
+        for spec in signal_specs_for_validation.specs:
+            if spec.role in roles_to_inherit and spec.encoder_name == "dct3d":
+                dct3d_signals_to_inherit.setdefault(spec.role, []).append(spec.name)
+
+    if dct3d_signals_to_inherit:
+        dct3d_roles_to_inherit = list(dct3d_signals_to_inherit)
+        src_emb = source_run_dir / "embeddings"
+        source_embeddings_available = stage_task_used_dct3d_artifacts_from_source(
+            source_run_dir=source_run_dir,
+            run_dir=run_dir,
+            signals_by_role=dct3d_signals_to_inherit,
+        )
+
+        if not source_embeddings_available:
+            raise FileNotFoundError(
+                f"embeddings.role_mode requires source embeddings at {src_emb} for source roles "
+                f"{dct3d_roles_to_inherit}. Ensure the source model was trained with DCT3D rank-mode tuning, "
+                "or use role_mode=tune/config for those roles."
+            )
+
+        # Step 2: Load inherited overrides and perform strict validation.
+        per_signal_overrides = load_embeddings_overrides(run_dir=run_dir)
 
         _validate_inherited_embeddings_strict(
             per_signal_overrides=per_signal_overrides,
-            signals_by_role=signals_by_role,
-            roles_to_inherit=roles_to_inherit,
+            signals_by_role=dct3d_signals_to_inherit,
+            roles_to_inherit=dct3d_roles_to_inherit,
             signal_specs=signal_specs_for_validation,
         )
 
-        inherited_overrides = _filter_embedding_overrides_by_roles(per_signal_overrides, roles_to_inherit)
+        inherited_overrides = _filter_embedding_overrides_by_roles(per_signal_overrides, dct3d_roles_to_inherit)
         if inherited_overrides:
             _merge_embedding_overrides(cfg_mmt.raw["embeddings"], inherited_overrides)
 
