@@ -33,6 +33,7 @@ ALL_LOSS_TYPES = frozenset({*EMBED_SPACE_LOSS_TYPES, *NATIVE_SPACE_LOSS_TYPES})
 
 DEFAULT_LOSS_TERMS: tuple[Mapping[str, Any], ...] = ({"type": EMBED_MSE_LOSS_TYPE, "weight": 1.0},)
 
+LOSS_ACRONYM_MAP = {"NSM": "data"}
 
 # ======================================================================================================================
 # Grad-Shafranov loss options
@@ -60,3 +61,5 @@ GRAD_SHAFRANOV_RHS_INPUT_ORIGINS = frozenset(
 GRAD_SHAFRANOV_J_TOR_CALCULATION_METHODS = frozenset(
     {GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR, GRAD_SHAFRANOV_J_TOR_VIA_PARAMETRIC_APPROX}
 )
+
+GRAD_SHAFRANOV_WEIGHT_MAP = {"no_gt": r"$\omega_{NA}$", "lhs_gt": r"$\omega_{LA}$", "rhs_gt": r"$\omega_{RA}$"}
