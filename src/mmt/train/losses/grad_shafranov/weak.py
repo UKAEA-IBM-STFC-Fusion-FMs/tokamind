@@ -58,8 +58,9 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Hashable, Literal
-
 import numpy as np
+import scipy.sparse as sp
+
 import torch
 from torch import Tensor
 
@@ -87,18 +88,21 @@ from mmt.train.losses.constants import (
     GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY,
     GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY,
     GRAD_SHAFRANOV_RHS_KEYS,
+    LOSS_ACRONYM_MAP,
+    GRAD_SHAFRANOV_WEIGHT_MAP,
 )
 from mmt.utils.paths import REPO_ROOT
 from .plots import make_gs_plots
 
-WEAK_FORM_RHS_INPUT_ORIGINS: frozenset[str] = frozenset(
-    {GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR, GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR}
-)
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Preliminaries
 
-DEFAULT_WEAK_FORM_GRAD_SHAFRANOV_WEIGHTS: dict[str, float] = {
+WEAK_GRAD_SHAFRANOV_RHS_INPUT_ORIGINS: frozenset[str] = frozenset(
+    {GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR, GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR}
+)
+
+DEFAULT_WEAK_GRAD_SHAFRANOV_WEIGHTS: dict[str, float] = {
     "no_gt": 0.5,
     "lhs_gt": 0.25,
     "rhs_gt": 0.25,
@@ -107,7 +111,7 @@ DEFAULT_WEAK_FORM_GRAD_SHAFRANOV_WEIGHTS: dict[str, float] = {
 
 # ======================================================================================================================
 class WeakFormGradShafranovLoss(BaseLoss):
-    """
+    """# TODO: Check.
     Weak-form Grad-Shafranov residual loss.
 
     Parameters
@@ -126,7 +130,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         ``W(psi_gt)``. ``rhs_gt`` scores ``mu0 * j_tor_pred`` against ``W(psi_gt)``.
     mask_to_plasma : bool
         Whether to restrict the residual norm to the ground-truth plasma region.
-    rhs_input : str | None
+    rhs_input_origin : str | None
         RHS source. ``predicted_j_tor`` (general case) uses the predicted current, and all three
         residual variants are available. ``derived_j_tor`` (reduced case) derives the reference
         current from ground-truth psi through W, so psi is the only required model output and
@@ -135,7 +139,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         Optional per-output weights, accepted for loss-system consistency.
     output_filter : set[Hashable] | None
         Optional supervised output ids. When provided it must include all outputs required by
-        ``rhs_input``: psi and j_tor for ``predicted_j_tor``, psi alone for ``derived_j_tor``.
+        ``rhs_input_origin``: psi and j_tor for ``predicted_j_tor``, psi alone for ``derived_j_tor``.
 
     Attributes
     ----------
@@ -169,6 +173,15 @@ class WeakFormGradShafranovLoss(BaseLoss):
         -------
         None
 
+        Raises
+        ------
+        KeyError
+            If a required field is missing or an unknown nested key is provided.
+        TypeError
+            If a field has the wrong type.
+        ValueError
+            If a field has an unsupported value.
+
         """
 
         cls._validate_known_term_keys(
@@ -177,9 +190,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
             allowed_specific_keys={
                 "grad_shafranov_params_file",
                 "grad_shafranov_weights",
+                "rhs_input",
                 "loss_metric",
                 "plot_check",
-                "rhs_input",
             },
         )
 
@@ -187,32 +200,38 @@ class WeakFormGradShafranovLoss(BaseLoss):
         if grad_shafranov_params_file is None:
             raise KeyError(f"{path}.grad_shafranov_params_file is required.")
 
-        if not isinstance(grad_shafranov_params_file, str):
-            raise TypeError(f"{path}.grad_shafranov_params_file must be a string.")
+        if not isinstance(grad_shafranov_params_file, (str, Path)):
+            raise TypeError(
+                f"{path}.grad_shafranov_params_file must be a str or Path, "
+                f"got {type(grad_shafranov_params_file).__name__}."
+            )
 
-        rhs_input = term_def.get("rhs_input") or {}
-        if not isinstance(rhs_input, Mapping):
+        rhs_input_cfg = term_def.get("rhs_input") or {}
+        if not isinstance(rhs_input_cfg, Mapping):
             raise TypeError(f"{path}.rhs_input must be a mapping when provided.")
 
-        unknown_rhs_keys = sorted(str(key) for key in rhs_input if key not in GRAD_SHAFRANOV_RHS_KEYS)
-        if unknown_rhs_keys:
+        unknown_rhs_input_keys = sorted(
+            str(key) for key in rhs_input_cfg.keys() if (key not in GRAD_SHAFRANOV_RHS_KEYS)
+        )
+        if unknown_rhs_input_keys:
             raise KeyError(
-                f"Unknown {path}.rhs_input keys: {unknown_rhs_keys}. Supported: {sorted(GRAD_SHAFRANOV_RHS_KEYS)}."
+                f"Unknown {path}.rhs_input keys: {unknown_rhs_input_keys}. "
+                f"Supported: {sorted(GRAD_SHAFRANOV_RHS_KEYS)}."
             )
 
         rhs_input_origin = str(
-            rhs_input.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY, GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR)
+            rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY, GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR)
         )
-        if rhs_input_origin not in WEAK_FORM_RHS_INPUT_ORIGINS:
+        if rhs_input_origin not in WEAK_GRAD_SHAFRANOV_RHS_INPUT_ORIGINS:
             raise ValueError(
                 f"{path}.rhs_input.origin={rhs_input_origin!r} is unsupported by the weak form. "
-                f"Supported: {sorted(WEAK_FORM_RHS_INPUT_ORIGINS)}."
+                f"Supported: {sorted(WEAK_GRAD_SHAFRANOV_RHS_INPUT_ORIGINS)}."
             )
 
         rhs_input_calculation_method = str(
-            rhs_input.get(GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY, GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR)
+            rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY, GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR)
         )
-        if rhs_input_calculation_method != GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR:
+        if rhs_input_calculation_method != GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR:  # TODO: Different for strong.
             raise ValueError(
                 f"{path}.rhs_input.calculation_method={rhs_input_calculation_method!r} is unsupported by the weak "
                 f"form; only {GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR!r} (the discrete stiffness operator W) applies."
@@ -222,16 +241,16 @@ class WeakFormGradShafranovLoss(BaseLoss):
         if (loss_metric is not None) and (loss_metric not in {"l2", "mse"}):
             raise ValueError(f"{path}.loss_metric must be in ['l2', 'mse'], got '{loss_metric}'.")
 
-        validate_plot_check_cfg(term_def.get("plot_check"), path)
+        validate_plot_check_cfg(plot_check=term_def.get("plot_check"), path=path)
 
         grad_shafranov_weights = term_def.get("grad_shafranov_weights") or {}
         if not isinstance(grad_shafranov_weights, Mapping):
             raise TypeError(f"{path}.grad_shafranov_weights must be a mapping when provided.")
 
-        cls._validate_weight_mapping(
+        cls._validate_weight_mapping(  # TODO: Should we check/enforce convex combination?
             weights=grad_shafranov_weights,
             path=f"{path}.grad_shafranov_weights",
-            allowed_keys=set(DEFAULT_WEAK_FORM_GRAD_SHAFRANOV_WEIGHTS),
+            allowed_keys=set(DEFAULT_WEAK_GRAD_SHAFRANOV_WEIGHTS),
         )
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -242,48 +261,79 @@ class WeakFormGradShafranovLoss(BaseLoss):
         output_name_to_id: Mapping[str, Hashable],
         grad_shafranov_params_file: str | Path | None,
         grad_shafranov_weights: dict[str, float] | None = None,
-        mask_to_plasma: bool = True,
-        rhs_input: str | None = None,
+        mask_to_plasma: bool = True,  # TODO: What is this for? It does not come from finetune_tasks.yaml
+        rhs_input_origin: str | None = None,
+        j_tor_calculation_method: str | None = None,
         loss_metric: Literal["l2", "mse"] = "mse",
         output_weights: dict[Hashable, float] | None = None,
         output_filter: set[Hashable] | None = None,
-        plot_check_type: str | None = None,
-        plot_check_probability: float | None = None,
+        plot_check_cfg: Mapping[str, Any] = None,
     ) -> None:
+
         if not decoders:
             raise ValueError("WeakFormGradShafranovLoss requires at least one decoder.")
 
+        # FIXME: These checks are repeated in validate_term_cfg.
         if grad_shafranov_params_file is None:
-            raise ValueError("WeakFormGradShafranovLoss requires grad_shafranov_params_file.")
-
-        self._decoders = decoders
-        self.rhs_input = rhs_input or GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR
-        if self.rhs_input not in WEAK_FORM_RHS_INPUT_ORIGINS:
-            raise ValueError(
-                f"Unsupported `rhs_input={self.rhs_input!r}`. Supported: {sorted(WEAK_FORM_RHS_INPUT_ORIGINS)}."
+            raise KeyError("WeakFormGradShafranovLoss requires grad_shafranov_params_file.")
+        if not isinstance(grad_shafranov_params_file, (str, Path)):
+            raise TypeError(
+                f"[WeakFormGradShafranovLoss] `grad_shafranov_params_file` must be a str or Path, "
+                f"got {type(grad_shafranov_params_file).__name__}."
             )
-        self._derives_j_tor = self.rhs_input == GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR
+
+        # FIXME: This check seems repeated in validate_term_cfg.
+        self.rhs_input_origin: str = rhs_input_origin or GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR
+        if self.rhs_input_origin not in WEAK_GRAD_SHAFRANOV_RHS_INPUT_ORIGINS:
+            raise ValueError(
+                f"[WeakFormGradShafranovLoss] Unsupported `rhs_input_origin={self.rhs_input_origin!r}`. "
+                f"Supported: {sorted(WEAK_GRAD_SHAFRANOV_RHS_INPUT_ORIGINS)}."
+            )
+
+        # self._runtime_device: torch.device | None = None  # FIXME: From strong form. Not used yet here.
+        self._decoders = decoders
         self._output_weights = output_weights or {}
+        self.gs_weights = {**DEFAULT_WEAK_GRAD_SHAFRANOV_WEIGHTS, **(grad_shafranov_weights or {})}
+        for gs_weight in self.gs_weights.values():  # FIXME: This check seems repeated in validate_term_cfg.
+            if not 0 <= gs_weight <= 1:
+                raise ValueError(
+                    "[WeakFormGradShafranovLoss] All weights in `grad_shafranov_weights` must be between 0 and 1."
+                )
+
+        self._derives_j_tor = self.rhs_input_origin == GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR
+        if self._derives_j_tor and (self.gs_weights["rhs_gt"] > 0.0):
+            raise ValueError(
+                "[WeakFormGradShafranovLoss] `rhs_gt` is degenerate when `rhs_input_origin='derived_j_tor'` "
+                "(the derived RHS equals W(psi_gt), so the residual carries no gradient). Set rhs_gt: 0.0."
+            )
+
+        self.j_tor_calculation_method = j_tor_calculation_method
         self._output_filter = set(output_filter) if output_filter is not None else None
         self._output_name_to_id = {str(name): sid for name, sid in output_name_to_id.items()}
         self.signal_stats = {str(name): dict(stats) for name, stats in signal_stats.items()}
-        self.gs_weights = {**DEFAULT_WEAK_FORM_GRAD_SHAFRANOV_WEIGHTS, **(grad_shafranov_weights or {})}
-        if self._derives_j_tor and self.gs_weights["rhs_gt"] > 0.0:
-            raise ValueError(
-                "[WeakFormGradShafranovLoss] `rhs_gt` is degenerate when `rhs_input.origin='derived_j_tor'` "
-                "(the derived RHS equals W(psi_gt), so the residual carries no gradient). Set rhs_gt: 0.0."
-            )
         self.mask_to_plasma = bool(mask_to_plasma)
-        if loss_metric not in ("l2", "mse"):
+
+        if loss_metric not in ("l2", "mse"):  # FIXME: This check seems repeated in validate_term_cfg.
             raise ValueError(
                 f"[WeakFormGradShafranovLoss] Invalid `loss_metric`: must be in ['l2', 'mse'], got '{loss_metric}'."
             )
         self.loss_metric = loss_metric
-        self.plot_check_type = plot_check_type  # TODO: Unify this into plot_check_cfg
-        self.plot_check_probability = float(plot_check_probability or 0.0)  # TODO: Unify this into plot_check_cfg
+
+        self._plot_check_cfg = plot_check_cfg or {}
+        self._all_losses_weights = self._plot_check_cfg.get("all_losses_weights", {"NA": "NA"})  # FIXME: Not used yet.
+        self._plot_check_type = self._plot_check_cfg.get("type", None)  # Options: "show_plots", "save_plots", None.
+        self._plot_check_probability = float(self._plot_check_cfg.get("probability", 0.0))
+
+        self._plain_loss_name = "Weak-form Grad-Shafranov"
+        self._fig_title = ""
+        self._fig_subtitle = ""
+        self._build_plot_strings()
+
+        # ..............................................................................................................
+        # Set relevant output keys
 
         self._psi_key = resolve_output_key(
-            self._output_name_to_id, "equilibrium-psi", loss_name="Weak form Grad-Shafranov loss"
+            output_name_to_id=self._output_name_to_id, name="equilibrium-psi", loss_name="Weak-form Grad-Shafranov loss"
         )
         if self._derives_j_tor:
             # Reduced case: j_tor is not a model output, so it may be absent from the output map entirely.
@@ -300,21 +350,71 @@ class WeakFormGradShafranovLoss(BaseLoss):
             if missing:
                 raise ValueError(
                     f"WeakFormGradShafranovLoss output filter must include all outputs required by "
-                    f"`rhs_input.origin={self.rhs_input!r}`: {missing}."
+                    f"`rhs_input_origin={self.rhs_input_origin!r}`: {missing}."
                 )
 
+        # ..............................................................................................................
+        # Load Grad-Shafranov parameters
+
+        self.gs_op_coo: Tensor | None = None
+
         self.n_r = None
-        self.n_z = None
-        self.R_matrix = None
-        self.Z_matrix = None
-        self.base_j_tor_limiter_mask_rz = None
         self.dr = None
+        self.R_matrix = None
+
+        self.n_z = None
         self.dz = None
-        self.load_gs_params(filename=grad_shafranov_params_file)
+        self.Z_matrix = None
+
+        self.rz_points_for_lcfs_calculation: Tensor | None = None
+        self.zero_lcfs_rz_mask: Tensor | None = None
+        self.base_j_tor_limiter_mask_rz = None
+        self.mast_limiter_mask_rz: Tensor | None = None
+
+        self._load_gs_params(filename=grad_shafranov_params_file)
 
     # ------------------------------------------------------------------------------------------------------------------
-    def load_gs_params(self, filename: str | Path) -> None:
-        """Load the weak-form grid geometry and derive its uniform R/Z spacings.
+    def _gs_weights_latex(self) -> str:
+
+        gs_weights_latex = ""
+        for kk, vv in self.gs_weights.items():
+            if vv > 0:
+                gs_weights_latex += f"{GRAD_SHAFRANOV_WEIGHT_MAP[kk]}: {str(vv)}, "
+
+        gs_weights_latex = gs_weights_latex[:-2]
+
+        return gs_weights_latex
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def _build_plot_strings(self) -> None:
+        """Build the loss-configuration summary shown in diagnostic plots."""
+
+        self._fig_title = f"{self._plain_loss_name} related plots"
+
+        if self._plot_check_type is not None:
+            self._fig_subtitle = r"Output: ($\psi^{pred}$"
+            if self.rhs_input_origin == GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR:
+                self._fig_subtitle += r", $J^{pred}_\phi$)"
+            else:
+                self._fig_subtitle += rf"), $J^{{appr}}_\phi$ via {self.j_tor_calculation_method}"
+
+            losses_weights_latex = ""
+            for kk, vv in self._all_losses_weights.items():
+                loss_acronym = "".join(i[0].upper() for i in kk.split("_"))
+                if loss_acronym in LOSS_ACRONYM_MAP:
+                    loss_acronym = LOSS_ACRONYM_MAP[loss_acronym]
+                loss_acronym = "{" + loss_acronym + "}"
+                losses_weights_latex += rf", $\omega_{loss_acronym}$: {str(vv)}"
+
+                if kk.endswith("_grad_shafranov") and (vv > 0):
+                    losses_weights_latex += f" (with {self._gs_weights_latex()})"
+
+            self._fig_subtitle += losses_weights_latex
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def _load_gs_params(self, filename: str | Path) -> None:
+        """# TODO: Unify with strong form.
+        Load the weak-form grid geometry and derive its uniform R/Z spacings.
 
         Parameters
         ----------
@@ -334,14 +434,27 @@ class WeakFormGradShafranovLoss(BaseLoss):
         -----
         The method stores ``n_r``, ``n_z``, R/Z grids, the optional limiter mask, and the grid spacings used by the
         discrete stiffness operator.
+
         """
 
-        with np.load(resolve_gs_asset_path(filename, REPO_ROOT)) as loaded:
-            grid_assets = parse_gs_grid_assets(loaded, tensor_dtype=torch.float32)
+        with np.load(resolve_gs_asset_path(filename=filename, repo_root=REPO_ROOT)) as loaded_data:
+            grid_assets = parse_gs_grid_assets(loaded=loaded_data, tensor_dtype=torch.float32)
+            gs_op_coo_scipy = sp.coo_matrix(
+                (loaded_data["GS_op_coo_data"], (loaded_data["GS_op_coo_row"], loaded_data["GS_op_coo_col"])),
+                shape=loaded_data["GS_op_coo_shape"],
+            )
+            self.gs_op_coo = torch.sparse_coo_tensor(  # -> This is COO
+                indices=torch.LongTensor(np.array(gs_op_coo_scipy.nonzero())),
+                values=torch.as_tensor(gs_op_coo_scipy.data, dtype=torch.float32),
+                size=torch.Size(gs_op_coo_scipy.shape),
+            )
+            self.mast_limiter_mask_rz = torch.tensor(loaded_data["MAST_lim_mask_rz"]).unsqueeze(0).float()
+
         self.n_r = grid_assets.n_r
         self.n_z = grid_assets.n_z
         self.R_matrix = grid_assets.r_matrix  # (n_r, n_z): R varies along axis 0, Z along axis 1
         self.Z_matrix = grid_assets.z_matrix
+
         # R varies down rows (axis 0), Z across cols (axis 1) — confirmed from the asset.
         r_axis = self.R_matrix[:, 0]  # column 0, R changes down rows
         z_axis = self.Z_matrix[0, :]  # row 0, Z changes across cols
@@ -349,35 +462,36 @@ class WeakFormGradShafranovLoss(BaseLoss):
         self.dz = float((z_axis.max() - z_axis.min()) / (self.n_z - 1))
         if self.dr <= 0 or self.dz <= 0:
             raise ValueError(f"Bad GS grid spacing dr={self.dr}, dz={self.dz}; check R/Z axis orientation.")
+
+        self.rz_points_for_lcfs_calculation = torch.column_stack(
+            [self.R_matrix.ravel(), self.Z_matrix.ravel()]  # noqa - Ignore missing attribute warning
+        )
+        self.zero_lcfs_rz_mask = torch.zeros_like(self.R_matrix, dtype=torch.bool)  # noqa - Ignore missing attribute
         self.base_j_tor_limiter_mask_rz = grid_assets.base_j_tor_limiter_mask_rz
 
     # ------------------------------------------------------------------------------------------------------------------
     def _discrete_stiffness(self, psi_fields: Tensor, R_rz: Tensor) -> Tensor:
         """
-        Apply the discrete stiffness operator associated with the weak-form
-        bilinear form
+        Apply the discrete stiffness operator associated with the weak-form bilinear form
 
            a(ψ,v)=∫Ω (1/R) ∇ψ·∇v dΩ.
 
-        The operator is evaluated using edge-based flux differences with
-        arithmetic averaging of 1/R across grid edges.
+        The operator is evaluated using edge-based flux differences with arithmetic averaging of 1/R across grid edges.
 
-        This computes the action Wψ directly; no linear system is assembled
-        or solved.
+        This computes the action Wψ directly; no linear system is assembled or solved.
         """
-        dR, dZ = self.dr, self.dz
         res = torch.zeros_like(psi_fields)
 
         # R-direction edges
         R_edge_R = 0.5 * (R_rz[1:, :] + R_rz[:-1, :])
-        wR = (1.0 / R_edge_R) / (dR * dR)
+        wR = (1.0 / R_edge_R) / (self.dr * self.dr)
         flux_R = wR.unsqueeze(0) * (psi_fields[:, 1:, :] - psi_fields[:, :-1, :])
         res[:, :-1, :] = res[:, :-1, :] - flux_R
         res[:, 1:, :] = res[:, 1:, :] + flux_R
 
         # Z-direction edges
         R_edge_Z = 0.5 * (R_rz[:, 1:] + R_rz[:, :-1])
-        wZ = (1.0 / R_edge_Z) / (dZ * dZ)
+        wZ = (1.0 / R_edge_Z) / (self.dz * self.dz)
         flux_Z = wZ.unsqueeze(0) * (psi_fields[:, :, 1:] - psi_fields[:, :, :-1])
         res[:, :, :-1] = res[:, :, :-1] - flux_Z
         res[:, :, 1:] = res[:, :, 1:] + flux_Z
@@ -418,7 +532,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         no gradient to the model and is used for the RHS and for diagnostics only.
         """
 
-        return torch.clamp(self._discrete_stiffness(psi_gt_fields, R_rz) / mu0, min=0.0)
+        return torch.clamp(input=self._discrete_stiffness(psi_fields=psi_gt_fields, R_rz=R_rz) / mu0, min=0.0)
 
     # ------------------------------------------------------------------------------------------------------------------
     def _field_norm(self, field: Tensor, mask: Tensor | None = None) -> Tensor:  # FIXME: Replace "norm" by "metric"
@@ -498,6 +612,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         cleaning_mask = psi_finite_mask & jtor_finite_mask
         if self.mask_to_plasma:
             cleaning_mask = cleaning_mask & plasma_mask
+
         return psi_gt_fields, jtor_gt_fields, cleaning_mask
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -517,12 +632,12 @@ class WeakFormGradShafranovLoss(BaseLoss):
     ) -> None:
         """Emit one optional weak-form diagnostic plot using the shared plot probability convention."""
 
-        if self.plot_check_type is None:
+        if self._plot_check_type is None:
             return
 
         field_index = select_diagnostic_plot_slice(
             context=context,
-            probability=self.plot_check_probability,
+            probability=self._plot_check_probability,
             n_fields=psi_fields.shape[0],
             diagnostic_name="weak_grad_shafranov",
         )
@@ -530,7 +645,10 @@ class WeakFormGradShafranovLoss(BaseLoss):
             return
 
         with torch.no_grad():
-            rhs_ref = torch.where(cleaning_mask, mu0 * jtor_gt_fields, zero) if jtor_gt_fields is not None else None
+            rhs_ref = torch.where(cleaning_mask, mu0 * jtor_gt_fields, zero) if (jtor_gt_fields is not None) else None
+
+            j_tor_case = "approximated" if self._derives_j_tor else "predicted"
+
             make_gs_plots(
                 plot_data={
                     "grid_data": {
@@ -542,35 +660,38 @@ class WeakFormGradShafranovLoss(BaseLoss):
                             "j_tor": [-0.2 * 1e6, 1e6],
                         },
                     },
-                    "title": "Weak-form Grad-Shafranov: LHS vs RHS and signals",
+                    "fig_title": self._fig_title,
+                    "fig_subtitle": self._fig_subtitle,
                     "subplot_titles": [
-                        "LHS = W psi (pred.)",
-                        "LHS = W psi (real)",
-                        "RHS = mu0 j_tor (derived)" if self._derives_j_tor else "RHS = mu0 j_tor (pred.)",
-                        "RHS = mu0 j_tor (real)",
-                        "Pred. psi",
-                        "Real psi",
-                        "Pred. j_tor",
-                        "Real j_tor",
+                        r"$\mathrm{LHS}^{pred}: W\psi^{pred}$",
+                        r"$\mathrm{LHS}^{true}: W\psi^{true}$",
+                        r"$\mathrm{RHS}^{pred}: \mu_{0}{\cdot}J^{" + j_tor_case[:4] + r"}_{\phi}$",
+                        r"$\mathrm{LHS}^{true}: \mu_{0}{\cdot}J^{true}_{\phi}$",
+                        r"$\psi^{pred}$",
+                        r"$\psi^{true}$",
+                        r"$J^{" + j_tor_case[:4] + r"}_{\phi}$",
+                        r"$J^{true}_{\phi}$",
                     ],
                     "gs_data": {
                         "lhs_pred_data": lhs_pred[field_index].detach(),
-                        "lhs_ref_data": lhs_gt[field_index].detach() if lhs_gt is not None else None,
+                        "lhs_ref_data": lhs_gt[field_index].detach() if (lhs_gt is not None) else None,
                         "rhs_pred_data": rhs_pred[field_index].detach(),
-                        "rhs_ref_data": rhs_ref[field_index].detach() if rhs_ref is not None else None,
+                        "rhs_ref_data": rhs_ref[field_index].detach() if (rhs_ref is not None) else None,
                     },
                     "signal_data": {
                         "psi_pred_data": psi_fields[field_index].detach(),
                         "psi_ref_data": psi_gt_fields[field_index].detach(),
                         "j_tor_pred_data": j_tor_fields[field_index].detach(),
-                        "j_tor_ref_data": jtor_gt_fields[field_index].detach() if jtor_gt_fields is not None else None,
-                        "j_tor_case": "derived" if self._derives_j_tor else "predicted",
+                        "j_tor_ref_data": jtor_gt_fields[field_index].detach()
+                        if (jtor_gt_fields is not None)
+                        else None,
+                        "j_tor_case": j_tor_case,
                     },
                 },
-                save_plots=(self.plot_check_type == "save_plots"),
+                save_plots=(self._plot_check_type == "save_plots"),
                 save_path=(
-                    training_plot_path(context, slice_index=field_index)
-                    if self.plot_check_type == "save_plots"
+                    training_plot_path(context=context, slice_index=field_index)
+                    if self._plot_check_type == "save_plots"
                     else None
                 ),
             )
@@ -599,35 +720,38 @@ class WeakFormGradShafranovLoss(BaseLoss):
         ref = next(iter(preds.values()))
         logs: dict[Hashable, float] = {}
         # Keep R in float32 under AMP; weak-form stiffness uses reciprocal R weights.
-        r_matrix = runtime_tensor(self.R_matrix, ref=ref, dtype=torch.float32)  # already (n_r, n_z)
+        r_matrix = runtime_tensor(tensor=self.R_matrix, ref=ref, dtype=torch.float32)  # already (n_r, n_z)
 
         # ..............................................................................................................
         # 1 - Decode prediction fields and prepare finite native targets / physical-domain mask
         # ..............................................................................................................
-        psi_bhwt, psi_fields, j_tor_fields = self._decode_and_destandardize_predictions(preds)
+
+        psi_bhwt, psi_fields, j_tor_fields = self._decode_and_destandardize_predictions(preds=preds)
         n_fields = psi_fields.shape[0]
         psi_gt_fields, jtor_gt_fields, cleaning_mask = self._prepare_targets_and_cleaning_mask(
-            y_native, n_fields=n_fields
+            y_native=y_native, n_fields=n_fields
         )
 
         # ..............................................................................................................
         # 2 - Build weak-form residual sides and optional ground-truth anchor
         # ..............................................................................................................
+
         zero = torch.zeros((), device=cleaning_mask.device, dtype=psi_fields.dtype)
-        lhs_pred = torch.where(cleaning_mask, self._discrete_stiffness(psi_fields, r_matrix), zero)
+        lhs_pred = torch.where(cleaning_mask, self._discrete_stiffness(psi_fields=psi_fields, R_rz=r_matrix), zero)
         need_gt_reference = (self.gs_weights["lhs_gt"] > 0.0) or (self.gs_weights["rhs_gt"] > 0.0)
 
         lhs_gt = None
-        if need_gt_reference or self._derives_j_tor or self.plot_check_type is not None:
-            lhs_gt = torch.where(cleaning_mask, self._discrete_stiffness(psi_gt_fields, r_matrix), zero)
+        if need_gt_reference or self._derives_j_tor or (self._plot_check_type is not None):
+            lhs_gt = torch.where(cleaning_mask, self._discrete_stiffness(psi_fields=psi_gt_fields, R_rz=r_matrix), zero)
 
         if self._derives_j_tor:
-            j_tor_fields = self._j_tor_from_psi_via_weak_operator(psi_gt_fields, r_matrix)
+            j_tor_fields = self._j_tor_from_psi_via_weak_operator(psi_gt_fields=psi_gt_fields, R_rz=r_matrix)
         rhs_pred = torch.where(cleaning_mask, mu0 * j_tor_fields, zero)
 
         # ..............................................................................................................
         # 3 - Optional diagnostics, then per-field eligibility and loss reductions
         # ..............................................................................................................
+
         self._run_plot_check(
             context=context,
             cleaning_mask=cleaning_mask,
@@ -667,6 +791,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         # ..............................................................................................................
         # 4 - Aggregate enabled weak-form terms and report diagnostics
         # ..............................................................................................................
+
         loss = ref.sum() * 0.0
         if self.gs_weights["no_gt"] > 0.0:
             no_gt_loss = no_gt_per_field[valid].mean()

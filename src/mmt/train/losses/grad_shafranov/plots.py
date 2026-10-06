@@ -216,7 +216,8 @@ def make_gs_plots(
                 "psi_pred_data": psi_pred_data, "psi_ref_data": psi_ref_data,
                 "j_tor_pred_data": j_tor_pred_data, "j_tor_ref_data": j_tor_ref_data, "j_tor_case": j_tor_case,
             }
-            "title_sufix": title_sufix
+            "fig_title": fig_title
+            "fig_subtitle": fig_subtitle
         }
     view_data : Mapping[str, Any] | None
         Mapping with view data of the form:
@@ -257,9 +258,11 @@ def make_gs_plots(
         layout="tight",  # layout={'constrained', 'compressed', 'tight', 'none', .LayoutEngine, None}
         # tight_layout=True
     )
-    title_suffix = "" + plot_data.get("title_sufix", "")
-    title = plot_data.get("title", f"Grad-Shafranov related plots\n{title_suffix.strip()}")
-    fig.suptitle(t=title, fontsize=16, y=0.99)
+    full_fig_title = plot_data.get("fig_title", "Grad-Shafranov related plots")
+    fig_subtitle = ("" + plot_data.get("fig_subtitle", "")).strip()
+    if full_fig_title:
+        full_fig_title += f"\n{fig_subtitle}"
+    fig.suptitle(t=full_fig_title, fontsize=16, y=0.99)
     gs = GridSpec(nrows=2, ncols=4, figure=fig)
     fig.subplots_adjust(top=0.7, hspace=0.8, wspace=0.9)
 
@@ -272,18 +275,19 @@ def make_gs_plots(
     s_data = plot_data["signal_data"]
 
     default_subplot_titles = [
-        r"$\mathrm{LHS}^{pred}:M{\odot}\left(-\Delta*\psi^{pred}\right)$",
-        r"$\mathrm{LHS}^{true}:M{\odot}\left(-\Delta*\psi^{true}\right)$",
-        r"$\mathrm{RHS}^{pred}:M{\odot}\left(\mu_{0}{\cdot}R{\cdot}J^{" + j_tor_case[:4] + r"}_{\phi}\right)$",
-        r"$\mathrm{RHS}^{true}:\mu_{0}{\cdot}R{\cdot}J^{true}_{\phi}$",
+        r"$\mathrm{LHS}^{pred}$",
+        r"$\mathrm{LHS}^{true}$",
+        r"$\mathrm{RHS}^{pred}$",
+        r"$\mathrm{RHS}^{true}$",
         r"$\psi^{pred}$",
         r"$\psi^{true}$",
         r"$J^{" + j_tor_case[:4] + r"}_{\phi}$",
         r"$J^{true}_{\phi}$",
     ]
+
     subplot_titles = plot_data.get("subplot_titles", default_subplot_titles)
     if len(subplot_titles) != 8:
-        raise ValueError("plot_data['subplot_titles'] must contain exactly eight panel titles.")
+        raise ValueError("plot_data['subplot_titles'] must contain exactly 8 panel titles.")
 
     panels = [
         (gs[0, 0], subplot_titles[4], s_data.get("psi_pred_data"), z_lims_psi),
@@ -333,7 +337,7 @@ def make_gs_plots(
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def make_signal_plots(
+def make_signal_plots(  # FIXME: This method is not used and could be removed. Otherwise, it needs revision.
     plot_data,
     view_data=None,
     save_plots=False,
