@@ -1,0 +1,220 @@
+# Task-specific finetuning overrides for MMT.
+# Tasks omitted here use the shared phase defaults unchanged.
+# Full-scale base experiment: all selected tasks use explicit embed_mse,
+# 200 maximum epochs, and validation early stopping after 10 non-improving epochs.
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # Standard TokaMark tasks
+  # ---------------------------------------------------------------------------
+
+  task_1-1:
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_1-2:
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_1-3:
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_2-1:
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_2-2:
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_2-3:
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_3-2:
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+
+  task_3-3:
+    preprocess:
+      chunks:
+        input:
+          max_chunks: 21
+        actuator:
+          max_chunks: 21
+
+  # Long-horizon MHD tasks use a smaller batch and coarser training-window
+  # sampling. Evaluation retains the shared all-window default.
+  task_4-1:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_4-2:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_4-3:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_4-4:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200
+
+  task_4-5:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      early_stop:
+        patience: 10
+        delta: 0.0
+      stages:
+        - name: ft_scratch
+          epochs: 200

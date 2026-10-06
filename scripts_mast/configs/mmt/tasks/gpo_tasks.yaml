@@ -1,0 +1,690 @@
+# Task-specific GPO fine-tuning overrides for MMT.
+#
+# Each task entry here is merged on top of configs/mmt/phases/gpo.yaml.
+# Tasks omitted here inherit the shared phase defaults unchanged.
+#
+# Common per-task knobs:
+#   train.loss.terms[0].beta          — higher for tasks with large pref margins
+#   train.loss.terms[0].sft_weight    — increase if model drifts from ground truth
+#   train.loss.terms[0].mse_gap_clip  — hard-clip collection-time MSE gap (task_4-5 fat tail)
+#   train.loss.terms[0].log_mse_gap   — log(1+MSE) compression instead of raw gap (task_4-5)
+#   train.gpo_dataset.shot_blacklist  — list of shot IDs to exclude from pairs
+#   train.gpo_dataset.min_margin_mse  — optional filter for pairs below an embedding MSE gap
+#   train.gpo_dataset.min_window_index — drop early-ramp windows below this index (task_4-5)
+#   train.stages[0].epochs            — fewer for small pair datasets
+#   loader.batch_size                 — reduce for tasks with long input windows
+#
+# β calibration (v2) — measured from full gpo_pairs_v1 shards:
+#
+#   task   median_mse   p90_mse    β chosen   rationale
+#   4-1    0.0789       1.643      10         β×median≈0.79 — good operating point
+#   4-2    0.0786       1.739      10         β×median≈0.79 — same signal family as 4-1
+#   4-3    0.0028       0.041      50         median tiny; β=50 → logit≈0.13 at median,
+#                                             ≈2.0 at p90; after min_margin_mse filter,
+#                                             effective median will be higher
+#   4-4    0.1095       5.433       8         β×median≈0.88; β×p90≈43
+#   4-5    0.0223       ~p90>>100   5         fat tail; mse_gap_clip+log_mse_gap applied
+#
+# Shot blacklist rationale (from print_gpo_shot_outliers.py / panel 23):
+#   4-1/4-2: shots 18675, 14013, 14342 — mean MSE 45–54, up to 188× p95 — extreme outliers
+#   4-4:     all top-15 shots have n_windows=1 (single-window disruption captures) with
+#            mean MSE 42–57; blacklisting prevents them from dominating the loss
+#   4-5:     shots 30339, 28311, 28268 — mean MSE 117–284, p95 up to 1013
+#   1-1:     shots 24463, 25327, 21296 — mean MSE 41/36/10 (367/324/86× dataset mean 0.11)
+#   2-2:     shots 24828, 24463, 26921 — mean MSE 6.1/2.6/2.3 (70/30/27× dataset mean 0.09)
+#   2-3:     shots 11822, 26259, 28240, 21004, 25094 — mean MSE 1050/680/557/544/452
+#            (292/189/155/151/126× dataset mean 3.6); Gini=0.901 requires broader cut
+#
+# v3→v4 change: sft_weight=0.0 on all tasks (ablation: GPO-only, no supervised co-loss).
+# Hypothesis: at t=0 the DPO margin is zero so sft_weight was the only active gradient,
+# training output adapters on the hardest-window subset → biased adaptation → NRMSE ↑.
+# The DPO reference model already provides a KL anchor so sft is redundant.
+#
+# v4→v5 change: IPO for tasks 4-3 and 4-5 (β×p50 ≪ 0.5 → DPO gradient ≈ 0 at init).
+# Dilution fix (3230453) also active.
+#
+# v5→v6 change: restore embed_mse anchor term (weight=0.1) on all tasks.
+#
+# v6→v7 change: switch tasks 4-1 and 4-2 from DPO to IPO (reward hacking confirmed in
+# v6 logs — d_w rises monotonically while pref_acc rises; DPO sigmoid saturates once
+# margin grows, allowing free drift away from y_w). IPO's gradient 2·(margin−1/(2β))
+# is restorative: it penalises overshooting the target margin 1/(2β), pulling the
+# policy back toward y_w if it drifts too far.
+# Also reduce modality_heads and output_adapters LR 5× (5e-4 → 1e-4) on tasks
+# 4-1, 4-2, 4-4 — identified as too high from v6 training dynamics.
+# Root cause of v4/v5 NRMSE degradation (confirmed by eval): the KL reference constraint
+# (use_reference_model=true) is implemented as a relative-margin term only — it does NOT
+# prevent the adapter from inflating its output scale on non-pair windows. With
+# sft_weight=0.0, batches without pairs receive zero gradient. The 46–85% of batches
+# that have no pairs drift freely. Adding embed_mse at weight=0.1 provides a global
+# reconstruction anchor on every batch, keeping non-pair windows stable while GPO
+# gradient (weight=1.0) still dominates on pair-containing batches.
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # task_4-1 — SXR lower+upper
+  # median MSE gap=0.0789 → β=10 gives logit≈0.79 at median (good).
+  # sft_weight=0.0 (v4): pure GPO — DPO reference is the only GT anchor.
+  # Shot blacklist: top-3 dominant shots from panel 23 (mean MSE 45–54, p95 up to 188).
+  # v7: IPO (reward hacking in v6); LR 5e-4 → 1e-4 on heads/adapters.
+  # ---------------------------------------------------------------------------
+  task_4-1:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 64
+    train:
+      gpo_dataset:
+        shot_blacklist: [18675, 14013, 14342]
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 10.0
+            loss_type: ipo    # v7: reward hacking in v6; IPO prevents sigmoid saturation
+            sft_weight: 0.0   # keep 0: sft inside GPO loss only fires on pair windows
+          - type: embed_mse   # v6: global reconstruction anchor on ALL batches
+            weight: 0.2       # low weight — stabilises non-pair windows, GPO dominates
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.1
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4  # v7: reduced 5× (5e-4 → 1e-4); v6 LR too high
+              output_adapters: 1e-4  # v7: reduced 5× (5e-4 → 1e-4); v6 LR too high
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_4-2 — SXR lower+upper (same signal family as 4-1, larger dataset)
+  # max_chunks=40 must match finetune_tasks.yaml to avoid pos_embed shape mismatch.
+  # Same shot blacklist as 4-1 (shots appear in both datasets).
+  # sft_weight=0.0 (v4): pure GPO ablation.
+  # v7: IPO (same reward hacking signature as 4-1); LR 5e-4 → 1e-4 on heads/adapters.
+  # ---------------------------------------------------------------------------
+  task_4-2:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      gpo_dataset:
+        shot_blacklist: [18675, 14013, 14342]
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 10.0
+            loss_type: ipo    # v7: reward hacking in v6; IPO prevents sigmoid saturation
+            sft_weight: 0.0   # keep 0: sft inside GPO loss only fires on pair windows
+          - type: embed_mse   # v6: global reconstruction anchor on ALL batches
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.1
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4  # v7: reduced 5× (5e-4 → 1e-4); v6 LR too high
+              output_adapters: 1e-4  # v7: reduced 5× (5e-4 → 1e-4); v6 LR too high
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_4-3 — equilibrium reconstruction (embed_mse variant)
+  # The historical min_margin_mse=0.01 experiment is not active in this config.
+  # Current pair selection uses native-NRMSE percentiles and a per-shot cap only.
+  # β=50 with IPO is retained for the weak-margin pair distribution.
+  # sft_weight=0.0 (v4): pure GPO — embed_mse provides the global reconstruction anchor.
+  # ---------------------------------------------------------------------------
+  task_4-3:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      gpo_dataset:
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 50.0
+            loss_type: ipo    # β×p50≈0.14 → DPO gradient ≈0 at init; IPO fixes this
+            sft_weight: 0.0   # keep 0: sft inside GPO loss only fires on pair windows
+          - type: embed_mse   # v6: global reconstruction anchor on ALL batches
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4  # v7: explicit 1e-4 (phase default was 5e-4)
+              output_adapters: 1e-4  # v7: explicit 1e-4 (phase default was 5e-4)
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_4-4 — summary Ip (cleanest 1-D signal)
+  # median MSE gap=0.1095 → β=8 gives logit≈0.88 at median.
+  # Shot blacklist: all top-15 shots have n_windows=1 (single-window disruption
+  # captures) — they produce unreliable pairs and dominate the loss.
+  # sft_weight=0.0 (v4): pure GPO ablation.
+  # v7: LR 5e-4 → 1e-4 on heads/adapters (borderline early stop at E5 in v6).
+  # ---------------------------------------------------------------------------
+  task_4-4:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      gpo_dataset:
+        shot_blacklist: [18492, 14357, 17044, 12667, 15359, 16180, 15767, 15524, 14433, 12898,
+                         20575, 20839, 14383, 17048, 17412]
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 8.0
+            loss_type: dpo   # β×p50≈0.88: DPO is in its calibrated operating range
+            sft_weight: 0.0   # keep 0: sft inside GPO loss only fires on pair windows
+          - type: embed_mse   # v6: global reconstruction anchor on ALL batches
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4  # v7: reduced 5× (5e-4 → 1e-4); v6 borderline at E5
+              output_adapters: 1e-4  # v7: reduced 5× (5e-4 → 1e-4); v6 borderline at E5
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_4-5 — magnetics b_field omv+cc
+  # max_chunks=40 must match finetune_tasks.yaml.
+  # Three-pronged approach for the pathological fat-tail / amplitude-collapse:
+  #   (a) mse_gap_clip=50.0  — hard-clip collection-time gap at ≈p90, preventing
+  #       the few extreme shots (mean MSE 84–284) from exploding the gradient
+  #   (b) log_mse_gap=true   — log(1+gap) further compresses the tail smoothly
+  #   (c) shot_blacklist      — remove top-3 dominant shots (mean MSE 117–284)
+  #   (d) min_window_index=50 — skip the first 50 windows (early ramp-up phase
+  #       where the amplitude spikes to 10× normal and the model has near-zero norm)
+  # After these filters the effective median will be higher and β=5 more actionable.
+  # ---------------------------------------------------------------------------
+  task_4-5:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      gpo_dataset:
+        shot_blacklist: [30339, 28311, 28268]
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+        min_window_index: 50
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 5.0
+            loss_type: ipo    # β×p50≈0.11 → DPO gradient ≈0 at init; IPO fixes this
+            sft_weight: 0.0   # keep 0: sft inside GPO loss only fires on pair windows
+            mse_gap_clip: 50.0   # hard-clip at ≈p90 to bound gradient from outlier pairs
+            log_mse_gap: true    # log(1+gap) smoothly compresses the remaining tail
+          - type: embed_mse   # v6: global reconstruction anchor on ALL batches
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4  # v7: explicit 1e-4 (phase default was 5e-4)
+              output_adapters: 1e-4  # v7: explicit 1e-4 (phase default was 5e-4)
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_1-1 — equilibrium scalars (15 identity-encoded outputs)
+  # Outputs: elongation, triangularity_{upper,lower}, x_point_{r,z}, minor_radius,
+  #   magnetic_axis_{r,z}, q95, beta_{tor,pol,normal}, bvac_rmag, bphi_rmag,
+  #   elongation_axis — all identity-encoded (D=1 per signal, no VAE).
+  #
+  # β calibration v7 — measured from panel 29 of visualize_gpo_stats.py:
+  #
+  #   signal                   p50_MSE   β_opt(=1/p50)
+  #   equilibrium-beta_normal  0.0068    147
+  #   equilibrium-beta_pol     0.0053    189
+  #   equilibrium-beta_tor     0.0066    152
+  #   equilibrium-bphi_rmag    0.0094    106
+  #   equilibrium-bvac_rmag    0.0100    100
+  #   equilibrium-elongation   0.0077    130
+  #   equilibrium-elongation_ax 0.0091   110
+  #   equilibrium-magnetic_ax_r 0.0048   208
+  #   equilibrium-magnetic_ax_z 0.0012   833
+  #   equilibrium-minor_radius 0.0073    137
+  #   equilibrium-q95          0.0033    303
+  #   equilibrium-triangularity_lower 0.0065 154
+  #   equilibrium-triangularity_upper 0.0087 115
+  #   equilibrium-x_point_r    0.0048    208
+  #   equilibrium-x_point_z    0.0001   7153  ← near-perfect prediction; outlier
+  #
+  # Excluding x_point_z (essentially solved), the non-outlier signals have
+  # β_opt ≈ 100–833, median ≈ 150. For IPO the relevant criterion is that the
+  # target margin 1/(2β) ≈ p50_MSE. With p50 cluster at 0.003–0.010 and the
+  # geometric mean of β_opt (excluding x_point_z) ≈ 170, β=100 gives:
+  #   1/(2×100) = 0.005 ≈ p50 for most signals — reachable IPO target.
+  # β=100 also keeps 1/(2β)=0.005 above the near-zero x_point_z p50=0.0001
+  # (that signal will have near-zero IPO gradient, which is fine — it is solved).
+  # IPO is retained: D=1 per signal means DPO sigmoid has no discriminative
+  # structure across coefficient dimensions.
+  # Shot blacklist (from print_gpo_shot_outliers.py, dataset mean MSE=0.1125):
+  #   rank 1: shot 24463 — mean MSE 41.4 (367× mean), p95=399 — catastrophic fat tail
+  #   rank 2: shot 25327 — mean MSE 36.4 (324× mean), p50=0.003 but 1–2 extreme windows
+  #   rank 3: shot 21296 — mean MSE  9.6  (86× mean), included (above group-4 ~40× threshold)
+  #   rank 4: shot 20110 — mean MSE  4.9  (44× mean), p50=0.004 — benign median; excluded
+  # ---------------------------------------------------------------------------
+  task_1-1:
+    train:
+      gpo_dataset:
+        shot_blacklist: [24463, 25327, 21296]  # mean MSE 41/36/10 — 367/324/86× dataset mean
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 100.0    # v7: measured p50≈0.003–0.010; β=100 → 1/(2β)=0.005 ≈ p50
+            loss_type: ipo    # D=1 identity encoder; IPO avoids sigmoid flatness
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4  # reduced from phase default; v7 lesson
+              output_adapters: 1e-4  # reduced from phase default; v7 lesson
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_1-2 — LCFS boundary profiles with actuator conditioning
+  # v8 calibration: p50 MSE gaps are 0.01325 (lcfs_r) and 0.00670 (lcfs_z).
+  # β=50 gives IPO target 1/(2β)=0.01, close to the geometric-mean gap.
+  # The top three shot-level outliers are excluded.
+  # ---------------------------------------------------------------------------
+  task_1-2:
+    train:
+      gpo_dataset:
+        shot_blacklist: [26921, 24828, 21359]
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 50.0
+            loss_type: ipo
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4
+              output_adapters: 1e-4
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_1-3 — equilibrium-psi reconstruction
+  # v8 calibration: p50 MSE gap=0.26080, so β=2 gives IPO target 0.25.
+  # The top five shots dominate the heavy-tailed pair distribution and are
+  # excluded; native filtering and the per-shot cap limit residual dominance.
+  # ---------------------------------------------------------------------------
+  task_1-3:
+    train:
+      gpo_dataset:
+        shot_blacklist: [16914, 11822, 21004, 26846, 13202]
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 2.0
+            loss_type: ipo
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4
+              output_adapters: 1e-4
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_2-1 — multi-output equilibrium reconstruction with actuators
+  # v8 calibration: geometric-mean p50 MSE gap≈0.0182; β=25 gives IPO
+  # target 1/(2β)=0.02. The top three shot-level outliers are excluded.
+  # ---------------------------------------------------------------------------
+  task_2-1:
+    train:
+      gpo_dataset:
+        shot_blacklist: [24463, 22046, 23931]
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 25.0
+            loss_type: ipo
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4
+              output_adapters: 1e-4
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_2-2 — LCFS boundary profiles with actuator conditioning
+  # Outputs: equilibrium-lcfs_r, equilibrium-lcfs_z (1-D VAE, 25-step horizon).
+  # Same encoder family as group-4 tasks (conv1d VAE latent space).
+  # Actuators: pf_active-coil_voltage, summary-power_nbi (adds NBI coupling).
+  #
+  # β calibration v7 — measured from panel 29 of visualize_gpo_stats.py:
+  #
+  #   signal              p50_MSE   β_opt(=1/p50)
+  #   equilibrium-lcfs_r  0.0367    25.2
+  #   equilibrium-lcfs_z  0.0156    64.1
+  #
+  # Geometric mean of β_opt: √(25.2 × 64.1) ≈ 40. For IPO the target margin
+  # 1/(2β) should ≈ p50_MSE; β=40 gives 1/(2×40)=0.0125:
+  #   lcfs_r: target=0.0125 vs p50=0.037 — target is 34% of p50, reachable
+  #   lcfs_z: target=0.0125 vs p50=0.016 — target is 78% of p50, ideal
+  # Both signals had effective N ≈ 83–94% of total pairs at β=10; the IPO
+  # gradient is β-independent in magnitude, so changing β only shifts the
+  # target, not the scale. The Lorenz curves (Gini 0.665–0.731) show moderate
+  # concentration.
+  # Shot blacklist (from print_gpo_shot_outliers.py, dataset mean MSE=0.0866):
+  #   rank 1: shot 24828 — mean MSE 6.09 (70× mean), n_windows=2 — single disruption
+  #   rank 2: shot 24463 — mean MSE 2.57 (30× mean)
+  #   rank 3: shot 26921 — mean MSE 2.32 (27× mean)
+  #   rank 4: shot 17946 — mean MSE 2.18 (25× mean), p50=0.33 — median window benign; excluded
+  # Between-shot variance is only 18–20% of total — blacklisting beyond top 3
+  # yields diminishing returns as remaining variance is within-shot.
+  # ---------------------------------------------------------------------------
+  task_2-2:
+    train:
+      gpo_dataset:
+        shot_blacklist: [24828, 24463, 26921]  # mean MSE 6.1/2.6/2.3 — 70/30/27× dataset mean
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 40.0    # v7: measured p50≈0.037/0.016; geomean β_opt≈40
+            loss_type: ipo    # 1-D VAE latent; IPO for stable convergence
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4  # reduced from phase default; v7 lesson
+              output_adapters: 1e-4  # reduced from phase default; v7 lesson
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_2-3 — equilibrium-psi reconstruction with actuator conditioning
+  # Output: equilibrium-psi (2-D conv2d VAE, 25-step horizon) — richest embedding.
+  # Actuators: pf_active-coil_voltage, summary-power_nbi.
+  # Largest output dimension in the benchmark; most expensive collection and training.
+  #
+  # β calibration v7 — measured from panel 29 of visualize_gpo_stats.py:
+  #
+  #   signal             p50_MSE   β_current  β×p50   σ(β×p50)
+  #   equilibrium-psi    0.3055    50         15.3    0.955   ← OVERSATURATED
+  #
+  # β=50 was wrong in the opposite direction to the other tasks — p50 is large
+  # (0.31) because equilibrium-psi is a hard, high-dimensional reconstruction.
+  # β_opt = 1/p50 = 1/0.306 = 3.27. For IPO, 1/(2β) = 1/(2×2) = 0.25 vs
+  # p50=0.306 — the target is 82% of p50, near-ideal.
+  # Gini=0.901 (extreme concentration) and eff_N=28.9% at β=10; a handful of
+  # shots dominate the gradient completely.
+  # Shot blacklist (from print_gpo_shot_outliers.py, dataset mean MSE=3.595,
+  #   background p50=0.306):
+  #   rank 1: shot 11822 — mean MSE 1050 (292× mean), p95=5769
+  #   rank 2: shot 26259 — mean MSE  680 (189× mean), p50=1103 — consistently extreme
+  #   rank 3: shot 28240 — mean MSE  557 (155× mean)
+  #   rank 4: shot 21004 — mean MSE  544 (151× mean) — only 2.5% below rank 3; include
+  #   rank 5: shot 25094 — mean MSE  452 (126× mean)
+  #   rank 6: shot 27236 — mean MSE  354  (98× mean), p50=0.23 — majority of windows benign
+  #   → cut at rank 5: ranks 1–5 all have mean ≥ 452 (≥126× mean); rank 6 has p50=0.23
+  #     indicating most of its windows are actually informative.
+  # Between-shot variance is only 13.2% — remaining gradient concentration is
+  # within-shot (temporal), so blacklisting beyond 5 has little structural benefit.
+  # ---------------------------------------------------------------------------
+  task_2-3:
+    train:
+      gpo_dataset:
+        shot_blacklist: [11822, 26259, 28240, 21004, 25094]  # mean MSE 1050/680/557/544/452
+        native_nrmse_percentiles: [25.0, 95.0]
+        max_pairs_per_shot_percentile: 90.0
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 2.0     # v7: measured p50=0.306; β=50 was oversaturated (σ=0.955)
+            loss_type: ipo    # high-D 2-D VAE; IPO avoids sigmoid saturation
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4  # reduced from phase default; v7 lesson
+              output_adapters: 1e-4  # reduced from phase default; v7 lesson
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false

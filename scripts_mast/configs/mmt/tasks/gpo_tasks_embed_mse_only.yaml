@@ -1,0 +1,183 @@
+# GPO task overrides for the embed_mse-only ablation (v6-embed_mse_only).
+#
+# Purpose: isolate whether the reconstruction anchor (embed_mse) alone is sufficient
+# to drive val loss down.  If val improves → embed_mse works as an anchor and the
+# problem is in the continuous_gpo loss.  If val is flat → the issue is in the
+# training loop itself (optimizer, LR, freezing, etc.).
+#
+# Differences from gpo_tasks.yaml (v6):
+#   • continuous_gpo term REMOVED — only embed_mse is active
+#   • embed_mse weight raised to 1.0 (was 0.1 — it was secondary; now it is the only term)
+#   • use_reference_model: false — no DPO reference model needed (no KL constraint without GPO)
+#   • All other knobs (batch_size, freeze, stages, gpo_dataset filters) kept identical to v6
+#     so that any difference in outcome is attributable to the loss term only.
+#
+# Usage (set GPO_TASKS_YAML before launching run_gpo_finetune.py):
+#   GPO_TASKS_YAML=scripts_mast/configs/mmt/tasks/gpo_tasks_embed_mse_only.yaml \
+#   python scripts_mast/run_gpo_finetune.py --task task_4-2 --tag v6-embed_mse_only ...
+#
+# Or via the cluster script:
+#   GPO_TASK=task_4-2 GPO_TAG=v6-embed_mse_only \
+#   GPO_TASKS_YAML=scripts_mast/configs/mmt/tasks/gpo_tasks_embed_mse_only.yaml \
+#   bash cluster/ccc_gpo_finetune.sh
+
+tasks:
+
+  # ---------------------------------------------------------------------------
+  # task_4-1
+  # ---------------------------------------------------------------------------
+  task_4-1:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 64
+    train:
+      use_reference_model: false   # no KL constraint needed without GPO term
+      gpo_dataset:
+        shot_blacklist: [18675, 14013, 14342]
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      stages:
+        - name: gpo
+          epochs: 5
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.1
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 5e-4
+              output_adapters: 5e-4
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_4-2
+  # ---------------------------------------------------------------------------
+  task_4-2:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      use_reference_model: false
+      gpo_dataset:
+        shot_blacklist: [18675, 14013, 14342]
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+
+  # ---------------------------------------------------------------------------
+  # task_4-3
+  # ---------------------------------------------------------------------------
+  task_4-3:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      use_reference_model: false
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+
+  # ---------------------------------------------------------------------------
+  # task_4-4
+  # ---------------------------------------------------------------------------
+  task_4-4:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      use_reference_model: false
+      gpo_dataset:
+        shot_blacklist: [18492, 14357, 17044, 12667, 15359, 16180, 15767, 15524, 14433, 12898,
+                         20575, 20839, 14383, 17048, 17412]
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
+      stages:
+        - name: gpo
+          epochs: 10
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.05
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 5e-4
+              output_adapters: 5e-4
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  # ---------------------------------------------------------------------------
+  # task_4-5
+  # ---------------------------------------------------------------------------
+  task_4-5:
+    preprocess:
+      valid_windows:
+        window_stride_sec: 0.02
+      chunks:
+        input:
+          max_chunks: 40
+        actuator:
+          max_chunks: 40
+    loader:
+      batch_size: 256
+    train:
+      use_reference_model: false
+      gpo_dataset:
+        shot_blacklist: [30339, 28311, 28268]
+        min_window_index: 50
+      loss:
+        terms:
+          - type: embed_mse
+            weight: 1.0
