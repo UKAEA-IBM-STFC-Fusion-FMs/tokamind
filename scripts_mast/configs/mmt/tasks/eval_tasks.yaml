@@ -112,7 +112,7 @@ tasks:
         gs_topology:
           enable: true
 
-  task_1-6-data:
+  task_1-5-data:
     eval:
       compute_metrics:
         gs_metrics:
@@ -125,7 +125,7 @@ tasks:
         gs_topology:
           enable: true
 
-  task_1-6-strong:
+  task_1-5-strong:
     eval:
       compute_metrics:
         gs_metrics:
@@ -138,7 +138,7 @@ tasks:
         gs_topology:
           enable: true
 
-  task_1-6-weak:
+  task_1-5-weak:
     eval:
       compute_metrics:
         gs_metrics:
@@ -232,7 +232,7 @@ tasks:
         gs_topology:
           enable: true
 
-  task_2-6-data:
+  task_2-5-data:
     eval:
       compute_metrics:
         gs_metrics:
@@ -245,7 +245,7 @@ tasks:
         gs_topology:
           enable: true
 
-  task_2-6-strong:
+  task_2-5-strong:
     eval:
       compute_metrics:
         gs_metrics:
@@ -258,7 +258,7 @@ tasks:
         gs_topology:
           enable: true
 
-  task_2-6-weak:
+  task_2-5-weak:
     eval:
       compute_metrics:
         gs_metrics:
