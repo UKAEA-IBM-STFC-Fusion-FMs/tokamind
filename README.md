@@ -120,13 +120,25 @@ pip install -e .
 
 ### 3) VAE-FAIRMAST integration (optional)
 
-*Coming soon.* Only needed to reproduce the VAE embedding experiments for Group-1.
+Only needed to use VAE embeddings for Group-1 and Group-2 tasks. Install
+[VAE-FAIRMAST](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/VAE_fairmast) in the same Python environment as TokaMind.
+The commands below pin the public repository to reference commit
+[`ab112a7`](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/VAE_fairmast/commit/ab112a753e18afa7c43a6b6638927cf31b2c16fb).
 
 ```bash
-git clone <vae-fairmast-repo-url>   # coming soon
-cd vae-fairmast
+git clone https://github.com/UKAEA-IBM-STFC-Fusion-FMs/VAE_fairmast.git
+cd VAE_fairmast
+git checkout ab112a753e18afa7c43a6b6638927cf31b2c16fb
 pip install -e .
 ```
+
+The pretrained VAE artifacts must be obtained separately: they are not included in this public revision.
+Place each model folder under `VAE_fairmast/src/vae_pipeline/data/New_VAEs/<model_dir>/`, containing
+`config_*.json`, the checkpoint referenced by `mmt_info.json`, and `mmt_info.json` itself.
+Folder names must match `encoder_kwargs.model_dir` in the task's
+`scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/vae.yaml`.
+
+Back in the TokaMind checkout, select `--emb_profile vae` when running the Group-1/Group-2 finetuning commands below.
 
 ## 🤗 Pretrained Model
 
