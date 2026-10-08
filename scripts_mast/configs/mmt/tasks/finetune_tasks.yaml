@@ -404,9 +404,9 @@ tasks:
             output_adapters: false
 
   # --------------------------------------------------------------------------------------------------------------------
-  # task_1-6: thomson_scattering added in input, magnetics removed, same output set as task_1-4.
+  # task_1-5: thomson_scattering added in input, magnetics removed, same output set as task_1-4.
 
-  task_1-6-data:
+  task_1-5-data:
     embeddings:
       dct3d:
         tuning:
@@ -443,7 +443,7 @@ tasks:
 
   # --------------------------------------------------------------------------------------------------------------------
 
-  task_1-6-strong:
+  task_1-5-strong:
     embeddings:
       dct3d:
         tuning:
@@ -480,7 +480,7 @@ tasks:
 
   # --------------------------------------------------------------------------------------------------------------------
 
-  task_1-6-weak:
+  task_1-5-weak:
     embeddings:
       dct3d:
         tuning:
@@ -738,9 +738,9 @@ tasks:
           epochs: 50
 
   # --------------------------------------------------------------------------------------------------------------------
-  # task_2-6: thomson_scattering added in input, magnetics removed, same output set as task_2-4.
+  # task_2-5: thomson_scattering added in input, magnetics removed, same output set as task_2-4.
 
-  task_2-6-data:
+  task_2-5-data:
     embeddings:
       dct3d:
         tuning:
@@ -777,7 +777,7 @@ tasks:
 
   # --------------------------------------------------------------------------------------------------------------------
 
-  task_2-6-strong:
+  task_2-5-strong:
     embeddings:
       dct3d:
         tuning:
@@ -814,7 +814,7 @@ tasks:
 
   # --------------------------------------------------------------------------------------------------------------------
 
-  task_2-6-weak:
+  task_2-5-weak:
     embeddings:
       dct3d:
         tuning:

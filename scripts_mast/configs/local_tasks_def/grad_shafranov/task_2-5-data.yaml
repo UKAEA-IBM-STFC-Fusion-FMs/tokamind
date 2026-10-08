@@ -1,8 +1,8 @@
-# Local GS-loss integration task.
+# Local task without physics loss.
 #
 # thomson_scattering added in input, magnetics removed, same output set as task_2-4.
 
-task_name: task_2-6-weak
+task_name: task_2-5-data
 task_type: markovian
 
 sources_and_signals:
