@@ -313,6 +313,7 @@ def make_gs_plots(
     if save_plots:
         if save_path is None:
             raise ValueError("save_path is required when save_plots is true.")
+
         save_path = Path(save_path)
         save_path.parent.mkdir(parents=True, exist_ok=True)
 

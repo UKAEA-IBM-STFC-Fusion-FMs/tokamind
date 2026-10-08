@@ -28,12 +28,13 @@ from torch import Tensor
 
 from mmt.data.standardization import destandardize_torch
 from mmt.train.losses.base import LossComputeContext
-
+from mmt.train.losses.constants import ALLOWED_PLOT_FORMATS_TYPE, ALLOWED_PLOT_FORMATS, ALLOWED_PLOT_CHECK_TYPES
 
 # Vacuum permeability (single source of truth for both GS losses).
 mu0 = 1.2566370614359173e-06
 
 
+# ======================================================================================================================
 @dataclass(frozen=True)
 class GSGridAssets:
     """Grid data common to the strong and weak Grad-Shafranov loss assets."""
@@ -165,6 +166,7 @@ def parse_gs_grid_assets(loaded: Mapping[str, Any], *, tensor_dtype: torch.dtype
     limiter = None
     if "base_j_tor_lim_mask_rz" in loaded:
         limiter = torch.tensor(np.asarray(loaded["base_j_tor_lim_mask_rz"])).unsqueeze(0).bool()
+
     return GSGridAssets(
         n_r=int(loaded["n_r"]),
         n_z=int(loaded["n_z"]),
@@ -180,6 +182,7 @@ def runtime_tensor(tensor: Tensor, *, ref: Tensor, dtype: torch.dtype | None = N
 
     if dtype is None:
         return tensor.to(device=ref.device)
+
     return tensor.to(device=ref.device, dtype=dtype)
 
 
@@ -189,13 +192,16 @@ def validate_plot_check_cfg(plot_check: Any, path: str) -> None:
 
     if plot_check is None:
         return
+
     if not isinstance(plot_check, Mapping):
         raise TypeError(f"{path}.plot_check must be a mapping when provided.")
+
     probability = plot_check.get("probability")
     if probability is not None and (isinstance(probability, bool) or not isinstance(probability, (float, int))):
         raise TypeError(f"{path}.plot_check.probability must be a number.")
-    if plot_check.get("type") not in {None, "show_plots", "save_plots"}:
-        raise ValueError(f"{path}.plot_check.type must be 'show_plots', 'save_plots', or null.")
+
+    if plot_check.get("type") not in ALLOWED_PLOT_CHECK_TYPES:
+        raise ValueError(f"{path}.plot_check.type must be in {ALLOWED_PLOT_CHECK_TYPES}.")
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -245,15 +251,25 @@ def select_diagnostic_plot_slice(
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def training_plot_path(context: LossComputeContext | None, *, slice_index: int) -> Path:
+def training_plot_path(
+    context: LossComputeContext | None,
+    *,
+    slice_index: int,
+    plot_format: ALLOWED_PLOT_FORMATS_TYPE = "png",
+) -> Path:
     """Build a reproducible diagnostic-plot path inside the current training run.
 
     The path is intentionally loss-agnostic. The configured term ``type`` distinguishes plot-producing terms that run
     on the same batch without exposing a Python implementation name in the output layout.
     """
 
-    if context is None or not context.run_dir:
+    if (context is None) or (not context.run_dir):
         raise RuntimeError("Saving diagnostic plots requires LossComputeContext.run_dir.")
+
+    if plot_format not in ALLOWED_PLOT_FORMATS:
+        raise ValueError(
+            f"Saving diagnostic plots requires a valid `plot_format` in {ALLOWED_PLOT_FORMATS}, got {plot_format}]."
+        )
 
     stage_index = "unknown" if context.stage_index is None else f"{context.stage_index:02d}"
     raw_stage_name = str(context.stage_name or "unnamed")
@@ -270,11 +286,12 @@ def training_plot_path(context: LossComputeContext | None, *, slice_index: int) 
     matching_term_indices = [
         index for index, term in enumerate(context.stage_loss_terms) if str(term.get("type")) == raw_term_type
     ]
-    if len(matching_term_indices) > 1 and context.term_index in matching_term_indices:
-        occurrence = matching_term_indices.index(context.term_index) + 1
+    if (len(matching_term_indices) > 1) and (context.term_index in matching_term_indices):
+        occurrence = matching_term_indices.index(context.term_index) + 1  # noqa - Proper check for None done above.
         term_type = f"{term_type}_{occurrence:02d}"
 
-    filename = f"{phase}_epoch_{epoch}_step_{step}_batch_{batch}_slice_{slice_index:03d}_{term_type}.png"
+    filename = f"{phase}_epoch_{epoch}_step_{step}_batch_{batch}_slice_{slice_index:03d}_{term_type}.{plot_format}"
+
     return plot_dir / filename
 
 
@@ -326,6 +343,7 @@ def masked_reduce(residual: Tensor, mask: Tensor | None, kind: Literal["l2", "ms
     flat_mask = mask.flatten(start_dim=1).to(device=flat.device, dtype=torch.bool)
     if flat_mask.shape != flat.shape:
         raise ValueError(f"mask shape {tuple(mask.shape)} is incompatible with residual shape {tuple(residual.shape)}.")
+
     active_cells = flat_mask.sum(dim=1).to(dtype=flat.dtype)
     active_residual = torch.where(flat_mask, flat, torch.zeros_like(flat))
 
@@ -335,6 +353,7 @@ def masked_reduce(residual: Tensor, mask: Tensor | None, kind: Literal["l2", "ms
         loss = active_residual.square().sum(dim=1) / active_cells.clamp_min(1)
     else:
         raise ValueError(f"[masked_reduce] Invalid `kind`: must be in ['l2', 'mse'], got {kind!r}.")
+
     return torch.where(active_cells > 0, loss, torch.full_like(loss, torch.nan))
 
 

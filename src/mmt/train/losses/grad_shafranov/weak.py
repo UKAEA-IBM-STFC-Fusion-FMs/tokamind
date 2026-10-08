@@ -320,9 +320,13 @@ class WeakFormGradShafranovLoss(BaseLoss):
         self.loss_metric = loss_metric
 
         self._plot_check_cfg = plot_check_cfg or {}
-        self._all_losses_weights = self._plot_check_cfg.get("all_losses_weights", {"NA": "NA"})  # FIXME: Not used yet.
-        self._plot_check_type = self._plot_check_cfg.get("type", None)  # Options: "show_plots", "save_plots", None.
+        self._all_losses_weights = self._plot_check_cfg.get("all_losses_weights", {"NA": "NA"})
+
+        self._plot_check_type: str = self._plot_check_cfg.get("type", None) or "none_none"
+        self._run_plotting = not self._plot_check_type.startswith("none_none")
         self._plot_check_probability = float(self._plot_check_cfg.get("probability", 0.0))
+        self._save_plots = self._plot_check_type.startswith("save_")
+        self._save_plot_format: str = self._plot_check_type.split("_")[-1] if self._save_plots else "png"
 
         self._plain_loss_name = "Weak-form Grad-Shafranov"
         self._fig_title = ""
@@ -346,11 +350,11 @@ class WeakFormGradShafranovLoss(BaseLoss):
             self.required_output_keys = (self._psi_key, self._j_tor_key)
 
         if self._output_filter is not None:
-            missing = [key for key in self.required_output_keys if key not in self._output_filter]
-            if missing:
+            missing_filter_keys = [key for key in self.required_output_keys if key not in self._output_filter]
+            if missing_filter_keys:
                 raise ValueError(
                     f"WeakFormGradShafranovLoss output filter must include all outputs required by "
-                    f"`rhs_input_origin={self.rhs_input_origin!r}`: {missing}."
+                    f"`rhs_input_origin={self.rhs_input_origin!r}`: {missing_filter_keys}."
                 )
 
         # ..............................................................................................................
@@ -632,7 +636,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
     ) -> None:
         """Emit one optional weak-form diagnostic plot using the shared plot probability convention."""
 
-        if self._plot_check_type is None:
+        if not self._run_plotting:
             return
 
         field_index = select_diagnostic_plot_slice(
@@ -663,9 +667,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
                     "fig_title": self._fig_title,
                     "fig_subtitle": self._fig_subtitle,
                     "subplot_titles": [
-                        r"$\mathrm{LHS}^{pred}: W\psi^{pred}$",
-                        r"$\mathrm{LHS}^{true}: W\psi^{true}$",
-                        r"$\mathrm{RHS}^{pred}: \mu_{0}{\cdot}J^{" + j_tor_case[:4] + r"}_{\phi}$",
+                        r"$\mathrm{LHS}^{pred}: M{\odot}\left(W\psi^{pred}\right)$",
+                        r"$\mathrm{LHS}^{true}: M{\odot}\left(W\psi^{true}\right)$",
+                        r"$\mathrm{RHS}^{pred}: M{\odot}\left(\mu_{0}{\cdot}J^{" + j_tor_case[:4] + r"}_{\phi}\right)$",
                         r"$\mathrm{LHS}^{true}: \mu_{0}{\cdot}J^{true}_{\phi}$",
                         r"$\psi^{pred}$",
                         r"$\psi^{true}$",
@@ -688,10 +692,14 @@ class WeakFormGradShafranovLoss(BaseLoss):
                         "j_tor_case": j_tor_case,
                     },
                 },
-                save_plots=(self._plot_check_type == "save_plots"),
+                save_plots=self._save_plots,
                 save_path=(
-                    training_plot_path(context=context, slice_index=field_index)
-                    if self._plot_check_type == "save_plots"
+                    training_plot_path(
+                        context=context,
+                        slice_index=field_index,
+                        plot_format=self._save_plot_format,
+                    )
+                    if self._save_plots
                     else None
                 ),
             )

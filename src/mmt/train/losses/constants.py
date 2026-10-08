@@ -9,7 +9,7 @@ consumers — such as the config validator — can import it without pulling in 
 from __future__ import annotations
 
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal, get_args
 
 # ======================================================================================================================
 # Loss term types
@@ -63,3 +63,11 @@ GRAD_SHAFRANOV_J_TOR_CALCULATION_METHODS = frozenset(
 )
 
 GRAD_SHAFRANOV_WEIGHT_MAP = {"no_gt": r"$\omega_{NA}$", "lhs_gt": r"$\omega_{LA}$", "rhs_gt": r"$\omega_{RA}$"}
+
+# ======================================================================================================================
+# Plotting options
+# ======================================================================================================================
+
+ALLOWED_PLOT_FORMATS_TYPE = Literal["png", "pdf", "svg"]
+ALLOWED_PLOT_FORMATS = get_args(ALLOWED_PLOT_FORMATS_TYPE)
+ALLOWED_PLOT_CHECK_TYPES = frozenset({None, "show_plots", "save_png", "save_pdf", "save_svg"})
