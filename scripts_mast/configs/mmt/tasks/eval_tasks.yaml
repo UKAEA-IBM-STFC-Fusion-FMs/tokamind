@@ -112,45 +112,6 @@ tasks:
         gs_topology:
           enable: true
 
-  task_1-5-data:
-    eval:
-      compute_metrics:
-        gs_metrics:
-          enable: true
-        smoothness:
-          enable: true
-          sigma: 2.0
-        psi_error_map:
-          enable: true
-        gs_topology:
-          enable: true
-
-  task_1-5-strong:
-    eval:
-      compute_metrics:
-        gs_metrics:
-          enable: true
-        smoothness:
-          enable: true
-          sigma: 2.0
-        psi_error_map:
-          enable: true
-        gs_topology:
-          enable: true
-
-  task_1-5-weak:
-    eval:
-      compute_metrics:
-        gs_metrics:
-          enable: true
-        smoothness:
-          enable: true
-          sigma: 2.0
-        psi_error_map:
-          enable: true
-        gs_topology:
-          enable: true
-
   task_1-6-data:
     eval:
       compute_metrics:
@@ -259,45 +220,6 @@ tasks:
           enable: true
 
   task_2-4-weak:
-    eval:
-      compute_metrics:
-        gs_metrics:
-          enable: true
-        smoothness:
-          enable: true
-          sigma: 2.0
-        psi_error_map:
-          enable: true
-        gs_topology:
-          enable: true
-
-  task_2-5-data:
-    eval:
-      compute_metrics:
-        gs_metrics:
-          enable: true
-        smoothness:
-          enable: true
-          sigma: 2.0
-        psi_error_map:
-          enable: true
-        gs_topology:
-          enable: true
-
-  task_2-5-strong:
-    eval:
-      compute_metrics:
-        gs_metrics:
-          enable: true
-        smoothness:
-          enable: true
-          sigma: 2.0
-        psi_error_map:
-          enable: true
-        gs_topology:
-          enable: true
-
-  task_2-5-weak:
     eval:
       compute_metrics:
         gs_metrics:
