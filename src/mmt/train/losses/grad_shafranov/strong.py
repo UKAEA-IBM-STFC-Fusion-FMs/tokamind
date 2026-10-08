@@ -362,8 +362,12 @@ class StrongFormGradShafranovLoss(BaseLoss):
 
         self._plot_check_cfg = plot_check_cfg or {}
         self._all_losses_weights = self._plot_check_cfg.get("all_losses_weights", {"NA": "NA"})
-        self._plot_check_type = self._plot_check_cfg.get("type", None)  # Options: "show_plots", "save_plots", None.
+
+        self._plot_check_type: str = self._plot_check_cfg.get("type", None) or "none_none"
+        self._run_plotting = not self._plot_check_type.startswith("none_none")
         self._plot_check_probability = float(self._plot_check_cfg.get("probability", 0.0))
+        self._save_plots = self._plot_check_type.startswith("save_")
+        self._save_plot_format: str = self._plot_check_type.split("_")[-1] if self._save_plots else "png"
 
         self._plain_loss_name = "Strong-form Grad-Shafranov"
         self._fig_title = ""
@@ -375,10 +379,12 @@ class StrongFormGradShafranovLoss(BaseLoss):
 
         self.required_output_names = self._required_output_names_for_rhs(rhs_input_origin=self.rhs_input_origin)
         self.required_output_keys = [
-            resolve_output_key(self._output_name_to_id, name, loss_name="Grad-Shafranov loss")
+            resolve_output_key(
+                output_name_to_id=self._output_name_to_id, name=name, loss_name="Strong-form Grad-Shafranov loss"
+            )
             for name in self.required_output_names
         ]
-        self._name_by_key = {key: name for name, key in self._output_name_to_id.items()}
+        self._name_by_key = {key: name for name, key in self._output_name_to_id.items()}  # FIXME: Not used.
         self._psi_key = resolve_output_key(
             output_name_to_id=self._output_name_to_id,
             name="equilibrium-psi",
@@ -389,15 +395,11 @@ class StrongFormGradShafranovLoss(BaseLoss):
         self._ffprime_key = self._output_name_to_id.get("equilibrium-f_df_dpsi")
 
         if self._output_filter is not None:
-            missing_filter_names = [
-                name
-                for name, key in zip(self.required_output_names, self.required_output_keys, strict=True)
-                if key not in self._output_filter
-            ]
-            if missing_filter_names:
+            missing_filter_keys = [key for key in self.required_output_keys if key not in self._output_filter]
+            if missing_filter_keys:
                 raise ValueError(
-                    "Grad-Shafranov loss output filter must include all outputs required by `rhs_input_origin="
-                    f"{rhs_input_origin!r}: {missing_filter_names}`."
+                    f"StrongFormGradShafranovLoss loss output filter must include all outputs required by "
+                    f"`rhs_input_origin={rhs_input_origin!r}: {missing_filter_keys}`."
                 )
 
         # ..............................................................................................................
@@ -695,7 +697,8 @@ class StrongFormGradShafranovLoss(BaseLoss):
         j_tor_fields_gt_destdized: Tensor | None,
         plot_single_slice: bool = True,
     ):
-        """Optionally emit strong-form diagnostic plots for selected field slices.
+        """
+        Optionally emit strong-form diagnostic plots for selected field slices.
 
         Parameters
         ----------
@@ -717,9 +720,10 @@ class StrongFormGradShafranovLoss(BaseLoss):
         Returns
         -------
         None
+
         """
 
-        if self._plot_check_type is None:
+        if not self._run_plotting:
             return
 
         plot_index = select_diagnostic_plot_slice(
@@ -789,10 +793,14 @@ class StrongFormGradShafranovLoss(BaseLoss):
                             "j_tor_case": j_tor_case,
                         },
                     },
-                    save_plots=(self._plot_check_type == "save_plots"),
+                    save_plots=self._save_plots,
                     save_path=(
-                        training_plot_path(context=context_info, slice_index=ii)
-                        if self._plot_check_type == "save_plots"
+                        training_plot_path(
+                            context=context_info,
+                            slice_index=ii,
+                            plot_format=self._save_plot_format,
+                        )
+                        if self._save_plots
                         else None
                     ),
                 )
