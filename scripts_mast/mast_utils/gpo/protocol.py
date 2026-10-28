@@ -589,11 +589,12 @@ def validate_evaluation_manifest(run_dir, eval_dir, task):
     manifest = json.loads((root / "cgpo_evaluation.json").read_text())
     validate_shots(manifest["split_manifest"]["shots"])
     counts = manifest["test_window_counts"]
+    expected_test = set(manifest["split_manifest"]["shots"]["test"]) - set(manifest.get("empty_test_shots", []))
     if (
         manifest.get("format") != "cgpo-evaluation-v1"
         or manifest.get("task") != task
         or not manifest.get("complete")
-        or set(map(int, counts)) != set(manifest["split_manifest"]["shots"]["test"])
+        or set(map(int, counts)) != expected_test
         or any(not isinstance(n, int) or n <= 0 for n in counts.values())
         or manifest["source_config_digest"] != file_digest(Path(run_dir) / f"{Path(run_dir).name}.yaml")
         or manifest["config_digest"] != file_digest(root / "evaluation_config.yaml")

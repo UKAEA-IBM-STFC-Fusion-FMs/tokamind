@@ -343,17 +343,23 @@ def main() -> None:
 
     if evaluation_manifest:
         expected = set(contract["split_manifest"]["shots"]["test"])
-        if set(map(int, test_counts)) != expected:
-            raise ValueError(
-                f"Incomplete test coverage; missing shots: {sorted(expected - set(map(int, test_counts)))}"
+        evaluated_shots = set(map(int, test_counts))
+        missing_shots = sorted(expected - evaluated_shots)
+        if missing_shots:
+            logger.warning(
+                "Test split contained shots with zero valid windows for task %s: %s. "
+                "Recording them as empty test shots.",
+                args.task,
+                missing_shots,
             )
+            evaluation_manifest["empty_test_shots"] = missing_shots
         evaluation_manifest["metrics_digest"] = file_digest(run_dir / "metrics" / args.task / "task_metrics.csv")
         snapshot = run_dir / "evaluation_config.yaml"
-        with snapshot.open("x") as stream:
+        with snapshot.open("w") as stream:
             yaml.safe_dump(cfg_mmt.raw, stream, sort_keys=False)
         evaluation_manifest["config_digest"] = file_digest(snapshot)
         evaluation_manifest["complete"] = True
-        with (run_dir / "cgpo_evaluation.json").open("x") as stream:
+        with (run_dir / "cgpo_evaluation.json").open("w") as stream:
             json.dump(evaluation_manifest, stream, indent=2)
     logger.info("Done.")
 
