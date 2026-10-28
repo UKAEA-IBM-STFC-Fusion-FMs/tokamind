@@ -326,7 +326,10 @@ class TokenEncoder(nn.Module):
             y = proj(vecs.to(device=device, dtype=torch.float32))
             if y.dtype != tokens_flat.dtype:
                 y = y.to(dtype=tokens_flat.dtype)
-            tokens_flat.index_copy_(0, idx, y)
+            if tokens_flat.device.type == "mps":
+                tokens_flat[idx] = y
+            else:
+                tokens_flat.index_copy_(0, idx, y)
 
         tokens = tokens_flat.view(B, L, self.d_model)
 

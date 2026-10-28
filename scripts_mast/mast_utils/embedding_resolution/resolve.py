@@ -284,14 +284,19 @@ def resolve_finetune_embeddings(  # NOSONAR - Ignore cognitive complexity
         signal_specs=signal_specs_for_policy,
         signals_by_role=signals_by_role,
     )
-    manual_config_signals = _signal_names_from_overrides(
-        overrides=original_profile_overrides,
-        signal_names_by_role=dct3d_signals,
-    )
-    dct3d_policy_signals = _subtract_signal_names_by_role(
-        signal_names_by_role=dct3d_signals,
-        names_to_remove=manual_config_signals,
-    )
+    inherit_all = bool(cfg_mmt.raw.get("gpo_inherit_all_embeddings", False))
+    if inherit_all:
+        manual_config_signals = {}
+        dct3d_policy_signals = dct3d_signals
+    else:
+        manual_config_signals = _signal_names_from_overrides(
+            overrides=original_profile_overrides,
+            signal_names_by_role=dct3d_signals,
+        )
+        dct3d_policy_signals = _subtract_signal_names_by_role(
+            signal_names_by_role=dct3d_signals,
+            names_to_remove=manual_config_signals,
+        )
 
     source_overrides = {}
     if _uses_dct3d_tuning_policy(cfg_mmt=cfg_mmt):

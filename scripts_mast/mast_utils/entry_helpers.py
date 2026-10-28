@@ -179,6 +179,13 @@ def build_mast_datasets(
 
     # Build store_manager_settings only when running locally and a path is provided.
     store_settings = {"base_local_zarr_path": local_path} if (local_flag and local_path) else None
+    if local_flag and local_path:
+        local_dir = Path(local_path)
+        avail = {int(p.stem) for p in local_dir.glob("*.zarr") if p.stem.isdigit()}
+        if avail:
+            train_shots = [s for s in train_shots if s in avail]
+            test_shots = [s for s in test_shots if s in avail]
+            val_shots = [s for s in val_shots if s in avail]
 
     # Initialize datasets based on phase
     if phase == "eval":
