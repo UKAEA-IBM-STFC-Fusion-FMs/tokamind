@@ -97,11 +97,11 @@ separated) — SLiC would focus the gradient on the remaining poorly-separated p
 
 ## 6. Group 3 tasks (task_3-1, task_3-2, task_3-3)
 
-**Status:** Base fine-tuning included in pipeline; GPO configs not yet written.
+**Status:** Base fine-tuning included in pipeline; GPO recipes added to `gpo_tasks.yaml` (IPO starting templates).
 
-Group 3 tasks are submitted via `ccc_finetune_all.sh` but have no entries in
-`gpo_tasks.yaml`.  Once base fine-tune checkpoints are available, the calibration
-step (Stage 2) will produce β recommendations and shot blacklists, and task configs
-can be added.
+Group 3 tasks are submitted via `ccc_finetune_all.sh` and have standardized entries in
+`gpo_tasks.yaml`. Once base fine-tune checkpoints are available, the calibration
+step (Stage 2) will produce empirical β recommendations and shot blacklists.
 
-*Source: `docs/gpo_runbook.md §Stage 0`; absence from `gpo_tasks.yaml`*
+*Source: `docs/gpo_runbook.md §Stage 0`; `scripts_mast/configs/mmt/tasks/gpo_tasks.yaml`*
+
