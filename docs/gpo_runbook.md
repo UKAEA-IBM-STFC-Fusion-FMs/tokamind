@@ -1,8 +1,12 @@
 # CGPO: verified cluster workflow
 
-This runbook describes the corrected `cgpo` branch. Historical recipes and reports are not evidence
-that older runs followed this protocol. See [the shot/resume protocol](cgpo_shot_protocol.md) for
-configuration precedence, independent validation and checkpoint semantics.
+This runbook describes the corrected `cgpo` branch for IBM CCC / LSF cluster execution.
+For local testing on a personal workstation or Mac without cluster access, see the
+[Local Machine Smoke Test Runbook](gpo_local_runbook.md).
+
+Historical recipes and reports are not evidence that older runs followed this protocol.
+See [the shot/resume protocol](cgpo_shot_protocol.md) for configuration precedence, independent
+validation and checkpoint semantics.
 
 ## Cluster setup
 
