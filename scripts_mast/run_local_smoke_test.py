@@ -2,7 +2,7 @@
 run_local_smoke_test.py
 =======================
 
-Automated end-to-end local smoke test for Continuous Generative Preference Optimization (CGPO).
+Automated end-to-end local smoke test for Continuous Generalized Preference Optimization (CGPO).
 Designed for running on local workstations (Mac with MPS or CPU, Linux) without access to an LSF
 compute cluster or large datasets.
 

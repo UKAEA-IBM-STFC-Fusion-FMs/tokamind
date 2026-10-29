@@ -1,6 +1,6 @@
 # CGPO: Local Machine Smoke Test Runbook
 
-This runbook guides researchers, reviewers, and collaborators who do **not** have access to the IBM CCC cluster or large-scale compute resources to run and verify the complete **Continuous Generative Preference Optimization (CGPO)** pipeline locally on a personal machine (such as an Apple Silicon Mac or Linux workstation).
+This runbook guides researchers, reviewers, and collaborators who do **not** have access to the IBM CCC cluster or large-scale compute resources to run and verify the complete **Continuous Generalized Preference Optimization (CGPO)** pipeline locally on a personal machine (such as an Apple Silicon Mac or Linux workstation).
 
 ---
 
