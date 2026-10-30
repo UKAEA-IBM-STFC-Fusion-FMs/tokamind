@@ -562,6 +562,45 @@ def verified_test_batches(loader, test_shots, counts):
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+def verify_empty_test_shots(test_shots, counts, window_iterable, transform_factory):
+    """Recheck absent shots individually before excluding them from test coverage.
+
+    Reuse the TokaMark shot processor, but with a fresh transform chain: validity
+    and stride filters may carry state from the first iteration. Only missing
+    shots are revisited, without materializing their windows or running inference.
+    Missing data, processing failures and windows omitted by the loader all fail
+    closed. The original iterable and its transform state are not modified.
+    """
+    expected = set(test_shots)
+    evaluated = set(map(int, counts))
+    if not evaluated or not evaluated <= expected:
+        raise ValueError("Verified evaluation requires non-empty, test-only coverage.")
+    missing = sorted(expected - evaluated)
+    if not missing:
+        return {}
+    shots = getattr(window_iterable, "shots_list", None)
+    if shots is None or not callable(getattr(window_iterable, "_process_shot", None)):
+        raise ValueError("Cannot verify empty test shots: a shot-addressable TokaMark iterable is required.")
+    indices = {int(shot): index for index, shot in enumerate(shots)}
+    if not expected <= indices.keys():
+        raise ValueError("Test dataset is missing official shots; these cannot be classified as empty.")
+    audit = copy.copy(window_iterable)
+    checks = {}
+    for shot in missing:
+        audit.custom_transform = transform_factory()
+        # TokaMark's per-shot generator loads the raw shot and applies the same
+        # test-mode and custom-transform filters as normal iteration.
+        windows = audit._process_shot(shot_idx=indices[shot])
+        try:
+            sentinel = object()
+            if next(windows, sentinel) is not sentinel:
+                raise ValueError(f"Test shot {shot} has valid windows but was absent from evaluation.")
+        finally:
+            windows.close()
+        checks[str(shot)] = {"method": "per-shot-recheck-v1", "valid_windows": 0}
+    return checks
+
+
 def validate_evaluation_manifest(run_dir, eval_dir, task):
     """
     Verify complete test coverage and the identity of evaluated weights and saved metrics.
@@ -587,13 +626,29 @@ def validate_evaluation_manifest(run_dir, eval_dir, task):
     """
     root = Path(eval_dir)
     manifest = json.loads((root / "cgpo_evaluation.json").read_text())
+    for key in ("collection_digest", "evaluation_contract", "embedding_config_digest"):
+        if not isinstance(manifest.get(key), str) or not manifest[key].strip():
+            raise ValueError(f"Missing or invalid CGPO evaluation provenance: {key}")
     validate_shots(manifest["split_manifest"]["shots"])
     counts = manifest["test_window_counts"]
-    expected_test = set(manifest["split_manifest"]["shots"]["test"]) - set(manifest.get("empty_test_shots", []))
+    official_test = set(manifest["split_manifest"]["shots"]["test"])
+    empty = manifest.get("empty_test_shots", [])
+    checks = manifest.get("empty_test_shot_checks", {})
+    if (
+        not isinstance(empty, list)
+        or any(type(shot) is not int for shot in empty)
+        or len(set(empty)) != len(empty)
+        or not set(empty) <= official_test
+        or not isinstance(checks, dict)
+        or checks != {str(shot): {"method": "per-shot-recheck-v1", "valid_windows": 0} for shot in empty}
+    ):
+        raise ValueError("Empty test shots require successful per-shot verification.")
+    expected_test = official_test - set(empty)
     if (
         manifest.get("format") != "cgpo-evaluation-v1"
         or manifest.get("task") != task
         or not manifest.get("complete")
+        or not counts
         or set(map(int, counts)) != expected_test
         or any(not isinstance(n, int) or n <= 0 for n in counts.values())
         or manifest["source_config_digest"] != file_digest(Path(run_dir) / f"{Path(run_dir).name}.yaml")

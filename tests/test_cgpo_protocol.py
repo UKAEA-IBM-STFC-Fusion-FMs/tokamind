@@ -235,7 +235,8 @@ def test_resolved_snapshot_is_not_overwritten(tmp_path):
     assert path.read_bytes() == before
 
 
-def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
+@pytest.mark.parametrize("empty_test_shot", [False, True])
+def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch, empty_test_shot):
     """Use the real config loader and real pair writer/dataset; stub only costly MAST/model work."""
     import logging
 
@@ -263,6 +264,8 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
     (root / "checkpoints" / "best").mkdir(parents=True)
     (root / "checkpoints" / "best" / "fake.pt").write_bytes(b"model")
     manifest = {"protocol": PROTOCOL, "shots": {"train": [1, 2], "val": [3], "test": [4]}, "assets": {}}
+    if empty_test_shot:
+        manifest["shots"]["test"].append(5)
     monkeypatch.setattr(protocol, "benchmark_manifest", lambda data: manifest)
     spec = SimpleNamespace(signal_id=1, name="a")
     registry = SimpleNamespace(specs_for_role=lambda role: [spec])
@@ -406,7 +409,20 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
     from compare_gpo_eval import _compare_task
 
     gpo_root = root.parent / f"ft-task_1-1-ws-{root.name}-mmt-corrected"
-    monkeypatch.setattr(evaluator, "build_window_data", lambda **kw: {"test": {"loader": [batch(4)]}})
+
+    class TestWindows:
+        shots_list = manifest["shots"]["test"]
+        custom_transform = "already-used"
+
+        def _process_shot(self, shot_idx):
+            assert self.shots_list[shot_idx] == 5
+            assert self.custom_transform == "fresh"
+            yield from []
+
+    monkeypatch.setattr(evaluator, "build_default_transform", lambda **kw: "fresh")
+    monkeypatch.setattr(
+        evaluator, "build_window_data", lambda **kw: {"test": {"loader": [batch(4)], "iterable": TestWindows()}}
+    )
 
     def benchmark(**kw):
         assert [s for b in kw["dataloader"] for s in b["shot_id"]] == [4]
@@ -425,6 +441,10 @@ def test_entrypoints_route_distinct_mast_loaders(tmp_path, monkeypatch):
             ),
         )
         evaluator.main()
+        proof = json.loads((model_root / "eval_verified/cgpo_evaluation.json").read_text())
+        assert proof.get("empty_test_shots", []) == ([5] if empty_test_shot else [])
+        if empty_test_shot:
+            assert proof["empty_test_shot_checks"] == {"5": {"method": "per-shot-recheck-v1", "valid_windows": 0}}
     comparison = _compare_task(
         "task_1-1",
         str(root),

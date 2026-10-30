@@ -40,6 +40,7 @@ from mast_utils import (
     init_run_context,
     build_mast_datasets,
     build_window_data,
+    build_default_transform,
     build_model_and_optional_warmstart,
     resolve_eval_embeddings,
     evaluate_benchmark_and_diagnostics,
@@ -114,6 +115,7 @@ def main() -> None:
         source_fingerprint,
         validate_collection,
         verified_test_batches,
+        verify_empty_test_shots,
     )
     from mmt.utils.config.experiment.inheritance import load_source_run_config_yaml
 
@@ -342,17 +344,27 @@ def main() -> None:
         )
 
     if evaluation_manifest:
-        expected = set(contract["split_manifest"]["shots"]["test"])
-        evaluated_shots = set(map(int, test_counts))
-        missing_shots = sorted(expected - evaluated_shots)
-        if missing_shots:
+        empty_checks = verify_empty_test_shots(
+            contract["split_manifest"]["shots"]["test"],
+            test_counts,
+            window_data["test"].get("iterable"),
+            lambda: build_default_transform(
+                cfg_mmt=cfg_mmt,
+                dict_metadata=dict_task_metadata,
+                signal_specs=signal_specs,
+                codecs=codecs,
+                keep_output_native=cfg_data.get("keep_output_native", False),
+            ),
+        )
+        if empty_checks:
+            empty_shots = sorted(map(int, empty_checks))
             logger.warning(
-                "Test split contained shots with zero valid windows for task %s: %s. "
-                "Recording them as empty test shots.",
+                "Verified zero valid windows by rechecking test shots for task %s: %s.",
                 args.task,
-                missing_shots,
+                empty_shots,
             )
-            evaluation_manifest["empty_test_shots"] = missing_shots
+            evaluation_manifest["empty_test_shots"] = empty_shots
+            evaluation_manifest["empty_test_shot_checks"] = empty_checks
         evaluation_manifest["metrics_digest"] = file_digest(run_dir / "metrics" / args.task / "task_metrics.csv")
         snapshot = run_dir / "evaluation_config.yaml"
         with snapshot.open("w") as stream:

@@ -289,7 +289,7 @@ def _compare_task(
                 "evaluation_contract",
                 "embedding_config_digest",
             ):
-                if base_proof.get(key) != gpo_proof.get(key):
+                if base_proof[key] != gpo_proof[key]:
                     raise ValueError(f"Base/GPO evaluation mismatch: {key}")
             if base_proof.get("empty_test_shots") != gpo_proof.get("empty_test_shots"):
                 raise ValueError("Base/GPO evaluation mismatch: empty_test_shots")

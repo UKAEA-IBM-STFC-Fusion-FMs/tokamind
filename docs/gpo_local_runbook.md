@@ -44,59 +44,57 @@ loader:
 train:
   amp:
     enable: false
-  stages:
-    - name: ft_scratch
-      epochs: 1
-      scheduler:
-        grad_accum_steps: 1
-        warmup_steps_fraction: 0.02
-      optimizer:
-        lr:
-          token_encoder: 5e-3
-          backbone: 1e-3
-          modality_heads: 5e-3
-          output_adapters: 5e-3
-        wd:
-          token_encoder: 0.01
-          backbone: 0.01
-          modality_heads: 0.01
-          output_adapters: 0.01
-      freeze:
-        token_encoder: false
-        backbone: false
-        modality_heads: false
-        output_adapters: false
-    - name: gpo
-      epochs: 1
-      scheduler:
-        grad_accum_steps: 1
-        warmup_steps_fraction: 0.05
-      optimizer:
-        lr:
-          token_encoder: 5e-4
-          backbone: 1e-4
-          modality_heads: 1e-4
-          output_adapters: 1e-4
-        wd:
-          token_encoder: 0.01
-          backbone: 0.01
-          modality_heads: 0.01
-          output_adapters: 0.01
-      freeze:
-        token_encoder: true
-        backbone: true
-        modality_heads: false
-        output_adapters: false
 ```
 
 #### Option B: Load from Pre-Downloaded Local Zarr Directory
-If you already downloaded sample shots (e.g. via `download_tokamark_sample_data.ipynb`):
+Keep the common settings above, replacing only the `data.local` and `data.local_path` values
+if you already downloaded the required shots (e.g. via `download_tokamark_sample_data.ipynb`):
 ```yaml
 data:
   local: true
   local_path: /path/to/your/local/mast/shots  # directory containing <shot_id>.zarr
   subset_size: 1
 ```
+
+Local files must include **all shots selected from the official split**. With `subset_size: 1`,
+this means the first selected train, validation and test shot, not any arbitrary three shots.
+Missing local files are errors; they never silently redefine the benchmark split.
+Shots that genuinely yield no valid test windows are rechecked individually before exclusion.
+
+#### One-epoch schedules (both data options)
+
+Do **not** put `train.stages` in the shared `local_overrides.yaml`: named stages are merged
+and unknown names appended, so listing both `ft_scratch` and `gpo` runs both stages in each phase.
+
+For this smoke test, edit the existing `task_1-1` entry in
+`scripts_mast/configs/mmt/tasks/finetune_tasks.yaml`, retaining its other settings:
+
+```yaml
+tasks:
+  task_1-1:
+    train:
+      stages:
+        - name: ft_scratch
+          epochs: 1
+```
+
+Separately, edit the existing `task_1-1` entry in
+`scripts_mast/configs/mmt/tasks/gpo_tasks.yaml`, again retaining its other settings:
+
+```yaml
+tasks:
+  task_1-1:
+    train:
+      stages:
+        - name: gpo
+          epochs: 1
+```
+
+These are partial edits to the corresponding task, **not replacements for the full files**.
+Use the chosen task ID instead of `task_1-1` when testing another task. Each phase now has
+one one-epoch stage, with its own existing learning rates and freezing policy. Make these
+edits **before calibration**, which freezes the effective CGPO recipe, and restore the
+production epoch budgets before launching full experiments.
 
 > [!IMPORTANT]
 > The configuration hash is strictly tracked. Never edit `local_overrides.yaml` between Stage 2 (calibration) and Stage 3 (GPO training), as CGPO enforces configuration immutability.
