@@ -30,6 +30,93 @@ EXTERNAL_LAUNCHERS = pytest.mark.skipif(
 )
 
 
+@pytest.fixture(autouse=True)
+def isolate_campaign_paths(tmp_path, monkeypatch):
+    """Never let tests write into a real campaign inherited from the shell."""
+    monkeypatch.setenv("RUNS_DIR", str(tmp_path / "runs"))
+    monkeypatch.setenv("ARTIFACT_DIR", str(tmp_path / "artifacts"))
+    monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
+    monkeypatch.delenv("BASE_RUN", raising=False)
+    monkeypatch.delenv("GPO_OVERWRITE", raising=False)
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_collect_submits_for_missing_or_empty_directory(monkeypatch, existing):
+    monkeypatch.setenv("TASKS", "task_1-1")
+    p = pipeline.Pipeline()
+    pairs = p.pairs("task_1-1")
+    if existing:
+        pairs.mkdir(parents=True)
+    calls = []
+    monkeypatch.setattr(p, "require_base", lambda task: None)
+    monkeypatch.setattr(p, "submit", lambda *args: calls.append(("submit", args)) or "123")
+    monkeypatch.setattr(p, "wait", lambda jobs: calls.append(("wait", jobs)))
+    monkeypatch.setattr(p, "validate_pairs", lambda task: calls.append(("validate", task)))
+    p.collect()
+    assert [kind for kind, _ in calls] == ["submit", "wait", "validate"]
+    assert "--overwrite" not in calls[0][1][2]
+
+
+@pytest.mark.parametrize("valid", [False, True])
+def test_collect_validates_before_reuse_and_preserves_incomplete_data(monkeypatch, valid, capsys):
+    monkeypatch.setenv("TASKS", "task_1-1")
+    p = pipeline.Pipeline()
+    pairs = p.pairs("task_1-1")
+    pairs.mkdir(parents=True)
+    config = pairs / "collection_config.json"
+    config.write_text("{}")
+    monkeypatch.setattr(p, "require_base", lambda task: None)
+    monkeypatch.setattr(p, "submit", lambda *args: pytest.fail("collection must not be submitted"))
+    monkeypatch.setattr(p, "wait", lambda jobs: None)
+    checks = []
+
+    def validate(task):
+        checks.append(task)
+        if not valid:
+            raise subprocess.CalledProcessError(1, ["validate_gpo_pairs.py", str(pairs)])
+
+    monkeypatch.setattr(p, "validate_pairs", validate)
+    if valid:
+        p.collect()
+        assert "REUSE verified collection" in capsys.readouterr().out
+    else:
+        with pytest.raises(RuntimeError, match="Existing files were preserved.*GPO_PAIR_TAG.*GPO_OVERWRITE"):
+            p.collect()
+        assert "REUSE" not in capsys.readouterr().out
+    assert checks
+    assert config.read_text() == "{}"
+
+
+def test_collect_explicit_overwrite_submits_and_validates(monkeypatch):
+    monkeypatch.setenv("TASKS", "task_1-1")
+    monkeypatch.setenv("GPO_OVERWRITE", "1")
+    p = pipeline.Pipeline()
+    pairs = p.pairs("task_1-1")
+    pairs.mkdir(parents=True)
+    (pairs / "collection_config.json").write_text("{}")
+    calls = []
+    monkeypatch.setattr(p, "require_base", lambda task: None)
+    monkeypatch.setattr(p, "submit", lambda *args: calls.append(args) or "123")
+    monkeypatch.setattr(p, "wait", lambda jobs: None)
+    monkeypatch.setattr(p, "validate_pairs", lambda task: calls.append(task))
+    p.collect()
+    assert "--overwrite" in calls[0][2]
+    assert calls[1] == "task_1-1"
+
+
+def test_collect_dry_run_does_not_touch_existing_collection(monkeypatch):
+    monkeypatch.setenv("TASKS", "task_1-1")
+    p = pipeline.Pipeline(dry_run=True)
+    pairs = p.pairs("task_1-1")
+    pairs.mkdir(parents=True)
+    config = pairs / "collection_config.json"
+    config.write_text("{}")
+    monkeypatch.setattr(pipeline.subprocess, "run", lambda *a, **k: pytest.fail("dry-run executed a command"))
+    p.collect()
+    assert list(pairs.iterdir()) == [config]
+    assert config.read_text() == "{}"
+
+
 @pytest.mark.parametrize("state", ["DONE", "EXIT", "RUN", "PEND", "PSUSP", "USUSP", "SSUSP", "WAIT", "PROV"])
 def test_lsf_known_states(monkeypatch, state):
     monkeypatch.setattr(

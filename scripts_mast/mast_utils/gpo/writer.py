@@ -117,8 +117,8 @@ class GpoPairWriter:
         buffer reaches this size, so a single flush may exceed it by up to one
         batch.  Default: 2048.
     overwrite : bool
-        If ``out_dir`` already exists: raise ``FileExistsError`` when False,
-        replace it when True.  Default: False.
+        If ``out_dir`` contains data: raise ``FileExistsError`` when False,
+        replace it when True. Empty directories are allowed. Default: False.
     """
 
     def __init__(
@@ -131,7 +131,9 @@ class GpoPairWriter:
         self._out_dir = Path(out_dir)
         self._overwrite = bool(overwrite)
 
-        if self._out_dir.exists() and not self._overwrite:
+        if self._out_dir.is_symlink() or (self._out_dir.exists() and not self._out_dir.is_dir()):
+            raise FileExistsError(f"GPO output path must be a directory, not a file or symlink: {self._out_dir}")
+        if self._out_dir.is_dir() and any(self._out_dir.iterdir()) and not self._overwrite:
             raise FileExistsError(
                 f"GPO output directory already exists: {self._out_dir}. "
                 "Pass overwrite=True (--overwrite) to replace it, or choose a different --tag."
@@ -279,8 +281,13 @@ class GpoPairWriter:
         # A crash between (1) and (2) leaves the old dataset recoverable in the
         # backup dir rather than destroyed; if (2) raises, we restore the backup.
         backup_dir: Path | None = None
+        # Recheck before promotion: a directory that was absent/empty at startup
+        # may now contain another collector's output. Never replace it implicitly.
+        if self._out_dir.is_symlink() or (self._out_dir.exists() and not self._out_dir.is_dir()):
+            raise FileExistsError(f"GPO output path changed during collection: {self._out_dir}")
         if self._out_dir.exists():
-            # overwrite=True is guaranteed here; __init__ raises otherwise.
+            if not self._overwrite and any(self._out_dir.iterdir()):
+                raise FileExistsError(f"GPO output directory became nonempty during collection: {self._out_dir}")
             backup_dir = self._out_dir.parent / f"{self._staging_dir.name}.backup"
             os.replace(self._out_dir, backup_dir)
 

@@ -454,10 +454,30 @@ class Pipeline:
         None
         """
         jobs = []
+        reuse = set()
+        overwrite = os.environ.get("GPO_OVERWRITE", "0") == "1"
+        # Validate existing collections before submitting any work. An empty
+        # directory is not a collection; nonempty incomplete data must be preserved.
         for task in self.tasks:
             self.require_base(task)
-            if not self.dry_run and self.pairs(task).exists() and os.environ.get("GPO_OVERWRITE", "0") != "1":
-                print(f"REUSE collection task={task}: {self.pairs(task)}", flush=True)
+            pairs = self.pairs(task)
+            if self.dry_run:
+                continue
+            if pairs.is_symlink() or (pairs.exists() and not pairs.is_dir()):
+                raise ValueError(f"Invalid pair directory task={task}: {pairs}; select a new GPO_PAIR_TAG.")
+            if pairs.is_dir() and any(pairs.iterdir()) and not overwrite:
+                try:
+                    self.validate_pairs(task)
+                except subprocess.CalledProcessError as exc:
+                    raise RuntimeError(
+                        f"Incomplete or invalid pair collection task={task}: {pairs}. "
+                        "Existing files were preserved. Select a new GPO_PAIR_TAG, or explicitly "
+                        "set GPO_OVERWRITE=1 to replace this collection after inspecting it."
+                    ) from exc
+                reuse.add(task)
+        for task in self.tasks:
+            if task in reuse:
+                print(f"REUSE verified collection task={task}: {self.pairs(task)}", flush=True)
                 continue
             command = self.command(
                 "run_collect_gpo_pairs.py",
@@ -476,7 +496,7 @@ class Pipeline:
                 "--shard_size",
                 os.environ.get("GPO_SHARD_SIZE", "2048"),
             )
-            if os.environ.get("GPO_OVERWRITE", "0") == "1":
+            if overwrite:
                 command.append("--overwrite")
             jobs.append(self.submit("collect", task, command))
         self.wait(jobs)

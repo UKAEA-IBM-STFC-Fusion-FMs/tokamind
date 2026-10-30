@@ -136,6 +136,43 @@ def make_pairs(tmp_path):
     return tmp_path / "pairs", contract
 
 
+def test_pair_writer_accepts_empty_output_without_overwrite(tmp_path):
+    (tmp_path / "pairs").mkdir()
+    pairs, _ = make_pairs(tmp_path)
+    assert (pairs / "metadata.json").is_file()
+    assert (pairs / "collection_config.json").is_file()
+    assert list(pairs.glob("*.npz"))
+
+
+def test_pair_writer_preserves_nonempty_output_without_overwrite(tmp_path):
+    pairs = tmp_path / "pairs"
+    pairs.mkdir()
+    marker = pairs / "collection_config.json"
+    marker.write_text("{}")
+    with pytest.raises(FileExistsError, match="already exists"):
+        GpoPairWriter(pairs, {})
+    assert marker.read_text() == "{}"
+    assert list(tmp_path.iterdir()) == [pairs]
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_pair_writer_rechecks_output_before_promotion(tmp_path, existing):
+    pairs = tmp_path / "pairs"
+    if existing:
+        pairs.mkdir()
+    writer = GpoPairWriter(pairs, {})
+    pairs.mkdir(exist_ok=True)
+    marker = pairs / "other-collector.txt"
+    marker.write_text("preserve me")
+    try:
+        with pytest.raises(FileExistsError, match="became nonempty"):
+            writer.finalize()
+        assert marker.read_text() == "preserve me"
+        assert list(pairs.iterdir()) == [marker]
+    finally:
+        writer.abort()
+
+
 def test_split_precedes_filters_and_all_signals_stay_together(tmp_path):
     pairs, _ = make_pairs(tmp_path)
     tr = GpoPairDataset(pairs, "train", native_nrmse_percentiles=(0, 100), max_pairs_per_shot_percentile=90)
