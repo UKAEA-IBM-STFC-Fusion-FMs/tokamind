@@ -13,6 +13,8 @@ It is used by evaluation and trace-saving routines and assumes window-level batc
 collate.
 """
 
+from __future__ import annotations
+
 from collections.abc import Mapping, MutableMapping
 from typing import TYPE_CHECKING, Any
 import numpy as np
