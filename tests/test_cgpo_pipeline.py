@@ -12,15 +12,15 @@ import sys
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 import gpo_pipeline as pipeline
+import pytest
 from mast_utils.gpo.protocol import (
     file_digest,
     source_fingerprint,
     validate_evaluation_manifest,
     verified_test_batches,
 )
+
 from mmt.utils.config.validator import _validate_loss_terms
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -38,6 +38,7 @@ def isolate_campaign_paths(tmp_path, monkeypatch):
     monkeypatch.setenv("LOG_DIR", str(tmp_path / "logs"))
     monkeypatch.delenv("BASE_RUN", raising=False)
     monkeypatch.delenv("GPO_OVERWRITE", raising=False)
+    monkeypatch.delenv("PIPELINE_STATE", raising=False)
 
 
 @pytest.mark.parametrize("existing", [False, True])
@@ -349,6 +350,7 @@ def test_pair_validator_reports_missing_artifacts_without_unpacking_error(tmp_pa
 @pytest.mark.parametrize(("kind", "expected"), [("dpo", 1.0), ("ipo", 0.5)])
 def test_documented_reference_gradients_and_orthogonal_freedom(kind, expected):
     import torch
+
     from mmt.train.losses.continuous_gpo import ContinuousGPOLoss
 
     term = ContinuousGPOLoss(beta=2.0, loss_type=kind)
@@ -371,6 +373,7 @@ def test_documented_reference_gradients_and_orthogonal_freedom(kind, expected):
 
 def test_runtime_reference_clip_guard():
     import torch
+
     from mmt.train.losses.continuous_gpo import ContinuousGPOLoss
 
     term = ContinuousGPOLoss(mse_gap_clip=1.0)
@@ -422,12 +425,21 @@ if state != 'MISSING': print(sys.argv[-1], state)
         monkeypatch.setenv(key, value)
     p = pipeline.Pipeline()
     calls = []
-    monkeypatch.setattr(p, "run", lambda command: calls.append(command))
+
+    def run(command):
+        calls.append(command)
+        if "validate_gpo_pairs.py" in command[1]:
+            p.pairs("task_1-1").mkdir(parents=True, exist_ok=True)
+            (p.pairs("task_1-1") / "collection_config.json").write_text("{}")
+
+    monkeypatch.setattr(p, "run", run)
     monkeypatch.setattr(p, "require_base", lambda task: None)
     monkeypatch.setattr(p, "require_calibration", lambda task: None)
-    import mast_utils.gpo.protocol as protocol
+    from mast_utils.gpo import protocol
 
-    monkeypatch.setattr(protocol, "validate_evaluation_manifest", lambda *args: {})
+    monkeypatch.setattr(
+        protocol, "validate_evaluation_manifest", lambda *args: {"collection_digest": protocol.digest({})}
+    )
     if state == "DONE":
         p.complete()
         jobs = json.loads(ledger.read_text())
@@ -519,3 +531,145 @@ def test_all_missing_comparisons_produce_explicit_incomplete_report(tmp_path, mo
     reports = list((tmp_path / "reports").glob("*.md"))
     assert len(reports) == 1
     assert "INCOMPLETE: 0/1" in reports[0].read_text()
+
+
+@pytest.fixture
+def restart_pipeline(tmp_path, monkeypatch):
+    """Build a tiny isolated campaign with fake LSF submission resources."""
+    root = tmp_path / "code"
+    (root / "scripts_mast/configs").mkdir(parents=True)
+    (root / "scripts_mast/configs/task.yaml").write_text("epochs: 2\n")
+    for key, value in {
+        "REPO_ROOT": str(root),
+        "TASKS": "task_1-1",
+        "LSF_QUEUE": "q",
+        "LSF_NCPUS": "1",
+        "LSF_WALLTIME": "1:00",
+        "LSF_MEM_GB": "2",
+        "POLL_INTERVAL": "0",
+    }.items():
+        monkeypatch.setenv(key, value)
+    monkeypatch.delenv("PIPELINE_STATE", raising=False)
+    return pipeline.Pipeline()
+
+
+def test_restart_reattaches_and_remembers_observed_success(restart_pipeline, monkeypatch):
+    p = restart_pipeline
+    submissions = []
+    monkeypatch.setattr(
+        pipeline.subprocess,
+        "run",
+        lambda cmd, **kw: submissions.append(cmd) or SimpleNamespace(returncode=0, stdout="Job <123>", stderr=""),
+    )
+    command = ["python", "train.py"]
+    assert p.submit("gpo", "task_1-1", command) == "123"
+    monkeypatch.setattr(pipeline, "job_status", lambda job: "PEND")
+    monkeypatch.setattr(pipeline.time, "sleep", lambda seconds: (_ for _ in ()).throw(KeyboardInterrupt()))
+    with pytest.raises(KeyboardInterrupt):
+        p.wait(["123"])
+    resumed = pipeline.Pipeline()
+    assert resumed.submit("gpo", "task_1-1", command) == "123"
+    monkeypatch.setattr(pipeline, "job_status", lambda job: "DONE")
+    resumed.wait(["123"])
+    monkeypatch.setattr(pipeline, "job_status", lambda job: pytest.fail("observed DONE was forgotten"))
+    finished = pipeline.Pipeline()
+    assert finished.submit("gpo", "task_1-1", command) == "123"
+    finished.wait(["123"])
+    assert len(submissions) == 1
+
+
+@pytest.mark.parametrize("failure", ["EXIT", "unknown", "interrupted_submission"])
+def test_restart_never_resubmits_failed_or_ambiguous_job(restart_pipeline, monkeypatch, failure):
+    p = restart_pipeline
+    calls = []
+
+    def submit(command, **kwargs):
+        calls.append(command)
+        if failure == "interrupted_submission":
+            raise KeyboardInterrupt()
+        return SimpleNamespace(returncode=0, stdout="Job <123>", stderr="")
+
+    monkeypatch.setattr(pipeline.subprocess, "run", submit)
+    if failure == "interrupted_submission":
+        with pytest.raises(KeyboardInterrupt):
+            p.submit("gpo", "task_1-1", ["python", "train.py"])
+    else:
+        p.submit("gpo", "task_1-1", ["python", "train.py"])
+    monkeypatch.setattr(
+        pipeline,
+        "job_status",
+        lambda job: "EXIT" if failure == "EXIT" else (_ for _ in ()).throw(RuntimeError("UNKNOWN")),
+    )
+    with pytest.raises(RuntimeError, match="FAILED|UNKNOWN"):
+        pipeline.Pipeline().submit("gpo", "task_1-1", ["python", "train.py"])
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("change", ["command", "config"])
+def test_restart_rejects_changed_work(restart_pipeline, monkeypatch, change):
+    p = restart_pipeline
+    monkeypatch.setattr(
+        pipeline.subprocess, "run", lambda *a, **kw: SimpleNamespace(returncode=0, stdout="Job <123>", stderr="")
+    )
+    command = ["python", "train.py"]
+    p.submit("gpo", "task_1-1", command)
+    if change == "command":
+        command.append("--different-objective")
+    else:
+        (p.root / "scripts_mast/configs/task.yaml").write_text("epochs: 200\n")
+    monkeypatch.setattr(pipeline.subprocess, "run", lambda *a, **kw: pytest.fail("resubmitted changed work"))
+    with pytest.raises(RuntimeError, match="Changed submission"):
+        pipeline.Pipeline().submit("gpo", "task_1-1", command)
+
+
+def test_concurrent_submission_is_rejected(restart_pipeline, monkeypatch):
+    p = restart_pipeline
+    monkeypatch.setattr(pipeline.subprocess, "run", lambda *a, **kw: pytest.fail("concurrent submission"))
+    with p.lock_journal(), pytest.raises(RuntimeError, match="Another coordinator"):
+        pipeline.Pipeline().submit("gpo", "task_1-1", ["python", "train.py"])
+
+
+def test_collect_waits_for_recorded_worker_before_validating_partial_output(restart_pipeline, monkeypatch):
+    p = restart_pipeline
+    pairs = p.pairs("task_1-1")
+    pairs.mkdir(parents=True)
+    (pairs / "partial.json").write_text("{}")
+    events = []
+    monkeypatch.setattr(p, "has_submission", lambda stage, task: True)
+    monkeypatch.setattr(p, "require_base", lambda task: None)
+    monkeypatch.setattr(p, "submit", lambda *args: events.append("reattach") or "123")
+    monkeypatch.setattr(p, "wait", lambda jobs: events.append("wait"))
+    monkeypatch.setattr(p, "validate_pairs", lambda task: events.append("validate"))
+    p.collect()
+    assert events == ["reattach", "wait", "validate"]
+
+
+def test_restart_dry_run_leaves_no_receipt_or_lock(restart_pipeline, monkeypatch):
+    p = pipeline.Pipeline(dry_run=True)
+    monkeypatch.setattr(pipeline.subprocess, "run", lambda *a, **kw: pytest.fail("dry-run queried LSF"))
+    p.submit("gpo", "task_1-1", ["python", "train.py"])
+    p.wait([None])
+    assert not p.journal.parent.exists()
+
+
+def test_evaluation_restart_waits_before_checking_partial_artifacts(restart_pipeline, monkeypatch):
+    from mast_utils.gpo import protocol
+
+    p = restart_pipeline
+    task = "task_1-1"
+    evaluation = p.base(task) / f"eval_{p.eval_tag}"
+    evaluation.mkdir(parents=True)
+    (evaluation / "partial.csv").write_text("unfinished")
+    p.pairs(task).mkdir(parents=True)
+    (p.pairs(task) / "collection_config.json").write_text("{}")
+    events = []
+    monkeypatch.setattr(p, "has_submission", lambda stage, task: True)
+    monkeypatch.setattr(p, "submit", lambda *args: events.append("reattach") or "123")
+    monkeypatch.setattr(p, "wait", lambda jobs: events.append("wait"))
+    monkeypatch.setattr(
+        protocol,
+        "validate_evaluation_manifest",
+        lambda *args: events.append("validate") or {"collection_digest": protocol.digest({})},
+    )
+    p.evaluate("base")
+    assert events == ["reattach", "wait", "validate"]

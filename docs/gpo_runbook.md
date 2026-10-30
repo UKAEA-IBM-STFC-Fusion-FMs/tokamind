@@ -54,8 +54,32 @@ Each submission must return exactly one positive job ID. The coordinator waits a
 `DONE` is success, `EXIT` is failure; active jobs are polled. An absent job is checked against `bhist`;
 without an explicit matching terminal record it is **unknown**, never successful. Failure, ambiguity
 or polling timeout prevents downstream submission. Jobs already submitted in the same stage are
-not automatically cancelled. Keep the login-side coordinator alive (for example in a managed shell
-session); it submits workers directly rather than submitting the Bash dispatchers recursively.
+not automatically cancelled. Run the coordinator as a small CPU-only LSF job, with externally chosen
+memory and walltime sufficient for the pipeline, or under a cluster-supported persistent service.
+A login-node `tmux` session alone does not guarantee survival of node/session cleanup. The coordinator
+submits workers directly rather than submitting the Bash dispatchers recursively; preserve the LSF
+runtime environment (in particular `LSF_ENVDIR`) when launching it on a compute node.
+
+### Restarting the coordinator
+
+Submissions are recorded atomically in `<ARTIFACT_DIR>/pipeline_jobs.json`; `PIPELINE_STATE` can select
+another shared-filesystem path dedicated to this campaign. Restart the same command with the same
+code, configuration, paths and resources. The coordinator reattaches to recorded active jobs, reuses
+observed successful jobs, and still validates their output artifacts. It waits for recorded collection
+and evaluation workers before inspecting partially written output. Completed calibrations are verified
+and reused. This is orchestration recovery, separate from `GPO_RESUME`, which resumes training weights.
+
+The journal uses a file lock to prevent duplicate submissions from concurrent processes. A submission
+intent is saved **before** calling `bsub`. If the process dies before saving the returned ID, its state
+remains `SUBMITTING`: restart stops for manual reconciliation with LSF instead of guessing or submitting
+again. Failed, unknown or mismatched submissions also stop. Never delete the journal just to bypass
+these checks: inspect the scheduler and artifacts first. Retain the journal with the campaign manifest.
+Changed commands, source or config inputs require a new campaign/state file and appropriate fresh output
+tags. Dry-run creates neither the journal nor its lock.
+
+Campaigns started before this journal existed require explicit adoption of their saved job receipts;
+simply restarting their old launcher can duplicate jobs. Keep frozen worker code/configuration untouched
+and record any recovery launcher separately in the campaign provenance.
 
 All resource values are external: `LSF_QUEUE`, `LSF_NCPUS`, `LSF_MEM_GB`, `LSF_WALLTIME`, optional
 `LSF_GPU`. Override individual stages with `FINETUNE_`, `COLLECT_`, `GPO_`, `BASE_EVAL_` or

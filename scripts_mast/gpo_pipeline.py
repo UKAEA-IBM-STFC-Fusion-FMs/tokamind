@@ -15,6 +15,8 @@ unknown jobs, incomplete artifacts and omitted requested tasks fail the invocati
 from __future__ import annotations
 
 import argparse
+import fcntl
+import hashlib
 import json
 import os
 import re
@@ -22,6 +24,7 @@ import shlex
 import subprocess
 import sys
 import time
+from contextlib import contextmanager
 from pathlib import Path
 
 DEFAULT_TASKS = " ".join(f"task_{g}-{n}" for g, size in ((1, 3), (2, 3), (3, 3), (4, 5)) for n in range(1, size + 1))
@@ -122,6 +125,7 @@ class Pipeline:
         self.recipe = Path(
             os.environ.get("GPO_TASKS_YAML", self.root / "scripts_mast/configs/mmt/tasks/gpo_tasks.yaml")
         ).resolve()
+        self.journal = Path(os.environ.get("PIPELINE_STATE", self.artifacts / "pipeline_jobs.json")).resolve()
         self.python = os.environ.get("PYTHON_BIN", sys.executable)
         for name in (
             "DRY_RUN",
@@ -328,13 +332,158 @@ class Pipeline:
         print("  + " + shlex.join(submit_cmd), flush=True)
         if self.dry_run:
             return None
-        log_dir.mkdir(parents=True, exist_ok=True)
-        result = subprocess.run(submit_cmd, cwd=self.root, env=self.env, capture_output=True, text=True)
-        ids = re.findall(r"Job <([1-9][0-9]*)>", result.stdout)
-        if result.returncode or len(ids) != 1:
-            raise RuntimeError(f"SUBMISSION FAILED/UNKNOWN {stage} {task}: {result.stdout} {result.stderr}")
+        key = f"{stage}/{task}"
+        signature = self.submission_signature(submit_cmd)
+        with self.lock_journal():
+            journal = self.read_journal()
+            receipt = journal["jobs"].get(key)
+            if receipt is not None:
+                if receipt["signature"] != signature:
+                    raise RuntimeError(f"Changed submission/config/code for {key}; use a new campaign and state file.")
+                job = receipt.get("job_id")
+                if not job:
+                    raise RuntimeError(f"SUBMISSION UNKNOWN {key}: inspect LSF before reconciling {self.journal}.")
+                state = receipt["state"] if receipt["state"] in {"DONE", "EXIT"} else job_status(job)
+                if state == "EXIT":
+                    raise RuntimeError(f"FAILED job={job}: no automatic resubmission.")
+                receipt["state"] = state
+                self.write_journal(journal)
+                print(f"REATTACH stage={stage} task={task} job={job} state={state}", flush=True)
+                return job
+            # Persist intent before bsub. A crash before recording its reply is
+            # ambiguous, so restart must stop rather than submit a duplicate.
+            journal["jobs"][key] = {"signature": signature, "state": "SUBMITTING", "job_id": None}
+            self.write_journal(journal)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            result = subprocess.run(submit_cmd, cwd=self.root, env=self.env, capture_output=True, text=True)
+            ids = re.findall(r"Job <([1-9][0-9]*)>", result.stdout)
+            if result.returncode or len(ids) != 1:
+                raise RuntimeError(f"SUBMISSION FAILED/UNKNOWN {stage} {task}: {result.stdout} {result.stderr}")
+            journal["jobs"][key].update(job_id=ids[0], state="SUBMITTED")
+            self.write_journal(journal)
         print(f"SUBMITTED stage={stage} task={task} job={ids[0]}", flush=True)
         return ids[0]
+
+    def submission_signature(self, command):
+        """
+        Bind a submission to its command, source files and configuration inputs.
+
+        Parameters
+        ----------
+        command : list[str]
+            Full scheduler command including the worker environment.
+
+        Returns
+        -------
+        str
+            SHA256 digest used to reject changed work on coordinator restart.
+        """
+        files = {self.recipe, self.root / "pyproject.toml"}
+        for directory in (self.root / "scripts_mast", self.root / "src"):
+            files.update(p for p in directory.rglob("*") if p.suffix in {".py", ".yaml", ".yml"})
+        inputs = {str(p): hashlib.sha256(p.read_bytes()).hexdigest() for p in sorted(files) if p.is_file()}
+        return hashlib.sha256(json.dumps([command, inputs], sort_keys=True).encode()).hexdigest()
+
+    @contextmanager
+    def lock_journal(self):
+        """
+        Serialize receipt updates and submissions across coordinator processes.
+
+        Yields
+        ------
+        None
+            Exclusive advisory lock, released even after an exception.
+        """
+        self.journal.parent.mkdir(parents=True, exist_ok=True)
+        with self.journal.with_suffix(self.journal.suffix + ".lock").open("a") as lock:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise RuntimeError(f"Another coordinator is updating {self.journal}") from exc
+            try:
+                yield
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+
+    def read_journal(self):
+        """
+        Read durable submission receipts without creating files.
+
+        Returns
+        -------
+        dict
+            Validated journal, or an empty journal for a new campaign.
+        """
+        if not self.journal.exists():
+            return {"format": "cgpo-jobs-v1", "jobs": {}}
+        data = json.loads(self.journal.read_text())
+        if data.get("format") != "cgpo-jobs-v1" or not isinstance(data.get("jobs"), dict):
+            raise ValueError(f"Invalid pipeline journal: {self.journal}")
+        for key, row in data["jobs"].items():
+            if (
+                not isinstance(row, dict)
+                or not isinstance(row.get("signature"), str)
+                or row.get("state")
+                not in {
+                    "SUBMITTING",
+                    "SUBMITTED",
+                    "DONE",
+                    "EXIT",
+                    "RUN",
+                    "PEND",
+                    "WAIT",
+                    "PROV",
+                    "PSUSP",
+                    "USUSP",
+                    "SSUSP",
+                }
+                or (row.get("job_id") is not None and not re.fullmatch(r"[1-9][0-9]*", str(row["job_id"])))
+                or (row.get("job_id") is None and row.get("state") != "SUBMITTING")
+            ):
+                raise ValueError(f"Invalid pipeline receipt {key}: {self.journal}")
+        return data
+
+    def write_journal(self, data):
+        """
+        Atomically persist receipts while the caller holds the journal lock.
+
+        Parameters
+        ----------
+        data : dict
+            Journal containing submission intents and observed scheduler states.
+
+        Returns
+        -------
+        None
+        """
+        temporary = self.journal.with_suffix(self.journal.suffix + ".tmp")
+        with temporary.open("w") as output:
+            json.dump(data, output, indent=2)
+            output.write("\n")
+            output.flush()
+            os.fsync(output.fileno())
+        temporary.replace(self.journal)
+        directory = os.open(self.journal.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+
+    def has_submission(self, stage, task):
+        """
+        Check for prior submission intent before inspecting potentially partial output.
+
+        Parameters
+        ----------
+        stage, task : str
+            Labels identifying the worker in the campaign journal.
+
+        Returns
+        -------
+        bool
+            Whether submission must reconcile an existing receipt first.
+        """
+        return not self.dry_run and f"{stage}/{task}" in self.read_journal()["jobs"]
 
     def wait(self, jobs):
         """
@@ -354,7 +503,17 @@ class Pipeline:
         pending = {job for job in jobs if job is not None}
         for _ in range(int(os.environ.get("MAX_POLLS", "1440"))):
             for job in sorted(pending):
-                state = job_status(job)
+                with self.lock_journal():
+                    journal = self.read_journal()
+                    receipts = [row for row in journal["jobs"].values() if row["job_id"] == job]
+                    terminal = {row["state"] for row in receipts if row["state"] in {"DONE", "EXIT"}}
+                    if len(terminal) > 1:
+                        raise ValueError(f"Conflicting terminal receipts for job={job}")
+                    state = next(iter(terminal)) if terminal else job_status(job)
+                    for row in receipts:
+                        row["state"] = state
+                    if receipts:
+                        self.write_journal(journal)
                 print(f"STATUS job={job} state={state}", flush=True)
                 if state == "DONE":
                     pending.remove(job)
@@ -465,6 +624,10 @@ class Pipeline:
                 continue
             if pairs.is_symlink() or (pairs.exists() and not pairs.is_dir()):
                 raise ValueError(f"Invalid pair directory task={task}: {pairs}; select a new GPO_PAIR_TAG.")
+            if self.has_submission("collect", task):
+                # The worker may still be writing. Reattach below before any
+                # completeness check, including after a coordinator restart.
+                continue
             if pairs.is_dir() and any(pairs.iterdir()) and not overwrite:
                 try:
                     self.validate_pairs(task)
@@ -588,7 +751,12 @@ class Pipeline:
         for task in self.tasks:
             run = self.base(task) if which == "base" else self.gpo(task)
             evaluation = run / f"eval_{self.eval_tag}"
-            if not self.dry_run and evaluation.exists() and any(evaluation.iterdir()):
+            if (
+                not self.has_submission(f"{which}_eval", task)
+                and not self.dry_run
+                and evaluation.exists()
+                and any(evaluation.iterdir())
+            ):
                 from mast_utils.gpo.protocol import digest, validate_evaluation_manifest
 
                 proof = validate_evaluation_manifest(run, evaluation, task)
@@ -611,11 +779,14 @@ class Pipeline:
             jobs.append(self.submit(f"{which}_eval", task, command))
         self.wait(jobs)
         if not self.dry_run:
-            from mast_utils.gpo.protocol import validate_evaluation_manifest
+            from mast_utils.gpo.protocol import digest, validate_evaluation_manifest
 
             for task in self.tasks:
                 run = self.base(task) if which == "base" else self.gpo(task)
-                validate_evaluation_manifest(run, run / f"eval_{self.eval_tag}", task)
+                proof = validate_evaluation_manifest(run, run / f"eval_{self.eval_tag}", task)
+                cc = json.loads((self.pairs(task) / "collection_config.json").read_text())
+                if proof["collection_digest"] != digest(cc):
+                    raise ValueError(f"Stale evaluation for {task}; select a fresh EVAL_TAG.")
 
     def train_gpo(self):
         """
