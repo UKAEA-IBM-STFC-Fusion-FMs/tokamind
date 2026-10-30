@@ -179,6 +179,15 @@ def build_mast_datasets(
 
     # Build store_manager_settings only when running locally and a path is provided.
     store_settings = {"base_local_zarr_path": local_path} if (local_flag and local_path) else None
+    if local_flag and local_path:
+        local_dir = Path(local_path)
+        required = test_shots if phase == "eval" else [*train_shots, *val_shots]
+        missing = sorted({int(s) for s in required if not (local_dir / f"{s}.zarr").is_dir()})
+        if missing:
+            raise FileNotFoundError(
+                f"Missing local MAST shots in {local_dir}: {missing}. "
+                "Download the selected official split; local data availability must not change the split."
+            )
 
     # Initialize datasets based on phase
     if phase == "eval":

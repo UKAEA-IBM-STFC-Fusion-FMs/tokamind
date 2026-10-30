@@ -137,14 +137,29 @@ def run_dct3d_tuning(  # NOSONAR - Ignore cognitive complexity
     # Dataset: subsample training shots for tuning
     # ..................................................................................................................
 
+    subset_size = cfg_data.get("subset_size")
+    if subset_size is not None and subset_size < n_shots:
+        n_shots = subset_size
+        shuffle_tuning = False
+    else:
+        shuffle_tuning = True
+
     train_shots, _, _ = get_train_test_val_shots(
         max_index=n_shots,
-        shuffle=True,
+        shuffle=shuffle_tuning,
         seed=cfg_mmt.seed,
         data_splits_file_path=split_assets["data_splits_file_path"],
     )
 
     store_settings = {"base_local_zarr_path": local_path} if (local_flag and local_path) else None
+    if local_flag and local_path:
+        local_dir = Path(local_path)
+        avail = {int(p.stem) for p in local_dir.glob("*.zarr") if p.stem.isdigit()}
+        if avail:
+            train_shots = [s for s in train_shots if s in avail]
+            if not train_shots:
+                all_train, _, _ = get_train_test_val_shots(data_splits_file_path=split_assets["data_splits_file_path"])
+                train_shots = [s for s in all_train if s in avail][:n_shots]
 
     mast_dataset = initialize_MAST_dataset(
         config_task=cfg_task,

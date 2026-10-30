@@ -476,3 +476,112 @@ tasks:
             backbone: true
             modality_heads: false
             output_adapters: false
+
+  task_3-1:
+    train:
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 10.0
+            loss_type: ipo
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.1
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4
+              output_adapters: 1e-4
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  task_3-2:
+    train:
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 10.0
+            loss_type: ipo
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 1.0
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.1
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4
+              output_adapters: 1e-4
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+
+  task_3-3:
+    preprocess:
+      chunks:
+        input:
+          max_chunks: 21
+        actuator:
+          max_chunks: 21
+    train:
+      loss:
+        terms:
+          - type: continuous_gpo
+            weight: 1.0
+            beta: 10.0
+            loss_type: ipo
+            sft_weight: 0.0
+          - type: embed_mse
+            weight: 0.2
+      stages:
+        - name: gpo
+          epochs: 200
+          scheduler:
+            grad_accum_steps: 1
+            warmup_steps_fraction: 0.1
+          optimizer:
+            lr:
+              token_encoder: 5e-4
+              backbone: 1e-4
+              modality_heads: 1e-4
+              output_adapters: 1e-4
+            wd:
+              token_encoder: 0.01
+              backbone: 0.01
+              modality_heads: 0.01
+              output_adapters: 0.01
+          freeze:
+            token_encoder: true
+            backbone: true
+            modality_heads: false
+            output_adapters: false
+

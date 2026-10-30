@@ -433,8 +433,11 @@ def main() -> None:
 
     args = parse_args()
 
-    # Resolve config path relative to repo root (examples/ is at repo_root/examples/).
     cfg_path = Path(args.config)
+    if not cfg_path.exists():
+        fallback = Path(__file__).resolve().parent / args.config
+        if fallback.exists():
+            cfg_path = fallback
     cfg = _load_yaml(path=cfg_path)
 
     seed = int(cfg.get("seed", 0))

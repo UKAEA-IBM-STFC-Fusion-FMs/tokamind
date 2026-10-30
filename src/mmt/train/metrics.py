@@ -117,8 +117,8 @@ class EpochMetrics:
             self.signal_windows[str(sig)] += n
             if target is not None and n:
                 # CPU float64 also works when predictions live on MPS (no float64 support).
-                error = pred[mask].to(device="cpu", dtype=torch.float64) - target[mask].to(
-                    device="cpu", dtype=torch.float64
+                error = pred[mask].cpu().to(dtype=torch.float64) - target[mask].cpu().to(
+                    dtype=torch.float64
                 )
                 values = error.square().flatten(1).mean(1)
                 self.mse_sums[str(sig)] += float(values.sum())

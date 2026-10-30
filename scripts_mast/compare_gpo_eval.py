@@ -291,6 +291,8 @@ def _compare_task(
             ):
                 if base_proof[key] != gpo_proof[key]:
                     raise ValueError(f"Base/GPO evaluation mismatch: {key}")
+            if base_proof.get("empty_test_shots") != gpo_proof.get("empty_test_shots"):
+                raise ValueError("Base/GPO evaluation mismatch: empty_test_shots")
             if base_metrics["n_shots"] != len(base_proof["test_window_counts"]):
                 raise ValueError("Task metric shot count differs from verified test coverage.")
         except (OSError, ValueError, KeyError) as error:
