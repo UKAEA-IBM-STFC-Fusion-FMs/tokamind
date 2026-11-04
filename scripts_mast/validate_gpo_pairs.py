@@ -13,7 +13,7 @@ Checks (in order):
      native_nmae, native_mse, embedding_gap, emb_dim. Keys y_w / y_l (schema v1
      native arrays) must NOT be present.
   6. Embeddings are float32 with shape (B, D), D == emb_dim; diagnostics are
-     float32 with shape (B,).
+     float32 with shape (B,), except native_mse (float64; legacy float32 accepted).
   7. No NaN or Inf values in embeddings or diagnostics.
   8. y_w_emb != y_l_emb for every row (non-zero MSE gap — a zero gap means the
      model already predicted perfectly, which produces a useless preference pair).
@@ -174,8 +174,9 @@ def validate_gpo_dir(gpo_dir: Path) -> tuple[list[str], list[str]]:
                 if name not in keys:
                     continue
                 arr = npz[name]
-                if arr.dtype != np.float32:
-                    errors.append(f"DTYPE    {shard.name} {name}: dtype={arr.dtype}, expected float32")
+                allowed = (np.dtype("float32"), np.dtype("float64")) if name == "native_mse" else (np.dtype("float32"),)
+                if arr.dtype not in allowed:
+                    errors.append(f"DTYPE    {shard.name} {name}: dtype={arr.dtype}, expected {allowed}")
                 if arr.shape != (B,):
                     errors.append(f"SHAPE    {shard.name} {name}: shape={arr.shape}, expected ({B},)")
 

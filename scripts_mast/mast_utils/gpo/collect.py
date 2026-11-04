@@ -316,13 +316,15 @@ def collect_gpo_pairs(
                         # not persist pairs whose prediction is non-finite at an observed
                         # position or whose target has no observed positions.
                         valid = np.isfinite(y_true_native).reshape(B, -1)
-                        y_true_flat = np.where(valid, y_true_native.reshape(B, -1), 0.0)
-                        y_pred_flat = np.where(valid, y_pred_native.reshape(B, -1), 0.0)
+                        y_true_flat = np.where(valid, y_true_native.reshape(B, -1).astype(np.float64), 0.0)
+                        y_pred_flat = np.where(valid, y_pred_native.reshape(B, -1).astype(np.float64), 0.0)
                         eligible = valid.any(axis=1) & np.isfinite(y_pred_flat).all(axis=1)
                         n_valid = valid.sum(axis=1, dtype=np.float64)
                         diff = y_pred_flat - y_true_flat
                         safe_n_valid = np.where(eligible, n_valid, 1.0)
-                        native_mse = (np.sum(diff**2, axis=1, dtype=np.float64) / safe_n_valid).astype(np.float32)
+                        # Physical-unit squared errors (e.g. electron density) can exceed float32.
+                        # Keep MSE in float64 through storage and normalize before narrowing NRMSE.
+                        native_mse = np.sum(diff**2, axis=1, dtype=np.float64) / safe_n_valid
                         native_nmae = (
                             np.sum(np.abs(diff), axis=1, dtype=np.float64) / safe_n_valid / native_stats[name]["std"]
                         ).astype(np.float32)

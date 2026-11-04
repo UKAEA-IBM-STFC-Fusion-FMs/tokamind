@@ -16,9 +16,12 @@ without requiring a decode step at every training iteration:
         y_l_emb          : float32 (B, D)  — model-prediction embedding (dispreferred)
         native_nrmse     : float32 (B,)    — decoded native-space RMSE / benchmark signal std
         native_nmae      : float32 (B,)    — decoded native-space MAE / benchmark signal std
-        native_mse       : float32 (B,)    — decoded native-space MSE
+        native_mse       : float64 (B,)    — decoded native-space MSE
         embedding_gap    : float32 (B,)    — mean squared winner/loser embedding distance
         emb_dim          : int     — scalar, embedding dimension D (convenience check)
+
+New collections store native_mse in float64 to avoid overflow in physical units.
+Readers also accept finite float32 native_mse from earlier v3 collections.
 
 Native-space arrays (y_w, y_l) are **not** stored in v3 shards. They can be
 recovered on demand via the reconstruction dataloader + codec when needed for
@@ -193,6 +196,7 @@ class GpoPairWriter:
         native_nrmse, native_nmae, native_mse : np.ndarray | None
             Per-window decoded native-space diagnostics.  ``None`` is written as
             NaN and is reserved for future pair sources that cannot be decoded.
+            Native MSE is stored as float64; normalized diagnostics use float32.
         """
         mask_1d = np.asarray(mask, dtype=bool)
         if mask_1d.ndim > 1:
@@ -202,12 +206,27 @@ class GpoPairWriter:
         if len(valid_idx) == 0:
             return
 
-        def _diagnostic_or_nan(values: np.ndarray | None) -> np.ndarray:
+        def _diagnostic_or_nan(values: np.ndarray | None, dtype=np.float32) -> np.ndarray:
+            """
+            Convert a diagnostic to its storage precision or fill missing values.
+
+            Parameters
+            ----------
+            values : np.ndarray | None
+                Per-window diagnostic values, when available.
+            dtype : numpy dtype
+                Storage precision for this diagnostic.
+
+            Returns
+            -------
+            np.ndarray
+                One value per batch window in the requested precision.
+            """
             if values is None:
-                return np.full(len(shot_ids), np.nan, dtype=np.float32)
+                return np.full(len(shot_ids), np.nan, dtype=dtype)
             if len(values) != len(shot_ids):
                 raise ValueError(f"Native diagnostic length {len(values)} != batch size {len(shot_ids)}.")
-            return np.asarray(values, dtype=np.float32)
+            return np.asarray(values, dtype=dtype)
 
         buf = self._buffers.setdefault(output_name, [])
         buf.append(
@@ -218,7 +237,7 @@ class GpoPairWriter:
                 "y_l_emb": y_l_emb[valid_idx].astype(np.float32),
                 "native_nrmse": _diagnostic_or_nan(native_nrmse)[valid_idx],
                 "native_nmae": _diagnostic_or_nan(native_nmae)[valid_idx],
-                "native_mse": _diagnostic_or_nan(native_mse)[valid_idx],
+                "native_mse": _diagnostic_or_nan(native_mse, dtype=np.float64)[valid_idx],
                 "embedding_gap": ((y_w_emb - y_l_emb) ** 2).mean(axis=1)[valid_idx].astype(np.float32),
             }
         )

@@ -27,7 +27,7 @@ Each .npz shard contains arrays (schema v3):
     y_l_emb        float32 (B, D)  — model-prediction embedding (dispreferred)
     native_nrmse   float32 (B,)    — decoded native RMSE / signal std
     native_nmae    float32 (B,)    — decoded native MAE / signal std
-    native_mse     float32 (B,)    — decoded native MSE
+    native_mse     float64 (B,)    — decoded native MSE
     embedding_gap  float32 (B,)    — mean squared embedding distance
     emb_dim        int64   — embedding dimension D
 

@@ -556,3 +556,46 @@ def test_all_benchmark_gpo_configs_resolve_with_source_contract(tmp_path, monkey
     assert cfg.data["split"] == src.data["split"]
     assert cfg.raw["preprocess"] == src.raw["preprocess"]
     assert [s["name"] for s in cfg.train["stages"]] == ["gpo"]
+
+
+@pytest.mark.parametrize("signal_std", [1.0, 1e19, 1e20])
+def test_collector_native_mse_precision_and_missing_targets(tmp_path, monkeypatch, signal_std):
+    """Keep large native errors finite without retaining missing or invalid observations."""
+    from mast_utils.gpo.collect import collect_gpo_pairs
+    from validate_gpo_pairs import validate_gpo_dir
+
+    model = torch.nn.Linear(2, 2)
+    predictions = torch.tensor([[2.0, 2.0], [2.0, 2.0], [float("inf"), 2.0], [2.0, 2.0]])
+    monkeypatch.setattr(model, "forward", lambda batch: {"pred": {1: predictions}})
+    batch = {
+        "shot_id": torch.tensor([1, 1, 1, 2]),
+        "window_index": torch.tensor([0, 1, 2, 3]),
+        "output_emb": {1: torch.zeros(4, 2)},
+        "output_native": {1: torch.tensor([[0.0, float("nan")], [float("nan"), float("nan")], [0.0, 0.0], [0.0, 1.0]])},
+        "output_mask": {1: torch.ones(4, dtype=torch.bool)},
+    }
+    pairs = tmp_path / "pairs"
+    with np.errstate(over="raise", invalid="raise"):
+        collect_gpo_pairs(
+            model=model,
+            dataloader=[batch],
+            device=torch.device("cpu"),
+            id_to_name={1: "density"},
+            run_dir=tmp_path,
+            task_name="task_3-1",
+            split="both",
+            out_dir=pairs,
+            amp_enabled=False,
+            native_decoders={"density": torch.nn.Identity()},
+            native_stats={"density": {"mean": 0.0, "std": signal_std}},
+            protocol_contract={"split_manifest": {"shots": {"train": [1], "val": [2], "test": [3]}}},
+        )
+    with np.load(next(pairs.glob("*.npz"))) as shard:
+        assert shard["window_index"].tolist() == [0, 3]
+        assert shard["native_mse"].dtype == np.float64
+        assert shard["y_l_emb"].dtype == np.float32
+        assert shard["native_nrmse"].dtype == np.float32
+        np.testing.assert_allclose(shard["native_mse"], np.array([4.0, 2.5]) * signal_std**2)
+        np.testing.assert_allclose(shard["native_nrmse"], [2.0, np.sqrt(2.5)])
+        np.testing.assert_allclose(shard["native_nmae"], [2.0, 1.5])
+    assert validate_gpo_dir(pairs) == ([], [])
