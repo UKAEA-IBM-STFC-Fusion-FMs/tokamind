@@ -132,6 +132,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -141,11 +144,11 @@ tasks:
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
             loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
-              no_gt: 0.5
-              lhs_gt: 0.5
+              no_gt: 0.0
+              lhs_gt: 1.0
               rhs_gt: 0
             rhs_input:
-              origin: derived_j_tor  # Select from: derived_j_tor
+              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -169,6 +172,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -182,7 +188,7 @@ tasks:
               lhs_gt: 1.0
               rhs_gt: 0.0
             rhs_input:
-              origin: derived_j_tor  # Select from: derived_j_tor
+              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -206,6 +212,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -219,8 +228,8 @@ tasks:
               lhs_gt: 1.0
               rhs_gt: 0.0
             rhs_input:
-              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  # Select from: GS_operator
+              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -243,20 +252,23 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
             weight: 1.0
-          - type: weak_grad_shafranov  # strong_grad_shafranov, weak_grad_shafranov
+          - type: strong_grad_shafranov  # strong_grad_shafranov, weak_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
             loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
-              rhs_gt: 0
+              rhs_gt: 0.0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -280,12 +292,15 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
           - type: strong_grad_shafranov
-            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
             loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
@@ -293,7 +308,7 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0.0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -317,6 +332,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -330,8 +348,8 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  # Select from: GS_operator
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -345,6 +363,9 @@ tasks:
 
   task_1-4-weak-two-stage:
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -375,8 +396,8 @@ tasks:
                   lhs_gt: 0.25
                   rhs_gt: 0.25
                 rhs_input:
-                  origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-                  calculation_method: GS_operator  # Select from: GS_operator
+                  origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
+                  calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
                 plot_check:
                   type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
                   probability: 0.0005
@@ -419,6 +440,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -432,7 +456,7 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -456,12 +480,15 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
           - type: strong_grad_shafranov
-            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
             loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
@@ -469,7 +496,7 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0.0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -493,6 +520,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -506,8 +536,8 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  # Select from: GS_operator
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -530,6 +560,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -539,11 +572,11 @@ tasks:
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
             loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
-              no_gt: 0.5
-              lhs_gt: 0.5
+              no_gt: 0.0
+              lhs_gt: 1.0
               rhs_gt: 0
             rhs_input:
-              origin: derived_j_tor  # Select from: derived_j_tor
+              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -567,20 +600,23 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
           - type: strong_grad_shafranov
-            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
             loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
               no_gt: 0.0
-              lhs_gt: 0.5
-              rhs_gt: 0.1
+              lhs_gt: 1.0
+              rhs_gt: 0.0
             rhs_input:
-              origin: derived_j_tor  # Select from: derived_j_tor
+              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -604,6 +640,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -617,8 +656,8 @@ tasks:
               lhs_gt: 1.0
               rhs_gt: 0.0
             rhs_input:
-              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  # Select from: GS_operator
+              origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -641,6 +680,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -654,7 +696,7 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -678,12 +720,15 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
           - type: strong_grad_shafranov
-            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
             loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
@@ -691,7 +736,7 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0.0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -715,6 +760,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -726,10 +774,10 @@ tasks:
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
-              rhs_gt: 0
+              rhs_gt: 0.0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  # Select from: GS_operator
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -753,6 +801,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -766,7 +817,7 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -790,12 +841,15 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
             weight: 0.9  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
           - type: strong_grad_shafranov
-            weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
+            weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
             loss_metric: mse  # Select from: l2 | mse
             grad_shafranov_weights:
@@ -803,7 +857,7 @@ tasks:
               lhs_gt: 0.5
               rhs_gt: 0.0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | predicted_profiles | derived_j_tor
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
@@ -827,6 +881,9 @@ tasks:
                 actuator: 4096
                 output: 8192  # Put what you want
     train:
+      early_stop:
+        patience: 10
+        delta: 0.0
       loss:
         terms:
           - type: native_sparse_mse
@@ -838,10 +895,10 @@ tasks:
             grad_shafranov_weights:
               no_gt: 0.5
               lhs_gt: 0.5
-              rhs_gt: 0
+              rhs_gt: 0.0
             rhs_input:
-              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor
-              calculation_method: GS_operator  # Select from: GS_operator
+              origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
+              calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
