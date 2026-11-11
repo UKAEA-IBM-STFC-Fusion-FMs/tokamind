@@ -1,18 +1,18 @@
 """
 Loss package for the Multi-Modal Transformer.
 
-This package provides a composable loss system consisting of individual loss terms combined by a
-``LossAggregator``. Each term is an instance of ``BaseLoss`` and declares what batch fields it needs.
+This package provides a composable loss system consisting of individual loss terms combined by a `LossAggregator`. Each
+term is an instance of `BaseLoss` and declares what batch fields it needs.
 
 Available loss terms
 --------------------
-• ``EmbedMSELoss``        — MSE in embedding (coeff) space. Default term, no decoding required.
-• ``NativeSparseMSELoss`` — MSE in native standardized space. Requires decoders and ``keep_output_native=True``.
-• ``StrongFormGradShafranovLoss`` — Strong-form Grad-Shafranov loss in destandardized native space.
-• ``WeakFormGradShafranovLoss`` — Weak-form Grad-Shafranov loss in destandardized native space.
+• `EmbedMSELoss`        — MSE in embedding (coeff) space. Default term, no decoding required.
+• `NativeSparseMSELoss` — MSE in native standardized space. Requires decoders and `keep_output_native=True`.
+• `StrongFormGradShafranovLoss` — Strong-form Grad-Shafranov loss in destandardized native space.
+• `WeakFormGradShafranovLoss` — Weak-form Grad-Shafranov loss in destandardized native space.
 
-Config schema (``train.loss``)
--------------------------------
+Config schema (`train.loss`)
+-----------------------------
 Old format (single embed-MSE term, still supported)::
 
     loss:
@@ -35,14 +35,14 @@ New format (explicit terms)::
           weight: 0.1
           rhs_input:
             origin: predicted_j_tor
-            calculation_method: GS_operator  # REMARK: Only used when "built" origin is used. TODO: Improve wording.
+            calculation_method: GS_operator  # REMARK: Only used when origin is derived_j_tor.
           outputs:
             include: [equilibrium-psi, equilibrium-j_tor]
 
 Notes
 -----
 For orthonormal encoders (DCT/FPCA) using all coefficients, coeff-space MSE and native-space MSE differ only by a
-constant factor ``K / N``:
+constant factor `K / N`:
 
     native_MSE ≈ (K / N) * coeff_MSE
 

@@ -115,7 +115,7 @@ class BaseLoss(ABC):
     @classmethod
     def validate_term_cfg(cls, term_def: Mapping[str, Any], path: str) -> None:
         """
-        Validate loss-specific config fields for one ``train.loss.terms`` item.
+        Validate loss-specific config fields for one `train.loss.terms` item.
 
         Generic config checks such as term type live in the config validator. Subclasses override this hook for
         fields they own, so application-specific options can fail early without hard-coding those details in the
@@ -212,9 +212,11 @@ class BaseLoss(ABC):
         unknown_weight_keys = sorted(str(key) for key in weights if str(key) not in allowed_keys)
         if unknown_weight_keys:
             raise KeyError(f"Unknown {path} keys: {unknown_weight_keys}. Supported keys are {sorted(allowed_keys)}.")
+
         for key, value in weights.items():
             if isinstance(value, bool) or not isinstance(value, (float, int)):
                 raise TypeError(f"{path}.{key} must be a number.")
+
             if float(value) < 0.0:
                 raise ValueError(f"{path}.{key} must be non-negative.")
 
