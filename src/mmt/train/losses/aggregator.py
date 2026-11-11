@@ -33,6 +33,8 @@ from mmt.train.losses.constants import (
     GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY,
     WEAK_GRAD_SHAFRANOV_LOSS_TYPE,
     NATIVE_SPARSE_MSE_LOSS_TYPE,
+    DEFAULT_GRAD_SHAFRANOV_LOSS_METRIC,
+    DEFAULT_GRAD_SHAFRANOV_WEIGHTS,
 )
 
 from .base import BaseLoss, LossComputeContext
@@ -213,7 +215,7 @@ def build_loss_aggregator(
     """
 
     terms_cfg: list[Mapping[str, Any]] = list(loss_cfg.get("terms", DEFAULT_LOSS_TERMS))
-    ow = dict(output_weights_by_id) if output_weights_by_id else {}
+    ow = dict(output_weights_by_id) if output_weights_by_id else None
     output_filters = [None] * len(terms_cfg) if term_output_filters is None else list(term_output_filters)
     if len(output_filters) != len(terms_cfg):
         raise ValueError(f"Expected {len(terms_cfg)} loss output filters, got {len(output_filters)}.")
@@ -228,7 +230,7 @@ def build_loss_aggregator(
         # Embed MSE loss term
 
         if term_type == EMBED_MSE_LOSS_TYPE:
-            built.append((EmbedMSELoss(output_weights=ow if ow else None, output_filter=output_filter), term_weight))
+            built.append((EmbedMSELoss(output_weights=ow, output_filter=output_filter), term_weight))
 
         # ..............................................................................................................
         # Native sparse MSE loss term
@@ -244,7 +246,7 @@ def build_loss_aggregator(
                 (
                     NativeSparseMSELoss(
                         decoders=decoders,
-                        output_weights=ow if ow else None,
+                        output_weights=ow,
                         output_filter=output_filter,
                     ),
                     term_weight,
@@ -279,12 +281,12 @@ def build_loss_aggregator(
                         decoders=decoders,
                         signal_stats=signal_stats,
                         output_name_to_id=output_name_to_id,
-                        grad_shafranov_params_file=term_def.get("grad_shafranov_params_file"),
-                        grad_shafranov_weights=term_def.get("grad_shafranov_weights"),
+                        grad_shafranov_params_file=term_def.get("grad_shafranov_params_file", ""),
+                        grad_shafranov_weights=term_def.get("grad_shafranov_weights", DEFAULT_GRAD_SHAFRANOV_WEIGHTS),
                         rhs_input_origin=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY),
                         j_tor_calculation_method=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY),
-                        loss_metric=term_def.get("loss_metric", "mse"),
-                        output_weights=ow if ow else None,
+                        loss_metric=term_def.get("loss_metric", DEFAULT_GRAD_SHAFRANOV_LOSS_METRIC),
+                        output_weights=ow,
                         output_filter=output_filter,
                         plot_check_cfg=plot_check_cfg,
                     ),
@@ -318,12 +320,12 @@ def build_loss_aggregator(
                         decoders=decoders,
                         signal_stats=signal_stats,
                         output_name_to_id=output_name_to_id,
-                        grad_shafranov_params_file=term_def.get("grad_shafranov_params_file"),
-                        grad_shafranov_weights=term_def.get("grad_shafranov_weights"),
+                        grad_shafranov_params_file=term_def.get("grad_shafranov_params_file", ""),
+                        grad_shafranov_weights=term_def.get("grad_shafranov_weights", DEFAULT_GRAD_SHAFRANOV_WEIGHTS),
                         rhs_input_origin=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY),
                         j_tor_calculation_method=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY),
-                        loss_metric=term_def.get("loss_metric", "mse"),
-                        output_weights=ow if ow else None,
+                        loss_metric=term_def.get("loss_metric", DEFAULT_GRAD_SHAFRANOV_LOSS_METRIC),
+                        output_weights=ow,
                         output_filter=output_filter,
                         plot_check_cfg=plot_check_cfg,
                     ),
