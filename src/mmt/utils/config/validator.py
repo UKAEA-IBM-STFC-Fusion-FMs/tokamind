@@ -24,7 +24,6 @@ from mmt.train.losses.constants import (
     EMBED_MSE_LOSS_TYPE,
     NATIVE_SPACE_LOSS_TYPES,
 )
-from mmt.train.losses.registry import get_loss_class
 
 
 # ======================================================================================================================
@@ -380,8 +379,13 @@ def _validate_loss_terms_block(loss_cfg: Mapping[str, Any], *, path: str) -> Non
     terms = loss_cfg.get("terms")
     if terms is None:
         return
+
     if not isinstance(terms, list):
         raise TypeError(f"{path}.terms must be a list when provided.")
+
+    # Lazy import: the registry pulls in the loss classes, which import mmt.data -> mmt.utils -> this module.
+    # REMARK: Lazy import needed to avoid circular import issues.
+    from mmt.train.losses.registry import get_loss_class  # noqa: PLC0415
 
     supported = sorted(ALL_LOSS_TYPES)
     for term_index, term_def in enumerate(terms):
@@ -437,7 +441,7 @@ def _validate_loss_terms(cfg: Mapping[str, Any]) -> None:
             continue
 
         stage_loss = stage["loss"]
-        if not isinstance(stage_loss, Mapping):
+        if not isinstance(stage_loss, dict):
             raise TypeError(f"train.stages[{stage_index}].loss must be a mapping when provided.")
 
         if "output_weights" in stage_loss:
@@ -538,6 +542,7 @@ def _normalize_load_parts(cfg: Mapping[str, Any], *, blocks: tuple[str, ...]) ->
     unknown = sorted(set(lp) - set(blocks))
     if unknown:
         raise KeyError(f"model_source.load_parts has unknown keys {unknown}. Expected: {sorted(blocks)}.")
+
     for block in blocks:
         if lp.get(block) is None:
             lp[block] = True
@@ -608,6 +613,7 @@ def _validate_output_adapters_hidden_dim(  # NOSONAR - Ignore cognitive complexi
             f"Unsupported `cfg['model']['output_adapters']['type']`={adapter_type!r}. "
             f"Allowed values are: {sorted(ALLOWED_OUTPUT_ADAPTER_TYPES)}."
         )
+
     oa["type"] = adapter_type
 
     hd = oa.get("hidden_dim")
@@ -638,6 +644,7 @@ def _validate_output_adapters_hidden_dim(  # NOSONAR - Ignore cognitive complexi
     for r in rules:
         if (not isinstance(r, dict)) or ("hidden" not in r):
             continue
+
         max_out = r.get("max_out_dim")
         max_out = None if max_out is None else int(max_out)  # type: ignore[arg-type]
         cleaned.append({"max_out_dim": max_out, "hidden": _validate_hidden_dim(values=r["hidden"])})
@@ -673,6 +680,7 @@ def _validate_model_name(cfg: Mapping[str, Any]) -> None:
     model = cfg.get("model")
     if model is None:
         return
+
     if not isinstance(model, dict):
         raise TypeError("`cfg['model']` must be a dict.")
 
@@ -699,6 +707,7 @@ def _validate_output_adapter_residual(cfg: Mapping[str, Any]) -> None:
     residual_cfg = (model_cfg.get("output_adapters") or {}).get("residual")
     if residual_cfg is None:
         return
+
     if not isinstance(residual_cfg, Mapping):
         raise TypeError("model.output_adapters.residual must be a mapping when provided.")
 
@@ -850,11 +859,13 @@ def validate_train_config(  # NOSONAR - Ignore cognitive complexity
             block_mapping = _get_nested(cfg=stage, path=block_path)
             if not isinstance(block_mapping, dict):
                 raise TypeError(f"Expected dict at train.stages[{i}].{block_path}.")
+
             _validate_block_mapping_keys(mapping=block_mapping, path=f"train.stages[{i}].{block_path}", blocks=blocks)
 
         for block in blocks:
             if not isinstance(stage["freeze"][block], bool):
                 raise TypeError(f"Expected bool at train.stages[{i}].freeze.{block}.")
+
             for optim_key in ("lr", "wd"):
                 value = stage["optimizer"][optim_key][block]
                 if value is not None:
