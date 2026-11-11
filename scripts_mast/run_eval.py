@@ -24,23 +24,23 @@ import argparse
 import logging
 from pathlib import Path
 
-from mmt.utils import validate_config, sdpa_math_only_ctx
-from mmt.checkpoints import load_best_weights
-from mmt.data import build_decoders
-
 from mast_utils import (
-    load_experiment_config,
-    validate_mast_config,
-    load_task_definition,
+    build_mast_datasets,
+    build_model_and_optional_warmstart,
     build_signals_by_role_from_task_definition,
+    build_window_data,
+    evaluate_benchmark_and_diagnostics,
     extract_signal_stats,
     init_run_context,
-    build_mast_datasets,
-    build_window_data,
-    build_model_and_optional_warmstart,
+    load_experiment_config,
+    load_task_definition,
     resolve_eval_embeddings,
-    evaluate_benchmark_and_diagnostics,
+    validate_mast_config,
 )
+
+from mmt.checkpoints import load_best_weights
+from mmt.data import build_decoders
+from mmt.utils import sdpa_math_only_ctx, validate_config
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -245,6 +245,8 @@ def main() -> None:
         or bool((cfg_compute_metrics.get("smoothness") or {}).get("enable", False))
         or bool((cfg_compute_metrics.get("gs_topology") or {}).get("enable", False))
         or bool((cfg_compute_metrics.get("psi_error_map") or {}).get("enable", False))
+        or bool((cfg_compute_metrics.get("jtor_error_map") or {}).get("enable", False))
+        or bool((cfg_compute_metrics.get("regional_mse") or {}).get("enable", False))
         or cfg_traces.get("enable", False)
     )
 
@@ -274,7 +276,7 @@ def main() -> None:
     else:
         logger.info(
             "[eval] compute_metrics: per_task, per_shot, per_window, per_timestamp, GS residual, smoothness, "
-            "psi error map, and traces are disabled; skipping evaluation."
+            "topology, psi/J_tor error maps, regional MSE, and traces are disabled; skipping evaluation."
         )
 
     logger.info("Done.")

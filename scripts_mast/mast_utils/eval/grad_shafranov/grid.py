@@ -44,6 +44,8 @@ class GSEvalGrid:
         Sparse FreeGS operator approximating ``Delta*`` when available.
     region : np.ndarray
         Fixed, one-cell-eroded limiter region used for evaluation aggregation.
+    limiter_region : np.ndarray
+        Original limiter mask without erosion, for pointwise regional errors.
 
     Methods
     -------
@@ -97,6 +99,8 @@ class GSEvalGrid:
                 limiter_mask = limiter_mask.T
             else:
                 raise ValueError(f"MAST_lim_mask_rz shape {limiter_mask.shape} != grid ({self.n_r},{self.n_z}).")
+        # Pointwise errors use the original geometry, without derivative-stencil erosion.
+        self.limiter_region = limiter_mask.copy()
         self.region = self._erode_one_cell(limiter_mask)
         self.n_region_cells = int(self.region.sum())
         if self.n_region_cells == 0:

@@ -42,8 +42,8 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, cast
-import numpy as np
 
+import numpy as np
 import torch
 from torch.utils.data import DataLoader
 
@@ -51,9 +51,11 @@ from mmt.eval.forward import forward_decode_native
 
 from ..benchmark_imports import WindowMetricsAccumulator, compute_metrics
 from .grad_shafranov.constants import DEFAULT_GS_PARAMS_FILE
+from .grad_shafranov.error_map import FieldErrorMapMetric
 from .grad_shafranov.grid import GSEvalGrid
 from .grad_shafranov.gs_metrics import GSMetrics
 from .grad_shafranov.psi_error_map import PsiErrorMapMetric
+from .grad_shafranov.regional_mse import RegionalMSEMetric
 from .grad_shafranov.smoothness_metric import SmoothnessMetric
 from .grad_shafranov.topology_metric import GSTopologyMetric
 from .grad_shafranov.topology_provider import TopologyProvider
@@ -189,6 +191,9 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
     psi_error_map_cfg = cfg.get("psi_error_map") or {}
     want_psi_error_map = bool(psi_error_map_cfg.get("enable", False))
 
+    want_jtor_error_map = bool((cfg.get("jtor_error_map") or {}).get("enable", False))
+    want_regional_mse = bool((cfg.get("regional_mse") or {}).get("enable", False))
+
     run_dir = Path(run_dir)
 
     # ..................................................................................................................
@@ -207,6 +212,8 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
         or want_smoothness
         or want_topology
         or want_psi_error_map
+        or want_jtor_error_map
+        or want_regional_mse
     )
     if need_metrics_task_dir:
         metrics_task_dir.mkdir(parents=True, exist_ok=True)
@@ -219,10 +226,19 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
     # Shared MAST GS geometry/operator. Construct it once so GS diagnostics use identical region and stencils.
     # ..................................................................................................................
     gs_grid = None
-    if want_gs_metrics or want_smoothness or want_topology or want_psi_error_map:
+    if (
+        want_gs_metrics
+        or want_smoothness
+        or want_topology
+        or want_psi_error_map
+        or want_jtor_error_map
+        or want_regional_mse
+    ):
         try:
             gs_grid = GSEvalGrid(DEFAULT_GS_PARAMS_FILE)
-        except Exception as exc:  # noqa: BLE001 - optional diagnostics must not break official eval
+        except Exception as exc:
+            if want_regional_mse or want_jtor_error_map:
+                raise RuntimeError("Requested spatial diagnostics cannot initialize the GS grid") from exc
             logger.warning("Grad-Shafranov diagnostics disabled (grid initialization failed): %s", exc)
 
     # ..................................................................................................................
@@ -271,6 +287,8 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
     # the equilibrium keys backing the metric's declared required auxiliary fields, and is built only when a source
     # manager/root is available — so training (no enabled metric) opens no Zarr at all.
     # ..................................................................................................................
+    regional_metric = RegionalMSEMetric(grid=gs_grid) if want_regional_mse else None
+    jtor_error_map_metric = FieldErrorMapMetric(grid=gs_grid, signal="jtor") if want_jtor_error_map else None
     topology_metric = None
     topology_provider = None
     if want_topology and gs_grid is not None:
@@ -281,11 +299,10 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
             logger.warning("Topology metric disabled (init failed): %s", exc)
             topology_metric = None
 
-    if topology_metric is not None:
-        # Union the required auxiliary signals over the enabled reference metrics (only topology today) and build
-        # one provider for exactly that union. Guarded: a provider failure disables the metric, never eval.
+    if topology_metric is not None or regional_metric is not None:
+        # Share one provider for the union of topology and regional-MSE reference fields.
         required_auxiliary: set[str] = set()
-        for metric in (topology_metric,):
+        for metric in (topology_metric, regional_metric):
             required_auxiliary |= set(getattr(metric, "required_auxiliary_fields", frozenset()))
         if required_auxiliary and (source_store_manager is not None or source_zarr_root):
             try:
@@ -295,13 +312,15 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                     store_root=source_zarr_root,
                     local=source_local,
                 )
-            except Exception as exc:  # noqa: BLE001 - provider must never break official eval
+            except Exception as exc:
+                if regional_metric is not None:
+                    raise RuntimeError("Regional MSE reference provider initialization failed") from exc
                 logger.warning("Topology provider disabled (init failed): %s", exc)
                 topology_provider = None
         else:
             logger.warning(
-                "Topology metric enabled but no source storage manager or Zarr root is available "
-                "(source_store_manager=%s, source_zarr_root=%s); disabling it.",
+                "No reference storage manager or Zarr root available "
+                "(source_store_manager=%s, source_zarr_root=%s); topology disabled and regional LCFS unavailable.",
                 type(source_store_manager).__name__ if source_store_manager is not None else None,
                 source_zarr_root,
             )
@@ -357,6 +376,7 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                 amp_enabled=amp_enabled,
             )
 
+            batch_topology = {}
             B = len(shot_ids)
             n_windows += B
 
@@ -418,6 +438,32 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                     psi_error_map_metric = None
 
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+            # New diagnostics fail on unexpected errors instead of publishing partial results.
+            if jtor_error_map_metric is not None and "equilibrium-j_tor" in y_pred and "equilibrium-j_tor" in y_mask:
+                jtor_error_map_metric.add_batch(
+                    pred_native=y_pred["equilibrium-j_tor"],
+                    true_native=y_true.get("equilibrium-j_tor"),
+                    window_mask=_combined_output_mask(masks=y_mask, output_names=("equilibrium-j_tor",)),
+                )
+            if regional_metric is not None:
+                for signal, output_name in (("psi", "equilibrium-psi"), ("jtor", "equilibrium-j_tor")):
+                    if output_name not in y_pred or output_name not in y_true or output_name not in y_mask:
+                        continue
+                    topo = None
+                    if topology_provider is not None and output_time is not None and output_name in output_time:
+                        # Query each signal's own times; never assume psi and current have identical horizons.
+                        topo = topology_provider.query(shot_ids, output_time[output_name])
+                    batch_topology[output_name] = topo
+                    regional_metric.add_batch(
+                        signal=signal,
+                        pred_native=y_pred[output_name],
+                        true_native=y_true[output_name],
+                        shot_ids=shot_ids,
+                        window_indices=window_indices,
+                        window_mask=_combined_output_mask(masks=y_mask, output_names=(output_name,)),
+                        topology=topo,
+                    )
+
             # LCFS / X-point flux-topology metric (predicted psi vs reference geometry), per-shot accumulation.
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if (
@@ -429,7 +475,10 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
             ):
                 win_mask_topo = _combined_output_mask(masks=y_mask, output_names=("equilibrium-psi",))
                 try:
-                    topo = topology_provider.query(shot_ids, output_time["equilibrium-psi"])
+                    if "equilibrium-psi" in batch_topology:
+                        topo = batch_topology["equilibrium-psi"]
+                    else:
+                        topo = topology_provider.query(shot_ids, output_time["equilibrium-psi"])
                     topology_metric.add_batch(
                         psi_native=y_pred["equilibrium-psi"],
                         shot_ids=shot_ids,
@@ -450,7 +499,7 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
             # Benchmark per-window metrics (buffered in memory)
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             if need_benchmark_metrics:
-                for out_name in stats.keys():
+                for out_name in stats:
                     if (out_name not in y_true) or (out_name not in y_pred):
                         continue
                     if out_name not in y_mask:
@@ -478,7 +527,7 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
             # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
             if wr_ts is not None:
-                for out_name in stats.keys():
+                for out_name in stats:
                     if (out_name not in y_true) or (out_name not in y_pred):
                         continue
                     if out_name not in y_mask:
@@ -697,4 +746,32 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
         except Exception as exc:  # noqa: BLE001
             logger.warning("Topology metric: failed to write CSVs (%s)", exc)
 
+    if jtor_error_map_metric is not None:
+        if jtor_error_map_metric.is_empty():
+            logger.warning("J_tor error map: no finite reference cells (signal may not be an output).")
+        else:
+            result["jtor_error_map"] = jtor_error_map_metric.write_npz(
+                metrics_task_dir=metrics_task_dir,
+                task_name=task_name,
+            )
+            logger.info("J_tor error map: %s", result["jtor_error_map"]["jtor_error_map_npz"])
+    if regional_metric is not None:
+        result["regional_mse"] = regional_metric.write_csvs(
+            metrics_task_dir=metrics_task_dir,
+            task_name=task_name,
+        )
+        for row in result["regional_mse"]["rows"]:
+            logger.info(
+                "Regional MSE %s/%s: %.6e; scored %d/%d fields, %d cells",
+                row["signal"],
+                row["region"],
+                row["mse"],
+                row["n_fields_scored"],
+                row["n_fields_selected"],
+                row["n_cells"],
+            )
+            if row["n_fields_scored"] < row["n_fields_selected"]:
+                logger.warning("Regional MSE incomplete coverage: %s", row)
+        if not result["regional_mse"]["rows"]:
+            logger.warning("Regional MSE: no selected psi/J_tor windows; empty CSVs written.")
     return result

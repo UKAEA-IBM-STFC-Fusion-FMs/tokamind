@@ -18,7 +18,6 @@ from mmt.utils.config.experiment import load_experiment_config as _load_experime
 from mmt.utils.config.experiment.inheritance import load_source_run_config_yaml
 from mmt.utils.config.schema import ExperimentConfig
 
-
 MAST_CONFIGS_ROOT = "scripts_mast/configs"
 MAST_DATA_SPLITS = {"random", "temporal"}
 logger = logging.getLogger("mmt.ConfigLoader")
@@ -107,6 +106,21 @@ def _validate_psi_error_map_eval_config(raw_cfg: MutableMapping[str, Any]) -> No
     enable = psi_error_map_cfg.get("enable", False)
     if not isinstance(enable, bool):
         raise TypeError("MAST eval.compute_metrics.psi_error_map.enable must be bool.")
+
+
+def _validate_regional_diagnostics_config(raw_cfg: MutableMapping[str, Any]) -> None:
+    """Validate the opt-in current error map and regional native MSE."""
+    metrics = (raw_cfg.get("eval") or {}).get("compute_metrics") or {}
+    for key in ("jtor_error_map", "regional_mse"):
+        diagnostic = metrics.get(key)
+        if diagnostic is None:
+            continue
+        if not isinstance(diagnostic, Mapping):
+            raise TypeError(f"MAST eval.compute_metrics.{key} must be a mapping.")
+        if set(diagnostic) - {"enable"}:
+            raise ValueError(f"Unknown options in eval.compute_metrics.{key}: {set(diagnostic) - {'enable'}}")
+        if not isinstance(diagnostic.get("enable", False), bool):
+            raise TypeError(f"MAST eval.compute_metrics.{key}.enable must be bool.")
 
 
 def _validate_gs_metrics_eval_config(raw_cfg: MutableMapping[str, Any]) -> None:
@@ -220,7 +234,8 @@ def validate_mast_config(cfg: Any) -> None:
         model_source["data_split"] = source_split
         _validate_smoothness_eval_config(raw_cfg=raw_cfg)
         _validate_psi_error_map_eval_config(raw_cfg=raw_cfg)
+        _validate_regional_diagnostics_config(raw_cfg=raw_cfg)
         _validate_gs_metrics_eval_config(raw_cfg=raw_cfg)
 
 
-__all__ = ["load_experiment_config", "validate_mast_config", "MAST_CONFIGS_ROOT"]
+__all__ = ["MAST_CONFIGS_ROOT", "load_experiment_config", "validate_mast_config"]
