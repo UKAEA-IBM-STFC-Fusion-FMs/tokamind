@@ -299,11 +299,8 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
             logger.warning("Topology metric disabled (init failed): %s", exc)
             topology_metric = None
 
-    if topology_metric is not None or regional_metric is not None:
-        # Share one provider for the union of topology and regional-MSE reference fields.
-        required_auxiliary: set[str] = set()
-        for metric in (topology_metric, regional_metric):
-            required_auxiliary |= set(getattr(metric, "required_auxiliary_fields", frozenset()))
+    if topology_metric is not None:
+        required_auxiliary = topology_metric.required_auxiliary_fields
         if required_auxiliary and (source_store_manager is not None or source_zarr_root):
             try:
                 topology_provider = TopologyProvider(
@@ -312,15 +309,13 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                     store_root=source_zarr_root,
                     local=source_local,
                 )
-            except Exception as exc:
-                if regional_metric is not None:
-                    raise RuntimeError("Regional MSE reference provider initialization failed") from exc
+            except Exception as exc:  # noqa: BLE001 - topology remains an optional diagnostic
                 logger.warning("Topology provider disabled (init failed): %s", exc)
                 topology_provider = None
         else:
             logger.warning(
                 "No reference storage manager or Zarr root available "
-                "(source_store_manager=%s, source_zarr_root=%s); topology disabled and regional LCFS unavailable.",
+                "(source_store_manager=%s, source_zarr_root=%s); topology disabled.",
                 type(source_store_manager).__name__ if source_store_manager is not None else None,
                 source_zarr_root,
             )
@@ -376,7 +371,6 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                 amp_enabled=amp_enabled,
             )
 
-            batch_topology = {}
             B = len(shot_ids)
             n_windows += B
 
@@ -449,11 +443,6 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                 for signal, output_name in (("psi", "equilibrium-psi"), ("jtor", "equilibrium-j_tor")):
                     if output_name not in y_pred or output_name not in y_true or output_name not in y_mask:
                         continue
-                    topo = None
-                    if topology_provider is not None and output_time is not None and output_name in output_time:
-                        # Query each signal's own times; never assume psi and current have identical horizons.
-                        topo = topology_provider.query(shot_ids, output_time[output_name])
-                    batch_topology[output_name] = topo
                     regional_metric.add_batch(
                         signal=signal,
                         pred_native=y_pred[output_name],
@@ -461,7 +450,6 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
                         shot_ids=shot_ids,
                         window_indices=window_indices,
                         window_mask=_combined_output_mask(masks=y_mask, output_names=(output_name,)),
-                        topology=topo,
                     )
 
             # LCFS / X-point flux-topology metric (predicted psi vs reference geometry), per-shot accumulation.
@@ -475,10 +463,7 @@ def evaluate_benchmark_and_diagnostics(  # NOSONAR - Ignore cognitive complexity
             ):
                 win_mask_topo = _combined_output_mask(masks=y_mask, output_names=("equilibrium-psi",))
                 try:
-                    if "equilibrium-psi" in batch_topology:
-                        topo = batch_topology["equilibrium-psi"]
-                    else:
-                        topo = topology_provider.query(shot_ids, output_time["equilibrium-psi"])
+                    topo = topology_provider.query(shot_ids, output_time["equilibrium-psi"])
                     topology_metric.add_batch(
                         psi_native=y_pred["equilibrium-psi"],
                         shot_ids=shot_ids,

@@ -6,6 +6,7 @@ No dataset download, training or GPU is required.
 
 import csv
 import importlib
+import json
 from pathlib import Path
 
 import numpy as np
@@ -16,7 +17,7 @@ from mast_utils.config import _validate_regional_diagnostics_config
 from mast_utils.eval.grad_shafranov.error_map import FieldErrorMapMetric
 from mast_utils.eval.grad_shafranov.grid import GSEvalGrid
 from mast_utils.eval.grad_shafranov.psi_error_map import PsiErrorMapMetric
-from mast_utils.eval.grad_shafranov.regional_mse import RegionalMSEMetric, _has_self_intersections, lcfs_mask
+from mast_utils.eval.grad_shafranov.regional_mse import RegionalMSEMetric
 from mast_utils.eval.grad_shafranov.topology_provider import TopologyProvider
 
 
@@ -40,11 +41,7 @@ def polygon():
     return np.array([[2.0, -1.0], [4.0, -1.0], [4.0, 1.0], [2.0, 1.0]])
 
 
-def topology(batch, times):
-    return [[{"lcfs": polygon()} for _ in range(times)] for _ in range(batch)]
-
-
-def feed(metric, fields, ids=None, indices=None, selected=None, topo=None, signal="psi", true=None):
+def feed(metric, fields, ids=None, indices=None, selected=None, signal="psi", true=None):
     batch = len(fields)
     metric.add_batch(
         signal=signal,
@@ -53,7 +50,6 @@ def feed(metric, fields, ids=None, indices=None, selected=None, topo=None, signa
         shot_ids=np.ones(batch, dtype=int) if ids is None else np.asarray(ids),
         window_indices=np.arange(batch) if indices is None else np.asarray(indices),
         window_mask=np.ones(batch, bool) if selected is None else np.asarray(selected),
-        topology=topo,
     )
 
 
@@ -66,45 +62,6 @@ def test_limiter_asset_preserves_original_region():
     actual = GSEvalGrid()
     assert actual.limiter_region.sum() > actual.region.sum()
     np.testing.assert_array_equal(actual.region, actual._erode_one_cell(actual.limiter_region))
-
-
-def test_lcfs_orientation_boundary_and_order(grid):
-    assert not _has_self_intersections(polygon())
-    mask = lcfs_mask(grid, polygon())
-    expected = (grid.r >= 2) & (grid.r <= 4) & (abs(grid.z) <= 1)
-    np.testing.assert_array_equal(mask, expected)
-    np.testing.assert_array_equal(lcfs_mask(grid, polygon()[::-1]), expected)
-    np.testing.assert_array_equal(lcfs_mask(grid, np.vstack([polygon(), polygon()[0]])), expected)
-
-
-@pytest.mark.parametrize(
-    "points",
-    [
-        np.zeros((2, 2)),
-        np.array([[2, 0], [3, 0], [4, 0]]),
-        np.array([[2, -1], [4, 1], [2, 1], [4, -1]]),
-        np.array([[0, 0], [2, 1], [3, -1]]),
-        np.array([[2, 0], [3, 1], [np.nan, 0]]),
-    ],
-)
-def test_invalid_polygons(grid, points):
-    with pytest.raises(ValueError):
-        lcfs_mask(grid, points)
-
-
-@pytest.mark.parametrize("reverse", [False, True])
-def test_self_intersection_with_nonzero_area(grid, reverse):
-    # Asymmetric bow tie: unlike the earlier test, its signed area is nonzero,
-    # so rejection must exercise the intersection check rather than the area check.
-    points = np.array([[2.0, -1.0], [4.0, 1.0], [2.0, 1.0], [3.0, -1.0]])
-    if reverse:
-        points = points[::-1]
-    end = np.roll(points, -1, axis=0)
-    twice_area = np.sum(points[:, 0] * end[:, 1] - points[:, 1] * end[:, 0])
-    assert abs(twice_area) == 2.0
-    assert _has_self_intersections(points)
-    with pytest.raises(ValueError, match="LCFS is self-intersecting"):
-        lcfs_mask(grid, points)
 
 
 def test_maps_preserve_psi_and_add_current_mse(grid, tmp_path):
@@ -136,72 +93,85 @@ def test_maps_preserve_psi_and_add_current_mse(grid, tmp_path):
     assert empty.is_empty()
 
 
-def test_regional_errors_and_independent_signals(grid, tmp_path):
+def test_limiter_errors_and_independent_signals(grid, tmp_path):
     metric = RegionalMSEMetric(grid=grid)
-    inside = lcfs_mask(grid, polygon())
-    fields = np.where(inside, 2.0, 1.0)[None, None]
-    feed(metric, fields, topo=topology(1, 1))
-    feed(metric, fields * 3, topo=topology(1, 1), signal="jtor", selected=[False])
+    # A non-square grid and large exterior errors expose transpose/mask errors.
+    fields = np.where(grid.limiter_region, 2.0, 100.0)[None, None]
+    feed(metric, fields)
+    feed(metric, fields * 3, signal="jtor", selected=[False])
     result = rows(metric, tmp_path)
-    assert len(result) == 3  # No invented J_tor zeroes for an unscored signal.
-    assert result["psi", "lcfs"]["mse"] == 4
-    assert result["psi", "limiter"]["mse"] == pytest.approx((9 * 4 + 6) / 15)
-    assert result["psi", "full_grid"]["mse"] == pytest.approx((9 * 4 + 26) / 35)
+    assert set(result) == {("psi", "limiter")}
+    assert result["psi", "limiter"]["mse"] == 4
+    assert result["psi", "limiter"]["n_cells"] == 15  # Includes un-eroded boundary.
+    protocol = json.loads((tmp_path / "regional_mse_protocol.json").read_text())
+    assert protocol["schema_version"] == 2
+    assert protocol["regions"] == {"limiter": "MAST_lim_mask_rz, no erosion"}
+    assert not any("lcfs" in key for key in result["psi", "limiter"])
 
 
-def test_time_dependent_mask_before_aggregation(grid, tmp_path):
+def test_output_times_pool_valid_limiter_cells(grid, tmp_path):
     metric = RegionalMSEMetric(grid=grid)
-    fields = np.zeros((1, 2, 5, 7))
-    fields[0, 0, 1:4, 2:5] = 2
-    fields[0, 1] = 1
-    topo = topology(1, 2)
-    topo[0][1] = {"lcfs": np.array([[2, 0], [3, 0], [3, 1], [2, 1]])}
-    feed(metric, fields, topo=topo)
-    result = rows(metric, tmp_path)
-    assert result["psi", "lcfs"]["mse"] == pytest.approx((9 * 4 + 4) / 13)
-    assert result["psi", "lcfs"]["n_cells"] == 13
+    fields = np.ones((1, 2, 5, 7))
+    fields[0, 0] = 2
+    true = np.zeros_like(fields)
+    true[0, 1, 1, 1] = np.nan
+    feed(metric, fields, true=true)
+    result = rows(metric, tmp_path)["psi", "limiter"]
+    assert result["mse"] == pytest.approx((15 * 4 + 14) / 29)
+    assert result["n_cells"] == 29
+    assert result["n_reference_nonfinite"] == 1
 
 
 def test_hierarchical_mean_and_batch_invariance(grid, tmp_path):
     fields = np.broadcast_to(np.array([1.0, 3.0, 2.0])[:, None, None, None], (3, 2, 5, 7))
     one, split = RegionalMSEMetric(grid=grid), RegionalMSEMetric(grid=grid)
-    feed(one, fields, ids=[10, 10, 20], topo=topology(3, 2))
+    feed(one, fields, ids=[10, 10, 20])
     for i, sid in enumerate([10, 10, 20]):
-        feed(split, fields[i : i + 1], ids=[sid], indices=[i], topo=topology(1, 2))
+        feed(split, fields[i : i + 1], ids=[sid], indices=[i])
     a, b = rows(one, tmp_path / "one"), rows(split, tmp_path / "split")
     assert a == b
-    assert a["psi", "full_grid"]["mse"] == 4.5  # ((1+9)/2 + 4)/2, not 14/3.
+    assert a["psi", "limiter"]["mse"] == 4.5  # ((1+9)/2 + 4)/2, not 14/3.
     assert (tmp_path / "one/regional_mse_shots.csv").read_text() == (
         tmp_path / "split/regional_mse_shots.csv"
     ).read_text()
 
 
-def test_missing_invalid_empty_lcfs_and_nonfinite_reference(grid, tmp_path):
+def test_empty_limiter_reports_nan(grid, tmp_path):
+    grid.limiter_region[:] = False
     metric = RegionalMSEMetric(grid=grid)
-    fields = np.ones((1, 3, 5, 7))
-    true = np.zeros_like(fields)
-    true[0, 0, 0, 0] = np.nan
-    topo = [[None, {"lcfs": [[2, 0], [3, 0]]}, {"lcfs": [[2.1, 0.1], [2.2, 0.1], [2.2, 0.2], [2.1, 0.2]]}]]
-    feed(metric, fields, true=true, topo=topo)
-    result = rows(metric, tmp_path)
-    lcfs = result["psi", "lcfs"]
-    assert np.isnan(lcfs["mse"])
-    assert lcfs["n_fields_missing_lcfs"] == lcfs["n_fields_invalid_lcfs"] == lcfs["n_fields_empty_region"] == 1
-    assert result["psi", "full_grid"]["mse"] == 1
-    assert result["psi", "full_grid"]["n_cells"] == 104
+    feed(metric, np.ones((1, 2, 5, 7)))
+    result = rows(metric, tmp_path)["psi", "limiter"]
+    assert np.isnan(result["mse"])
+    assert result["n_cells"] == 0
+    assert result["n_fields_empty_region"] == 2
+
+
+def test_nonfinite_predictions_outside_limiter_are_ignored(grid, tmp_path):
+    metric = RegionalMSEMetric(grid=grid)
+    fields = np.where(grid.limiter_region, 2.0, np.nan)[None, None]
+    feed(metric, fields)
+    assert rows(metric, tmp_path)["psi", "limiter"]["mse"] == 4
 
 
 def test_bad_prediction_fails_instead_of_exclusion(grid):
     values = np.ones((1, 1, 5, 7))
-    values[0, 0, 0, 0] = np.nan
+    values[0, 0, 1, 1] = np.nan
     with pytest.raises(ValueError, match="Non-finite"):
         feed(RegionalMSEMetric(grid=grid), values)
     feed(RegionalMSEMetric(grid=grid), values, selected=[False])
 
 
 def test_shape_mismatch_fails(grid):
-    with pytest.raises(ValueError, match="topology"):
-        feed(RegionalMSEMetric(grid=grid), np.ones((1, 2, 5, 7)), topo=topology(1, 1))
+    with pytest.raises(ValueError, match="shapes differ"):
+        feed(RegionalMSEMetric(grid=grid), np.ones((1, 2, 5, 7)), true=np.zeros((1, 1, 5, 7)))
+
+
+@pytest.mark.parametrize("value", [np.inf, 1e308])
+def test_invalid_or_overflowed_limiter_prediction_fails(grid, value):
+    fields = np.ones((1, 1, 5, 7))
+    fields[0, 0, 1, 1] = value
+    with pytest.raises(ValueError, match="Non-finite"):
+        feed(RegionalMSEMetric(grid=grid), fields)
 
 
 @pytest.mark.parametrize("config", [{"enable": "true"}, [], {"enable": True, "mask": "predicted"}])
@@ -220,32 +190,58 @@ def test_gs_configs_enabled():
 
 
 @pytest.mark.parametrize("with_current", [False, True])
-def test_evaluation_wiring_and_signal_times(grid, tmp_path, monkeypatch, with_current):
+@pytest.mark.parametrize("with_topology", [False, True])
+def test_evaluation_wiring_without_auxiliary_data(grid, tmp_path, monkeypatch, with_current, with_topology):
     runner = importlib.import_module("mast_utils.eval.benchmark_eval")
     monkeypatch.setattr(runner, "GSEvalGrid", lambda _: grid)
     fields = native(np.ones((1, 2, 5, 7)))
     predictions = {"equilibrium-psi": fields}
     if with_current:
-        predictions["equilibrium-j_tor"] = 2 * fields
+        predictions["equilibrium-j_tor"] = native(np.full((1, 3, 5, 7), 2.0))
     references = {key: np.zeros_like(value) for key, value in predictions.items()}
     masks = {key: np.ones(1, bool) for key in predictions}
-    times = {key: np.array([[0.1, 0.2]]) + i for i, key in enumerate(predictions)}
+    # Limiter MSE does not need timestamps; the independent topology metric does.
+    times = {"equilibrium-psi": np.array([[0.1, 0.2]])} if with_topology else None
     monkeypatch.setattr(
         runner,
         "forward_decode_native",
         lambda **_: (references, predictions, masks, np.array([30421]), np.array([4]), times),
     )
-    calls = []
 
-    class Provider:
-        def __init__(self, **kwargs):
-            assert kwargs["requested_fields"] == {"lcfs_r", "lcfs_z"}
+    def forbidden_provider(**kwargs):
+        raise AssertionError("Limiter-only evaluation accessed auxiliary geometry")
 
-        def query(self, ids, query_times):
-            calls.append(query_times.copy())
-            return topology(1, 2)
+    monkeypatch.setattr(runner, "TopologyProvider", forbidden_provider)
+    topology_calls = []
+    if with_topology:
 
-    monkeypatch.setattr(runner, "TopologyProvider", Provider)
+        class Provider:
+            def __init__(self, **kwargs):
+                assert kwargs["requested_fields"] == {"lcfs_r", "lcfs_z"}
+
+            def query(self, ids, query_times):
+                np.testing.assert_array_equal(query_times, times["equilibrium-psi"])
+                topology_calls.append("query")
+                return [[None, None]]
+
+        class Metric:
+            required_auxiliary_fields = frozenset({"lcfs_r", "lcfs_z"})
+
+            def __init__(self, **kwargs):
+                pass
+
+            def add_batch(self, **kwargs):
+                assert kwargs["topology"] == [[None, None]]
+                topology_calls.append("metric")
+
+            def write_csvs(self, **kwargs):
+                return {"n_shots": 1}
+
+        monkeypatch.setattr(runner, "TopologyProvider", Provider)
+        monkeypatch.setattr(runner, "GSTopologyMetric", Metric)
+
+    config = {key: {"enable": True} for key in ("regional_mse", "psi_error_map", "jtor_error_map")}
+    config["gs_topology"] = {"enable": with_topology}
     result = runner.evaluate_benchmark_and_diagnostics(
         model=torch.nn.Identity(),
         amp_enabled=False,
@@ -256,13 +252,13 @@ def test_evaluation_wiring_and_signal_times(grid, tmp_path, monkeypatch, with_cu
         id_to_name={},
         run_dir=tmp_path,
         task_name="test",
-        source_zarr_root="unused",
-        compute_metrics_cfg={key: {"enable": True} for key in ("regional_mse", "psi_error_map", "jtor_error_map")},
+        source_zarr_root="unused" if with_topology else None,
+        compute_metrics_cfg=config,
     )
-    assert len(calls) == len(predictions)
-    for observed, expected in zip(calls, times.values(), strict=True):
-        np.testing.assert_array_equal(observed, expected)
-    assert len(result["regional_mse"]["rows"]) == 3 * len(predictions)
+    assert topology_calls == (["query", "metric"] if with_topology else [])
+    assert ("gs_topology" in result) == with_topology
+    assert len(result["regional_mse"]["rows"]) == len(predictions)
+    assert all(row["region"] == "limiter" for row in result["regional_mse"]["rows"])
     assert "psi_error_map" in result
     assert ("jtor_error_map" in result) == with_current
     with open(result["regional_mse"]["regional_mse_shots_csv"], newline="") as stream:
@@ -283,15 +279,15 @@ def test_provider_alignment_rejects_distant_times(monkeypatch):
     assert result[0][1] is None
 
 
-def test_full_grid_matches_benchmark_shot_rmse_squared(grid, tmp_path, monkeypatch):
+def test_limiter_matches_benchmark_on_same_selected_cells(grid, tmp_path, monkeypatch):
     from tokamark import evaluator
 
     monkeypatch.setattr(evaluator, "get_signals_metadata", lambda: {"equilibrium-psi": {"std": 1.0}})
     fields = np.broadcast_to(np.array([1.0, 3.0, 2.0])[:, None, None, None], (3, 2, 5, 7))
     ids = np.array([10, 10, 20])
     df = evaluator.compute_windows_metrics(
-        y_target=np.zeros((3, 70)),
-        y_pred=native(fields).reshape(3, -1),
+        y_target=np.zeros((3, 30)),
+        y_pred=fields[:, :, grid.limiter_region].reshape(3, -1),
         shot_ids=ids,
         window_indices=np.arange(3),
         feature_name="equilibrium-psi",
@@ -302,7 +298,7 @@ def test_full_grid_matches_benchmark_shot_rmse_squared(grid, tmp_path, monkeypat
     rows(metric, tmp_path)
     with (tmp_path / "regional_mse_shots.csv").open() as stream:
         for row in csv.DictReader(stream):
-            if row["region"] == "full_grid":
+            if row["region"] == "limiter":
                 rmse = benchmark_shots.loc[benchmark_shots.shot_id == int(row["shot_id"]), "RMSE"].iloc[0]
                 assert float(row["mse"]) == pytest.approx(rmse**2)
 
@@ -334,7 +330,7 @@ def test_disabled_diagnostics_do_not_load_geometry(tmp_path, monkeypatch):
 
 def test_all_missing_reference_and_masked_nan(grid, tmp_path):
     metric = RegionalMSEMetric(grid=grid)
-    feed(metric, np.ones((1, 1, 5, 7)), true=np.full((1, 1, 5, 7), np.nan), topo=topology(1, 1))
+    feed(metric, np.ones((1, 1, 5, 7)), true=np.full((1, 1, 5, 7), np.nan))
     result = rows(metric, tmp_path)
     assert all(np.isnan(row["mse"]) and row["n_cells"] == 0 for row in result.values())
-    assert result["psi", "full_grid"]["n_reference_nonfinite"] == 35
+    assert result["psi", "limiter"]["n_reference_nonfinite"] == 15
