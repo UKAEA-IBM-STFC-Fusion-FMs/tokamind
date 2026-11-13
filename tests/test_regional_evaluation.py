@@ -100,12 +100,12 @@ def test_limiter_errors_and_independent_signals(grid, tmp_path):
     feed(metric, fields)
     feed(metric, fields * 3, signal="jtor", selected=[False])
     result = rows(metric, tmp_path)
-    assert set(result) == {("psi", "limiter")}
+    assert set(result) == {("psi", r) for r in ("full_grid", "limiter", "outside_limiter")}
     assert result["psi", "limiter"]["mse"] == 4
     assert result["psi", "limiter"]["n_cells"] == 15  # Includes un-eroded boundary.
     protocol = json.loads((tmp_path / "regional_mse_protocol.json").read_text())
-    assert protocol["schema_version"] == 2
-    assert protocol["regions"] == {"limiter": "MAST_lim_mask_rz, no erosion"}
+    assert protocol["schema_version"] == 3
+    assert protocol["regions"]["limiter"] == "MAST_lim_mask_rz, no erosion"
     assert not any("lcfs" in key for key in result["psi", "limiter"])
 
 
@@ -131,6 +131,8 @@ def test_hierarchical_mean_and_batch_invariance(grid, tmp_path):
     a, b = rows(one, tmp_path / "one"), rows(split, tmp_path / "split")
     assert a == b
     assert a["psi", "limiter"]["mse"] == 4.5  # ((1+9)/2 + 4)/2, not 14/3.
+    for row in a.values():
+        assert row["mse_pooled"] == pytest.approx(14 / 3)
     assert (tmp_path / "one/regional_mse_shots.csv").read_text() == (
         tmp_path / "split/regional_mse_shots.csv"
     ).read_text()
@@ -142,15 +144,16 @@ def test_empty_limiter_reports_nan(grid, tmp_path):
     feed(metric, np.ones((1, 2, 5, 7)))
     result = rows(metric, tmp_path)["psi", "limiter"]
     assert np.isnan(result["mse"])
+    assert np.isnan(result["mse_pooled"])
     assert result["n_cells"] == 0
     assert result["n_fields_empty_region"] == 2
 
 
-def test_nonfinite_predictions_outside_limiter_are_ignored(grid, tmp_path):
+def test_nonfinite_predictions_outside_limiter_raise(grid):
     metric = RegionalMSEMetric(grid=grid)
     fields = np.where(grid.limiter_region, 2.0, np.nan)[None, None]
-    feed(metric, fields)
-    assert rows(metric, tmp_path)["psi", "limiter"]["mse"] == 4
+    with pytest.raises(ValueError, match="Non-finite"):
+        feed(metric, fields)
 
 
 def test_bad_prediction_fails_instead_of_exclusion(grid):
@@ -257,8 +260,8 @@ def test_evaluation_wiring_without_auxiliary_data(grid, tmp_path, monkeypatch, w
     )
     assert topology_calls == (["query", "metric"] if with_topology else [])
     assert ("gs_topology" in result) == with_topology
-    assert len(result["regional_mse"]["rows"]) == len(predictions)
-    assert all(row["region"] == "limiter" for row in result["regional_mse"]["rows"])
+    assert len(result["regional_mse"]["rows"]) == 3 * len(predictions)
+    assert {row["region"] for row in result["regional_mse"]["rows"]} == {"full_grid", "limiter", "outside_limiter"}
     assert "psi_error_map" in result
     assert ("jtor_error_map" in result) == with_current
     with open(result["regional_mse"]["regional_mse_shots_csv"], newline="") as stream:
@@ -334,3 +337,34 @@ def test_all_missing_reference_and_masked_nan(grid, tmp_path):
     result = rows(metric, tmp_path)
     assert all(np.isnan(row["mse"]) and row["n_cells"] == 0 for row in result.values())
     assert result["psi", "limiter"]["n_reference_nonfinite"] == 15
+
+
+@pytest.mark.parametrize("signal", ["psi", "jtor"])
+def test_regions_partition_and_match_maps(grid, tmp_path, signal):
+    fields = np.arange(3 * 2 * 5 * 7, dtype=float).reshape(3, 2, 5, 7) / 10
+    true = np.zeros_like(fields)
+    true[0, 0, 1, 1] = np.nan
+    true[1, 1, 0, 0] = np.nan
+    metric = RegionalMSEMetric(grid=grid)
+    feed(metric, fields, true=true, signal=signal, ids=[10, 20, 30], selected=[True, True, False])
+    result = rows(metric, tmp_path)
+    full, inside, outside = [result[signal, name] for name in ("full_grid", "limiter", "outside_limiter")]
+    assert full["n_cells"] == inside["n_cells"] + outside["n_cells"]
+    assert full["squared_error_sum"] == pytest.approx(inside["squared_error_sum"] + outside["squared_error_sum"])
+    maps = FieldErrorMapMetric(grid=grid, signal=signal)
+    maps.add_batch(pred_native=native(fields), true_native=native(true), window_mask=np.array([True, True, False]))
+    output = maps.write_npz(metrics_task_dir=tmp_path, task_name="test")
+    with np.load(output[f"{signal}_error_map_npz"]) as data:
+        for region, mask in metric._regions.items():
+            valid = mask & (data["count"] > 0)
+            expected = np.sum(data["mse"][valid] * data["count"][valid]) / np.sum(data["count"][valid])
+            assert result[signal, region]["mse_pooled"] == pytest.approx(expected)
+
+
+def test_empty_exterior_reports_nan(grid, tmp_path):
+    grid.limiter_region[:] = True
+    metric = RegionalMSEMetric(grid=grid)
+    feed(metric, np.ones((1, 1, 5, 7)))
+    result = rows(metric, tmp_path)
+    assert np.isnan(result["psi", "outside_limiter"]["mse_pooled"])
+    assert result["psi", "full_grid"]["mse_pooled"] == result["psi", "limiter"]["mse_pooled"] == 1

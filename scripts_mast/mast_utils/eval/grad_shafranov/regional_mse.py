@@ -1,8 +1,8 @@
-"""Pointwise native-unit MSE inside the fixed, un-eroded MAST limiter.
+"""Pointwise native-unit MSE over the full grid, limiter and its exterior.
 
 Each window pools finite reference cells across its output times. Shot MSE is
 the mean of scored window MSEs; task MSE is the equal-weight mean of shot MSEs.
-The separate squared-error sum/count describes a pooled statistic, NOT that
+The separate mse_pooled (squared-error sum/count) describes a pooled statistic, NOT that
 hierarchical mean. No predictions or per-window grids are retained.
 """
 
@@ -21,7 +21,6 @@ import numpy as np
 from .aggregation import RunningMean, task_stats
 from .grid import GSEvalGrid
 
-REGION = "limiter"
 SIGNALS = {"psi": "Wb/rad", "jtor": "A/m^2"}
 COUNTERS = (
     "n_windows_selected",
@@ -45,15 +44,23 @@ class _ShotRegion:
 class RegionalMSEMetric:
     """Independent signal masks and fixed limiter geometry, without auxiliary data.
 
-    Bad predictions on finite selected targets inside the limiter raise, rather
-    than improve the MSE through exclusion. Cells outside it do not contribute.
+    Bad predictions on finite selected targets anywhere on the grid raise,
+    rather than improve the MSE through exclusion. The limiter is not the LCFS.
     Coverage hashes record scored window/slice identities and finite region cells;
     compare hashes only with identical data ordering/protocol.
+    Limiter and outside_limiter partition full_grid: their squared-error sums
+    and cell counts add to the full-grid values. Never sum all three regions.
+    Window, field and shot counts are not additive across regions.
     """
 
     def __init__(self, *, grid: GSEvalGrid) -> None:
         self.grid = grid
-        self._shots: dict[tuple[str, int], _ShotRegion] = {}
+        self._regions = {
+            "full_grid": np.ones_like(grid.limiter_region, dtype=bool),
+            "limiter": grid.limiter_region.copy(),
+            "outside_limiter": ~grid.limiter_region,
+        }
+        self._shots: dict[tuple[str, int, str], _ShotRegion] = {}
 
     def add_batch(
         self,
@@ -84,7 +91,7 @@ class RegionalMSEMetric:
         if n_times == 0:
             raise ValueError("Regional MSE needs at least one output time")
         valid = np.isfinite(true)
-        active = np.repeat(selected, n_times)[:, None, None] & self.grid.limiter_region
+        active = np.repeat(selected, n_times)[:, None, None]
         if np.any(active & valid & ~np.isfinite(pred)):
             raise ValueError(f"Non-finite {signal} predictions on valid selected targets")
         with np.errstate(over="ignore", invalid="ignore"):
@@ -93,45 +100,45 @@ class RegionalMSEMetric:
             raise ValueError(f"Non-finite squared errors for {signal}")
 
         for b in np.flatnonzero(selected):
-            state = self._shots.setdefault((signal, int(ids[b])), _ShotRegion())
-            counts = state.counters
-            counts["n_windows_selected"] += 1
-            window_sse, window_cells = 0.0, 0
-            for t in range(n_times):
-                idx = b * n_times + t
-                counts["n_fields_selected"] += 1
-                mask = self.grid.limiter_region
-                cells = mask & valid[idx]
-                counts["n_reference_nonfinite"] += int((mask & ~valid[idx]).sum())
-                n_cells = int(cells.sum())
-                if not n_cells:
-                    counts["n_fields_empty_region"] += 1
-                if n_cells:
-                    counts["n_fields_scored"] += 1
-                    window_sse += float(errors[idx][cells].sum())
-                    window_cells += n_cells
-                    state.coverage.update(f"{int(indices[b])}:{t};".encode())
-                    state.coverage.update(np.packbits(cells).tobytes())
-            counts["n_cells"] += window_cells
-            state.squared_error_sum += window_sse
-            if window_cells:
-                if not np.isfinite(state.squared_error_sum):
-                    raise ValueError(f"Regional squared-error sum overflow for {signal}")
-                counts["n_windows_scored"] += 1
-                state.windows.add(window_sse / window_cells)
+            for region, mask in self._regions.items():
+                state = self._shots.setdefault((signal, int(ids[b]), region), _ShotRegion())
+                counts = state.counters
+                counts["n_windows_selected"] += 1
+                window_sse, window_cells = 0.0, 0
+                for t in range(n_times):
+                    idx = b * n_times + t
+                    counts["n_fields_selected"] += 1
+                    cells = mask & valid[idx]
+                    counts["n_reference_nonfinite"] += int((mask & ~valid[idx]).sum())
+                    n_cells = int(cells.sum())
+                    if not n_cells:
+                        counts["n_fields_empty_region"] += 1
+                    if n_cells:
+                        counts["n_fields_scored"] += 1
+                        window_sse += float(errors[idx][cells].sum())
+                        window_cells += n_cells
+                        state.coverage.update(f"{int(indices[b])}:{t};".encode())
+                        state.coverage.update(np.packbits(cells).tobytes())
+                counts["n_cells"] += window_cells
+                state.squared_error_sum += window_sse
+                if window_cells:
+                    if not np.isfinite(state.squared_error_sum):
+                        raise ValueError(f"Regional squared-error sum overflow for {signal}")
+                    counts["n_windows_scored"] += 1
+                    state.windows.add(window_sse / window_cells)
 
     def write_csvs(self, *, metrics_task_dir: Path, task_name: str) -> dict[str, Any]:
         """Write long-form shot/task tables and a self-describing protocol manifest."""
         root = Path(metrics_task_dir)
         root.mkdir(parents=True, exist_ok=True)
         shot_rows, task_rows = [], []
-        for (signal, shot), state in sorted(self._shots.items()):
+        for (signal, shot, region), state in sorted(self._shots.items()):
             shot_rows.append(
                 {
                     "task": task_name,
                     "signal": signal,
                     "shot_id": shot,
-                    "region": REGION,
+                    "region": region,
                     "mse_units": f"({SIGNALS[signal]})^2",
                     "mse": state.windows.mean,
                     "squared_error_sum": state.squared_error_sum,
@@ -139,14 +146,14 @@ class RegionalMSEMetric:
                     "coverage_sha256": state.coverage.hexdigest(),
                 }
             )
-        for signal in sorted({key[0] for key in self._shots}):
-            rows = [row for row in shot_rows if row["signal"] == signal]
+        for signal, region in sorted({(key[0], key[2]) for key in self._shots}):
+            rows = [row for row in shot_rows if row["signal"] == signal and row["region"] == region]
             mse, std, n = task_stats(row["mse"] for row in rows if np.isfinite(row["mse"]))
             task_rows.append(
                 {
                     "task": task_name,
                     "signal": signal,
-                    "region": REGION,
+                    "region": region,
                     "mse_units": f"({SIGNALS[signal]})^2",
                     "mse": mse,
                     "mse_std_pop": std,
@@ -157,12 +164,24 @@ class RegionalMSEMetric:
                 }
             )
         paths = {}
+        for row in shot_rows + task_rows:
+            row["mse_pooled"] = row["squared_error_sum"] / row["n_cells"] if row["n_cells"] else float("nan")
         for name, rows, extra in (
             ("shots", shot_rows, ["shot_id", "coverage_sha256"]),
             ("task", task_rows, ["mse_std_pop", "n_shots_scored", "n_shots_selected"]),
         ):
             path = root / f"regional_mse_{name}.csv"
-            columns = ["task", "signal", "region", "mse_units", "mse", *extra, "squared_error_sum", *COUNTERS]
+            columns = [
+                "task",
+                "signal",
+                "region",
+                "mse_units",
+                "mse",
+                "mse_pooled",
+                *extra,
+                "squared_error_sum",
+                *COUNTERS,
+            ]
             with path.open("w", newline="", encoding="utf-8") as stream:
                 writer = csv.DictWriter(stream, fieldnames=columns)
                 writer.writeheader()
@@ -172,12 +191,22 @@ class RegionalMSEMetric:
         protocol.write_text(
             json.dumps(
                 {
-                    "schema_version": 2,
+                    "schema_version": 3,
                     "task": task_name,
                     "aggregation": "finite cells pooled within window; equal windows per shot; equal shots per task",
-                    "regions": {"limiter": "MAST_lim_mask_rz, no erosion"},
-                    "invalid_predictions": "raise on non-finite prediction at selected finite limiter targets",
-                    "coverage_sha256": "ordered window index, slice index and valid-region pixel bitmap per shot/signal",
+                    "mse_pooled": "squared_error_sum / n_cells; all valid elements equally weighted; NaN if empty",
+                    "regions": {
+                        "full_grid": "entire evaluation grid",
+                        "limiter": "MAST_lim_mask_rz, no erosion",
+                        "outside_limiter": "complement of MAST_lim_mask_rz on the evaluation grid",
+                    },
+                    "invalid_predictions": "raise on non-finite prediction at selected finite targets anywhere on grid",
+                    "region_overlap": (
+                        "limiter and outside_limiter partition full_grid; squared_error_sum and n_cells "
+                        "add across these two parts only. Never sum all three regions. "
+                        "Window, field and shot counts are not additive across regions."
+                    ),
+                    "coverage_sha256": "ordered window index, slice index and valid-region pixel bitmap per shot/signal/region",
                     "signals_reported": sorted({key[0] for key in self._shots}),
                     "grid_shape_rz": [self.grid.n_r, self.grid.n_z],
                 },
