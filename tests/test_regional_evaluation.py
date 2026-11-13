@@ -104,7 +104,7 @@ def test_limiter_errors_and_independent_signals(grid, tmp_path):
     assert result["psi", "limiter"]["mse"] == 4
     assert result["psi", "limiter"]["n_cells"] == 15  # Includes un-eroded boundary.
     protocol = json.loads((tmp_path / "regional_mse_protocol.json").read_text())
-    assert protocol["schema_version"] == 3
+    assert protocol["schema_version"] == 4
     assert protocol["regions"]["limiter"] == "MAST_lim_mask_rz, no erosion"
     assert not any("lcfs" in key for key in result["psi", "limiter"])
 
@@ -368,3 +368,58 @@ def test_empty_exterior_reports_nan(grid, tmp_path):
     result = rows(metric, tmp_path)
     assert np.isnan(result["psi", "outside_limiter"]["mse_pooled"])
     assert result["psi", "full_grid"]["mse_pooled"] == result["psi", "limiter"]["mse_pooled"] == 1
+    assert np.isnan(result["psi", "outside_limiter"]["nrmse"])
+
+
+@pytest.mark.parametrize(
+    "signal,feature,denominator", [("psi", "equilibrium-psi", 2.0), ("jtor", "equilibrium-j_tor", 7.0)]
+)
+def test_regional_nrmse_matches_tokamark(grid, tmp_path, monkeypatch, signal, feature, denominator):
+    from mast_utils.eval.grad_shafranov import regional_mse
+    from tokamark import evaluator
+
+    def metadata():
+        return {feature: {"std": denominator}}
+
+    monkeypatch.setattr(evaluator, "get_signals_metadata", metadata)
+    monkeypatch.setattr(regional_mse, "get_signals_metadata", metadata)
+    fields = np.arange(4 * 2 * 5 * 7, dtype=float).reshape(4, 2, 5, 7) / 30
+    true = np.zeros_like(fields)
+    true[0, 1, 1, 1] = np.nan
+    true[1, 0, 0, 0] = np.nan
+    ids = np.array([10, 10, 20, 30])
+    metric = RegionalMSEMetric(grid=grid)
+    feed(metric, fields, true=true, ids=ids, selected=[True, True, True, False], signal=signal)
+    result = rows(metric, tmp_path)
+    for region, mask in metric._regions.items():
+        frame = evaluator.compute_windows_metrics(
+            y_target=true[:3, :, mask].reshape(3, -1),
+            y_pred=fields[:3, :, mask].reshape(3, -1),
+            shot_ids=ids[:3],
+            window_indices=np.arange(3),
+            feature_name=feature,
+        )
+        signals, _, shots = evaluator.aggregate_windows_metrics(frame)
+        row = result[signal, region]
+        assert row["nrmse"] == pytest.approx(signals.iloc[0]["NRMSE_mean"])
+        assert row["nrmse_std_pop"] == pytest.approx(signals.iloc[0]["NRMSE_std_pop"])
+        assert row["normalization_std"] == denominator
+        assert row["nrmse"] != pytest.approx(np.sqrt(row["mse_pooled"]) / denominator)
+        with (tmp_path / "regional_mse_shots.csv").open() as stream:
+            for shot_row in csv.DictReader(stream):
+                if shot_row["region"] == region:
+                    expected = shots.loc[shots.shot_id == int(shot_row["shot_id"]), "NRMSE"].iloc[0]
+                    assert float(shot_row["nrmse"]) == pytest.approx(expected)
+    protocol = json.loads((tmp_path / "regional_mse_protocol.json").read_text())
+    assert protocol["normalization"]["signals"][signal]["std"] == denominator
+
+
+@pytest.mark.parametrize("value", [0, -1, np.nan, np.inf, None, "invalid"])
+def test_invalid_nrmse_normalization_fails(grid, tmp_path, monkeypatch, value):
+    from mast_utils.eval.grad_shafranov import regional_mse
+
+    monkeypatch.setattr(regional_mse, "get_signals_metadata", lambda: {"equilibrium-psi": {"std": value}})
+    metric = RegionalMSEMetric(grid=grid)
+    feed(metric, np.ones((1, 1, 5, 7)))
+    with pytest.raises(ValueError, match="normalization std"):
+        rows(metric, tmp_path)

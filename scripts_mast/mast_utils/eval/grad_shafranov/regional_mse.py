@@ -4,6 +4,8 @@ Each window pools finite reference cells across its output times. Shot MSE is
 the mean of scored window MSEs; task MSE is the equal-weight mean of shot MSEs.
 The separate mse_pooled (squared-error sum/count) describes a pooled statistic, NOT that
 hierarchical mean. No predictions or per-window grids are retained.
+NRMSE follows TokaMark: sqrt(shot MSE) / metadata signal std, then an
+equal-weight mean across shots. The same signal std is used for every region.
 """
 
 from __future__ import annotations
@@ -18,10 +20,12 @@ from typing import Any
 
 import numpy as np
 
+from ...benchmark_imports import get_signals_metadata
 from .aggregation import RunningMean, task_stats
 from .grid import GSEvalGrid
 
 SIGNALS = {"psi": "Wb/rad", "jtor": "A/m^2"}
+FEATURES = {"psi": "equilibrium-psi", "jtor": "equilibrium-j_tor"}
 COUNTERS = (
     "n_windows_selected",
     "n_windows_scored",
@@ -130,6 +134,17 @@ class RegionalMSEMetric:
     def write_csvs(self, *, metrics_task_dir: Path, task_name: str) -> dict[str, Any]:
         """Write long-form shot/task tables and a self-describing protocol manifest."""
         root = Path(metrics_task_dir)
+        metadata = get_signals_metadata() if self._shots else {}
+        normalization = {}
+        for signal in sorted({key[0] for key in self._shots}):
+            feature = FEATURES[signal]
+            try:
+                denominator = float(metadata[feature]["std"])
+            except (KeyError, TypeError, ValueError) as exc:
+                raise ValueError(f"Missing or invalid TokaMark normalization std for {feature}") from exc
+            if not np.isfinite(denominator) or denominator <= 0:
+                raise ValueError(f"TokaMark normalization std for {feature} must be finite and positive")
+            normalization[signal] = denominator
         root.mkdir(parents=True, exist_ok=True)
         shot_rows, task_rows = [], []
         for (signal, shot, region), state in sorted(self._shots.items()):
@@ -141,6 +156,8 @@ class RegionalMSEMetric:
                     "region": region,
                     "mse_units": f"({SIGNALS[signal]})^2",
                     "mse": state.windows.mean,
+                    "nrmse": float(np.sqrt(state.windows.mean) / normalization[signal]),
+                    "normalization_std": normalization[signal],
                     "squared_error_sum": state.squared_error_sum,
                     **{key: state.counters[key] for key in COUNTERS},
                     "coverage_sha256": state.coverage.hexdigest(),
@@ -149,6 +166,7 @@ class RegionalMSEMetric:
         for signal, region in sorted({(key[0], key[2]) for key in self._shots}):
             rows = [row for row in shot_rows if row["signal"] == signal and row["region"] == region]
             mse, std, n = task_stats(row["mse"] for row in rows if np.isfinite(row["mse"]))
+            nrmse, nrmse_std, _ = task_stats(row["nrmse"] for row in rows if np.isfinite(row["nrmse"]))
             task_rows.append(
                 {
                     "task": task_name,
@@ -157,6 +175,9 @@ class RegionalMSEMetric:
                     "mse_units": f"({SIGNALS[signal]})^2",
                     "mse": mse,
                     "mse_std_pop": std,
+                    "nrmse": nrmse,
+                    "nrmse_std_pop": nrmse_std,
+                    "normalization_std": normalization[signal],
                     "n_shots_scored": n,
                     "n_shots_selected": len(rows),
                     "squared_error_sum": sum(row["squared_error_sum"] for row in rows),
@@ -168,7 +189,7 @@ class RegionalMSEMetric:
             row["mse_pooled"] = row["squared_error_sum"] / row["n_cells"] if row["n_cells"] else float("nan")
         for name, rows, extra in (
             ("shots", shot_rows, ["shot_id", "coverage_sha256"]),
-            ("task", task_rows, ["mse_std_pop", "n_shots_scored", "n_shots_selected"]),
+            ("task", task_rows, ["mse_std_pop", "nrmse_std_pop", "n_shots_scored", "n_shots_selected"]),
         ):
             path = root / f"regional_mse_{name}.csv"
             columns = [
@@ -178,6 +199,8 @@ class RegionalMSEMetric:
                 "mse_units",
                 "mse",
                 "mse_pooled",
+                "nrmse",
+                "normalization_std",
                 *extra,
                 "squared_error_sum",
                 *COUNTERS,
@@ -191,10 +214,19 @@ class RegionalMSEMetric:
         protocol.write_text(
             json.dumps(
                 {
-                    "schema_version": 3,
+                    "schema_version": 4,
                     "task": task_name,
                     "aggregation": "finite cells pooled within window; equal windows per shot; equal shots per task",
                     "mse_pooled": "squared_error_sum / n_cells; all valid elements equally weighted; NaN if empty",
+                    "nrmse": "sqrt(shot mse) / signal std; equal mean across scored shots; NaN if empty",
+                    "normalization": {
+                        "source": "tokamark.tasks.get_signals_metadata()[feature]['std']",
+                        "shared_across_regions": True,
+                        "signals": {
+                            signal: {"feature": FEATURES[signal], "std": value, "units": SIGNALS[signal]}
+                            for signal, value in normalization.items()
+                        },
+                    },
                     "regions": {
                         "full_grid": "entire evaluation grid",
                         "limiter": "MAST_lim_mask_rz, no erosion",

@@ -1,4 +1,4 @@
-# Limiter MSE and spatial error maps (evaluation only)
+# Regional MSE, TokaMark NRMSE and spatial error maps (evaluation only)
 
 These diagnostics reuse existing checkpoints and decoded predictions. They do
 not change training, losses, embeddings, benchmark scores or GS residuals.
@@ -20,7 +20,7 @@ eval:
 
 Each option is independently disableable; omitted options default to disabled.
 Tasks predicting only psi do not produce invented J_tor scores or maps.
-Regional MSE scores only the fixed limiter region. It requires neither J_tor as
+Regional metrics score the full grid, fixed limiter and limiter exterior. They require neither J_tor as
 an auxiliary reference nor LCFS contours, output timestamps or `TopologyProvider`.
 It therefore works for psi-only Tasks 1-3/2-3 without additional source reads.
 The independent `gs_topology` option still fetches EFIT geometry if enabled;
@@ -47,7 +47,7 @@ the original evaluations before launching.
 python scripts_mast/run_eval.py \
   --task task_1-4-strong \
   --model_source /path/to/existing/training_run \
-  --tag gs_limiter_v1
+  --tag gs_regional_v4
 ```
 
 The run must include its original best checkpoint, config and required codec/
@@ -80,13 +80,24 @@ applied retrospectively to the aggregate map.
 
 - `regional_mse_shots.csv`: one row per selected shot, signal and region.
 - `regional_mse_task.csv`: one row per signal and region; includes population
-  standard deviation across scored shot MSEs (`mse_std_pop`, not a standard error).
+  standard deviations across scored shots (`mse_std_pop` and `nrmse_std_pop`,
+  not standard errors).
 - `regional_mse_protocol.json`: aggregation, geometry, missing-data policy and units conventions.
 
-The only CSV region is `limiter`: original `MAST_lim_mask_rz`, **without erosion**.
-No full-grid or LCFS MSE rows are produced. Protocol schema version 2 records this
-change and removes the former LCFS coverage counters. Existing `limiter` rows
-retain their aggregation and coverage-hash conventions for the same finite data.
+The three CSV regions are:
+
+- `full_grid`: the entire evaluation grid.
+- `limiter`: original `MAST_lim_mask_rz`, **without erosion**.
+- `outside_limiter`: its complement on the evaluation grid.
+
+No LCFS rows are produced. Protocol schema version **4** documents the regions,
+aggregation and NRMSE normalization. Existing `mse` values and coverage hashes
+retain their definitions for the same finite data.
+
+Limiter and exterior partition the full grid: their `squared_error_sum` and
+`n_cells` add to the corresponding full-grid values. Do not sum all three rows.
+Shot, window and field counts are not additive across regions. Neither MSE nor
+NRMSE is additive; pooled MSE combines using valid-cell-count weights.
 
 The existing eroded `GSEvalGrid.region` is unchanged for GS and smoothness
 diagnostics. Their unsuffixed CSV columns use that eroded limiter. Their optional
@@ -96,30 +107,48 @@ the plasma boundary: it may include cells outside the LCFS.
 
 For each predicted signal:
 
-1. Compute a window MSE by pooling valid squared errors across limiter cells
+1. Compute a window MSE by pooling valid squared errors across the selected region's cells
    and that signal's target times. Each signal uses its own window mask.
 2. Average scored window MSEs equally within each shot.
 3. Average scored shot MSEs equally for the task.
 
-These MSEs differ from the benchmark's full-grid errors by region as well as
-aggregation. Even for the same region, mean shot MSE is not generally the square
-of mean shot RMSE: squaring and averaging do not commute. Computation uses
+The CSVs retain this hierarchical `mse` and additionally report `mse_pooled`:
+`squared_error_sum / n_cells`, pooling all valid elements in the shot or task.
+For task-level pooled MSE, shots with more valid elements receive more weight.
+The maps reproduce `mse_pooled`, not generally the hierarchical `mse`.
+
+NRMSE follows TokaMark: compute `sqrt(mse)` for each scored shot, divide by the
+signal's `normalization_std`, then average those NRMSEs equally across shots.
+Both CSVs include `nrmse` and `normalization_std`; the task CSV also includes
+`nrmse_std_pop`. This is not `sqrt(mse_pooled) / normalization_std`, nor the
+square root of task-level `mse` divided by the denominator. Squaring and
+averaging do not commute. Computation uses
 float64 arithmetic; compare with tolerance rather than bitwise equality to a
 float32 benchmark.
 Raw MSE is in `(Wb/rad)^2` for psi and `(A/m^2)^2` for J_tor; do not combine
-signals with different units or label these values NRMSE.
+signals with different units. Only `nrmse` is dimensionless; `mse` and
+`mse_pooled` must not be labeled NRMSE.
+
+To preserve compatibility with the current TokaMark evaluator, regional NRMSE
+uses `tokamark.tasks.get_signals_metadata()` default **random-split** signal
+standard deviations for every evaluation split. The same denominator is used
+across all three regions. This is an explicit protocol choice; split-specific
+NRMSE normalization is not applied. Dataset selection and decoding still use
+the source run's split. Denominators, feature names and their source are recorded
+in the protocol JSON; each CSV row also stores its denominator. Missing,
+non-finite or non-positive denominators raise an error.
 
 CSV coverage includes selected/scored windows and fields, valid cells,
-non-finite reference cells inside the limiter and empty-field counts (no valid
-limiter cells). A shot/signal with no valid scored limiter cells reports NaN,
+non-finite reference cells in each region and empty-field counts (no valid
+region cells). An entirely unscored shot/signal/region reports NaN for its metrics,
 never zero.
-Finite selected targets inside the limiter with non-finite predictions (or
+Finite selected targets anywhere on the grid with non-finite predictions (or
 squared-error overflow) raise an error rather than improve the score through
-exclusion. Cells outside the limiter, including non-finite predictions there,
-do not affect this diagnostic. Unexpected regional computation errors fail the
+exclusion. Exterior cells contribute to `outside_limiter` and `full_grid`.
+Unexpected regional computation errors fail the
 evaluation; missing reference cells are reported through coverage.
 
-`squared_error_sum / n_cells` is the alternative pooled MSE, not the `mse` column.
+`squared_error_sum / n_cells` is reported as `mse_pooled`, not the `mse` column.
 Per-shot `coverage_sha256` hashes the ordered scored window/slice indices and
 finite region-cell masks. Compare these hashes and counts across data/strong/
 weak with identical ordering and dataset/config provenance before interpreting
@@ -137,7 +166,8 @@ PYTHONPATH=src:scripts_mast:/path/to/compatible-tokamark/src \
   python -m pytest tests/test_regional_evaluation.py -q
 ```
 
-Tests cover orientation, un-eroded limiter boundaries, exterior-cell exclusion,
-finite-value accounting, per-shot weighting, batch invariance, maps, config
+Tests cover orientation, un-eroded limiter boundaries, the inside/outside partition,
+pooled agreement with maps, finite-value accounting, per-shot weighting, batch invariance,
+TokaMark NRMSE agreement in all regions, invalid denominators, empty regions, maps, config
 validation and psi-only/signal-specific evaluation without auxiliary reads. They
 do not replace a checkpoint/data smoke evaluation before a CCC campaign.
