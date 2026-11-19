@@ -142,7 +142,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.0
               lhs_anchored: 1.0
@@ -182,7 +182,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.995 (L2), 0.75 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.0
               lhs_anchored: 1.0
@@ -222,7 +222,7 @@ tasks:
           - type: weak_grad_shafranov
             weight: 0.1
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.0
               lhs_anchored: 1.0
@@ -262,7 +262,7 @@ tasks:
           - type: strong_grad_shafranov  # strong_grad_shafranov, weak_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -302,7 +302,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -342,7 +342,7 @@ tasks:
           - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -390,7 +390,7 @@ tasks:
               - type: weak_grad_shafranov
                 weight: 21e-3 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
                 grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-                loss_metric: mse  # Select from: l2 | mse
+                loss_metric: mse  # Select from: l2 | l2_squared | mse
                 grad_shafranov_weights:
                   non_anchored: 0.5
                   lhs_anchored: 0.25
@@ -450,7 +450,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -490,7 +490,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -530,7 +530,7 @@ tasks:
           - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -570,7 +570,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.0
               lhs_anchored: 1.0
@@ -610,7 +610,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.0
               lhs_anchored: 1.0
@@ -650,7 +650,7 @@ tasks:
           - type: weak_grad_shafranov
             weight: 0.1
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.0
               lhs_anchored: 1.0
@@ -690,7 +690,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -730,7 +730,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -770,7 +770,7 @@ tasks:
           - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -811,7 +811,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.0
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -851,7 +851,7 @@ tasks:
           - type: strong_grad_shafranov
             weight: 0.1  # -> Sweet spot: 0.005 (L2), 0.25 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
@@ -891,7 +891,7 @@ tasks:
           - type: weak_grad_shafranov
             weight: 0.1 # -> Sweet spot: 0.0005 (L2), 0.20 (MSE)
             grad_shafranov_params_file: scripts_mast/assets/grad_shafranov/grad_shafranov_params_mast_coo.npz
-            loss_metric: mse  # Select from: l2 | mse
+            loss_metric: mse  # Select from: l2 | l2_squared | mse
             grad_shafranov_weights:
               non_anchored: 0.5
               lhs_anchored: 0.5
