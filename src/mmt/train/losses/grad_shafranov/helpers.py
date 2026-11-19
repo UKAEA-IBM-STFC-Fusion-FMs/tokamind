@@ -298,8 +298,9 @@ def validate_grad_shafranov_weights(
     """
     Validate the grad_shafranov_weights fragment common to strong and weak GS loss configuration, and return parsed
     values if all the checks pass. If weights are given, any missing key counts as 0. If no weights are given (None
-    or an empty mapping), `DEFAULT_GRAD_SHAFRANOV_WEIGHTS` is used. If `rhs_input_origin="derived_j_tor"`, `rhs_gt`
-    must be 0 (whatever `j_tor_calculation_method` is), since that residual carries no gradient to the model.
+    or an empty mapping), `DEFAULT_GRAD_SHAFRANOV_WEIGHTS` is used. If `rhs_input_origin="derived_j_tor"`,
+    `rhs_anchored` must be 0 (whatever `j_tor_calculation_method` is), since that residual carries no gradient to the
+    model.
     """
 
     required_keys = list(DEFAULT_GRAD_SHAFRANOV_WEIGHTS.keys())
@@ -320,7 +321,7 @@ def validate_grad_shafranov_weights(
         # None or an empty mapping: use the defaults.
         grad_shafranov_weights = DEFAULT_GRAD_SHAFRANOV_WEIGHTS
 
-    # Missing keys count as 0, so a partial mapping (e.g., {lhs_gt: 1.0}) selects only the terms it names.
+    # Missing keys count as 0, so a partial mapping (e.g., {lhs_anchored: 1.0}) selects only the terms it names.
     gs_weights = {**{key: 0.0 for key in required_keys}, **grad_shafranov_weights}
     for gs_weight_key, gs_weight_val in gs_weights.items():
         if isinstance(gs_weight_val, bool) or not isinstance(gs_weight_val, (float, int)):
@@ -335,10 +336,10 @@ def validate_grad_shafranov_weights(
     if abs(sum(gs_weights.values()) - 1) > 1e-5:
         raise ValueError(f"[{path}].grad_shafranov_weights {required_keys} must sum to 1.")
 
-    # With a derived j_tor, the predicted RHS is built from ground-truth psi only, so the `rhs_gt` residual
+    # With a derived j_tor, the predicted RHS is built from ground-truth psi only, so the `rhs_anchored` residual
     # (RHS_pred - anchor) carries no gradient to the model, whatever the calculation method. With "GS_operator", it is
     # also degenerate (≈ 0), since the derived RHS reproduces the ground-truth RHS.
-    if (rhs_input_origin == GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR) and (gs_weights["rhs_gt"] > 0):
+    if (rhs_input_origin == GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR) and (gs_weights["rhs_anchored"] > 0):
         degeneracy_note = (
             " With `rhs_input.calculation_method='GS_operator'`, it is also degenerate (~0), since the derived RHS "
             "reproduces the ground-truth RHS."
@@ -347,7 +348,7 @@ def validate_grad_shafranov_weights(
         )
         raise ValueError(
             f"[{path}] If `rhs_input.origin='derived_j_tor'`, the predicted RHS is built from ground-truth psi only, "
-            f"so the `rhs_gt` residual carries no gradient to the model.{degeneracy_note} Set rhs_gt: 0."
+            f"so the `rhs_anchored` residual carries no gradient to the model.{degeneracy_note} Set rhs_anchored: 0."
         )
 
     return gs_weights
