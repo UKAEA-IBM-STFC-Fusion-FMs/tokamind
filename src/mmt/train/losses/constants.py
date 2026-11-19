@@ -66,11 +66,15 @@ GRAD_SHAFRANOV_J_TOR_CALCULATION_METHODS = frozenset(
 )
 
 DEFAULT_GRAD_SHAFRANOV_WEIGHTS: dict[str, float] = {
-    "no_gt": 0.34,
-    "lhs_gt": 0.33,
-    "rhs_gt": 0.33,
+    "non_anchored": 0.34,
+    "lhs_anchored": 0.33,
+    "rhs_anchored": 0.33,
 }
-GRAD_SHAFRANOV_WEIGHT_MAP = {"no_gt": r"$\omega_{NA}$", "lhs_gt": r"$\omega_{LA}$", "rhs_gt": r"$\omega_{RA}$"}
+GRAD_SHAFRANOV_WEIGHT_MAP = {
+    "non_anchored": r"$\omega_{NA}$",
+    "lhs_anchored": r"$\omega_{LA}$",
+    "rhs_anchored": r"$\omega_{RA}$",
+}
 
 ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE = Literal["l2", "mse"]
 ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS = get_args(ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE)

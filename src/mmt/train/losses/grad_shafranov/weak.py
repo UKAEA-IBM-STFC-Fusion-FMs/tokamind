@@ -53,15 +53,15 @@ Key features
     ψ using `rhs_input.calculation_method`:
     - `GS_operator`: through the same weak operator, `j_tor = max(0, M ⊙ W ψ_true / μ₀)`, with `M` the cleaning
       mask. Inside the mask (and where it is non-negative), the RHS is then ≈ `W ψ_true`, i.e., the anchor. So the
-      `no_gt` residual `W ψ_pred - RHS` ≈ the `lhs_gt` residual `W ψ_pred - W ψ_true` (the two terms duplicate each
-      other), and the `rhs_gt` residual is degenerate (≈ 0). The recommended configuration is
-      {no_gt: 0.0, lhs_gt: 1.0, rhs_gt: 0.0}, giving the single-term loss: the `loss_metric` reduction of
-      `W ψ_pred - W ψ_true`.
+      `non_anchored` residual `W ψ_pred - RHS` ≈ the `lhs_anchored` residual `W ψ_pred - W ψ_true` (the two terms
+      duplicate each other), and the `rhs_anchored` residual is degenerate (≈ 0). The recommended configuration is
+      {non_anchored: 0.0, lhs_anchored: 1.0, rhs_anchored: 0.0}, giving the single-term loss: the `loss_metric`
+      reduction of `W ψ_pred - W ψ_true`.
     - `parametric_approx`: through a smooth power-law current profile (see `j_tor_from_psi_via_parametric_approx`),
       with min-max normalization of the GS sides.
 
-    With either method, the derived RHS is built from ground truth only, so the `rhs_gt` residual carries no gradient
-    to the model and `rhs_gt` must be 0.
+    With either method, the derived RHS is built from ground truth only, so the `rhs_anchored` residual carries no
+    gradient to the model and `rhs_anchored` must be 0.
   - `predicted_profiles` (pprime, ffprime): accepted by validation but not implemented yet (raises
     `NotImplementedError` in `compute`).
 - **Three loss terms**: Weighted combination of (1) LHS-RHS residual (no ground truth), (2) LHS vs ground-truth anchor,
@@ -85,7 +85,7 @@ Expects one item of `train.loss.terms` shaped as follows (all keys but `type`, `
           - type: weak_grad_shafranov
             weight: <float>
             grad_shafranov_params_file: <str or path>  # .npz asset with R/Z grids and limiter masks
-            grad_shafranov_weights: {no_gt: 0.34, lhs_gt: 0.33, rhs_gt: 0.33}  # omitted keys count as 0
+            grad_shafranov_weights: {non_anchored: 0.34, lhs_anchored: 0.33, rhs_anchored: 0.33}  # Omitted keys get 0
             rhs_input:
               origin: predicted_j_tor  # predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # GS_operator | parametric_approx (only used for derived_j_tor)
@@ -96,7 +96,7 @@ Expects one item of `train.loss.terms` shaped as follows (all keys but `type`, `
               type: save_png  # show_plots | save_png | save_pdf | save_svg | null
               probability: <float>  # fraction of training steps to plot, in [0, 1]
 
-With `rhs_input.origin: derived_j_tor`, `rhs_gt` must be 0 (see `WeakFormGradShafranovLoss`).
+With `rhs_input.origin: derived_j_tor`, `rhs_anchored` must be 0 (see `WeakFormGradShafranovLoss`).
 
 Data requirements
 -----------------
@@ -225,15 +225,17 @@ class WeakFormGradShafranovLoss(BaseLoss):
         which this loss does not use).
         Required. Absolute or repo-relative path.
     grad_shafranov_weights : dict[Hashable, float] | None
-        Weights for the three loss terms: {"no_gt": w1, "lhs_gt": w2, "rhs_gt": w3}. `no_gt` scores `W ψ_pred`
-        against `μ₀ · j_tor_pred`, `lhs_gt` scores `W ψ_pred` against the anchor `W ψ_true`, and `rhs_gt` scores
-        `μ₀ · j_tor_pred` against the anchor. Each must lie in [0, 1] and they must sum to 1; any key left out counts
-        as 0.
-        Optional. Default: None (or an empty mapping), which results in {"no_gt": 0.34, "lhs_gt": 0.33, "rhs_gt": 0.33}.
+        Weights for the three loss terms: {"non_anchored": w1, "lhs_anchored": w2, "rhs_anchored": w3}. `non_anchored`
+        scores `W ψ_pred` against `μ₀ · j_tor_pred`, `lhs_anchored` scores `W ψ_pred` against the anchor `W ψ_true`,
+        and `rhs_anchored` scores `μ₀ · j_tor_pred` against the anchor. Each must lie in [0, 1] and they must sum to 1;
+        any key left out counts as 0.
+        Optional. Default: None (or an empty mapping), which results in {"non_anchored": 0.34, "lhs_anchored": 0.33,
+        "rhs_anchored": 0.33}.
     rhs_input_origin : str | None
         RHS computation mode, shared with the strong form: "predicted_j_tor", "derived_j_tor", or "predicted_profiles".
-        `derived_j_tor` derives the current from ground-truth psi (see `j_tor_calculation_method`), so the `rhs_gt`
-        residual carries no gradient to the model and `rhs_gt` must be 0, whatever the calculation method.
+        `derived_j_tor` derives the current from ground-truth psi (see `j_tor_calculation_method`), so the
+        `rhs_anchored` residual carries no gradient to the model and `rhs_anchored` must be 0, whatever the calculation
+        method.
         `predicted_profiles` is accepted by validation but not implemented yet (raises `NotImplementedError` in
         `compute`).
         Optional. Default: "predicted_j_tor".
@@ -242,8 +244,8 @@ class WeakFormGradShafranovLoss(BaseLoss):
         (through the weak operator W) or "parametric_approx". Ignored for other origins.
         Optional. Default: "GS_operator".
     loss_metric : Literal["l2", "mse"]
-        Per-field reduction applied to each GS residual (`no_gt`, `lhs_gt`, `rhs_gt`) over the active cells of the
-        cleaning mask, before the terms are combined with `grad_shafranov_weights`:
+        Per-field reduction applied to each GS residual (`non_anchored`, `lhs_anchored`, `rhs_anchored`) over the
+        active cells of the cleaning mask, before the terms are combined with `grad_shafranov_weights`:
           - "mse": mean of squared residuals over active cells (i.e., sum(r**2) / n_active).
           - "l2": Euclidean norm of the residual over active cells (i.e., sqrt(sum(r**2))). Not normalized by the
             number of cells, so its magnitude grows with grid size and mask coverage.
@@ -283,9 +285,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
         Resolved toroidal-current calculation method (one of `GRAD_SHAFRANOV_J_TOR_CALCULATION_METHODS`), used in
         `derived_j_tor` mode.
     gs_weights : dict[str, float]
-        Weights for the `no_gt`, `lhs_gt`, and `rhs_gt` residual terms: `grad_shafranov_weights` with missing keys
-        set to 0, or `DEFAULT_GRAD_SHAFRANOV_WEIGHTS` if none (or an empty mapping) were given. Each weight lies in
-        [0, 1] and they sum to 1; terms with zero weight are skipped.
+        Weights for the `non_anchored`, `lhs_anchored`, and `rhs_anchored` residual terms: `grad_shafranov_weights`
+        with missing keys set to 0, or `DEFAULT_GRAD_SHAFRANOV_WEIGHTS` if none (or an empty mapping) were given. Each
+        weight lies in [0, 1] and they sum to 1; terms with zero weight are skipped.
     loss_metric : Literal["l2", "mse"]
         Per-field reduction form applied to each residual term (see `loss_metric` parameter).
     signal_stats : dict[str, dict[str, Any]]
@@ -348,8 +350,8 @@ class WeakFormGradShafranovLoss(BaseLoss):
         predictions, build the LHS/RHS and ground-truth anchor, compute the weighted residual terms, and optionally
         emit diagnostic plots. NaN target samples are excluded. Returns the loss tensor and a dict of logged values.
     grad_shafranov_loss(gs_lhs_pred, gs_rhs_pred, gs_anchor, cleaning_mask=None, min_max_normalize_sides=False)
-        Build the `no_gt`, `lhs_gt`, and `rhs_gt` residuals, reduce each one per field with `loss_metric` over the
-        cleaning mask, and return their `gs_weights`-weighted sum, shaped `(F,)`.
+        Build the `non_anchored`, `lhs_anchored`, and `rhs_anchored` residuals, reduce each one per field with
+        `loss_metric` over the cleaning mask, and return their `gs_weights`-weighted sum, shaped `(F,)`.
 
     Grad-Shafranov equation sides:
 
@@ -484,7 +486,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             If `plot_check.probability` is outside [0, 1] (NaN included), or `plot_check.type` is not in
             `ALLOWED_PLOT_CHECK_TYPES`.
             If any weight is outside [0, 1], or the weights (missing keys counted as 0) do not sum to 1.
-            If `rhs_input.origin="derived_j_tor"` and `rhs_gt > 0` (whatever `rhs_input.calculation_method` is).
+            If `rhs_input.origin="derived_j_tor"` and `rhs_anchored > 0` (whatever `rhs_input.calculation_method` is).
 
         """
 
@@ -603,7 +605,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             Absolute or repo-relative path to the `.npz` GS asset file.
             Required. A None value (e.g., from a config that omits the key) raises a KeyError.
         grad_shafranov_weights : dict[Hashable, float] | None
-            Weights for the `no_gt`, `lhs_gt`, and `rhs_gt` residuals.
+            Weights for the `non_anchored`, `lhs_anchored`, and `rhs_anchored` residuals.
             Optional. Default: None (`DEFAULT_GRAD_SHAFRANOV_WEIGHTS`).
         rhs_input_origin : str | None
             RHS source: "predicted_j_tor", "derived_j_tor", or "predicted_profiles".
@@ -636,7 +638,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             If `decoders` is empty.
             If `decoders`, or `output_filter` when given, is missing any key in `required_output_keys`.
             If `rhs_input_origin`, `j_tor_calculation_method`, `grad_shafranov_weights`, `loss_metric`, or
-            `plot_check_cfg` is invalid (see `validate_common_terms`; e.g., `rhs_gt > 0` with `derived_j_tor`).
+            `plot_check_cfg` is invalid (see `validate_common_terms`; e.g., `rhs_anchored > 0` with `derived_j_tor`).
             If the asset grid has fewer than 2 points along R or Z, or a non-positive spacing (see `_load_gs_params`).
         KeyError
             If a required output name (including "equilibrium-psi") is not in `output_name_to_id`.
@@ -1505,9 +1507,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
         residuals are built from the predicted LHS, the predicted RHS, and the ground-truth anchor (which approximates
         the true RHS up to discretization error):
 
-          - `no_gt`:  LHS_pred - RHS_pred   (physics consistency of the prediction, no ground truth needed)
-          - `lhs_gt`: LHS_pred - anchor     (predicted psi checked against the true equilibrium)
-          - `rhs_gt`: RHS_pred - anchor     (predicted current checked against the true equilibrium)
+          - `non_anchored`: LHS_pred - RHS_pred   (physics consistency of the prediction, no ground truth needed)
+          - `lhs_anchored`: LHS_pred - anchor     (predicted psi checked against the true equilibrium)
+          - `rhs_anchored`: RHS_pred - anchor     (predicted current checked against the true equilibrium)
 
         Only residuals with a positive weight in `self.gs_weights` are computed. Each one is reduced per field with
         `masked_reduce` using `self.loss_metric` ("mse": mean of squares over active cells; "l2": Euclidean norm over
@@ -1559,12 +1561,12 @@ class WeakFormGradShafranovLoss(BaseLoss):
         # Calculate the base GS residuals.
 
         flat_gs_residuals = {}
-        if self.gs_weights["no_gt"] > 0:
-            flat_gs_residuals["no_gt"] = (gs_lhs_pred - gs_rhs_pred).flatten(start_dim=1)
-        if self.gs_weights["lhs_gt"] > 0:
-            flat_gs_residuals["lhs_gt"] = (gs_lhs_pred - gs_anchor).flatten(start_dim=1)
-        if self.gs_weights["rhs_gt"] > 0:
-            flat_gs_residuals["rhs_gt"] = (gs_rhs_pred - gs_anchor).flatten(start_dim=1)
+        if self.gs_weights["non_anchored"] > 0:
+            flat_gs_residuals["non_anchored"] = (gs_lhs_pred - gs_rhs_pred).flatten(start_dim=1)
+        if self.gs_weights["lhs_anchored"] > 0:
+            flat_gs_residuals["lhs_anchored"] = (gs_lhs_pred - gs_anchor).flatten(start_dim=1)
+        if self.gs_weights["rhs_anchored"] > 0:
+            flat_gs_residuals["rhs_anchored"] = (gs_rhs_pred - gs_anchor).flatten(start_dim=1)
 
         # ..............................................................................................................
         # Calculate and return the GS loss
@@ -2031,10 +2033,10 @@ class WeakFormGradShafranovLoss(BaseLoss):
         tuple[Tensor, bool]
             `(j_tor_fields, perform_min_max_normalization)`:
             - j_tor_fields: derived j_tor, shaped `(F, n_r, n_z)`. Built from ground-truth psi only, so it carries no
-              gradient to the model, whichever method is used (hence `rhs_gt` must be 0). For "GS_operator", it
-              reproduces the ground-truth RHS (up to the clipping of negative values), so the `rhs_gt` residual is
-              also degenerate (≈ 0); for "parametric_approx", it generally differs from it. Gradients still reach the
-              model through the predicted-psi LHS in the `no_gt` and `lhs_gt` residuals.
+              gradient to the model, whichever method is used (hence `rhs_anchored` must be 0). For "GS_operator", it
+              reproduces the ground-truth RHS (up to the clipping of negative values), so the `rhs_anchored` residual
+              is also degenerate (≈ 0); for "parametric_approx", it generally differs from it. Gradients still reach
+              the model through the predicted-psi LHS in the `non_anchored` and `lhs_anchored` residuals.
             - perform_min_max_normalization: whether the GS sides must be min-max normalized before computing the
               residuals (passed to `grad_shafranov_loss` as `min_max_normalize_sides`). True for "parametric_approx",
               False for "GS_operator".
@@ -2116,8 +2118,8 @@ class WeakFormGradShafranovLoss(BaseLoss):
         -----
         In `compute`, this method receives ground-truth psi only, so the derived current density carries no gradient
         to the model (as with any `j_tor_calculation_method`; see `calculate_j_tor_from_psi`). It acts as a fixed
-        target for the predicted-psi LHS in the `no_gt` residual, and it can also be used for diagnostics (e.g., to
-        check the integrity of ground-truth data).
+        target for the predicted-psi LHS in the `non_anchored` residual, and it can also be used for diagnostics (e.g.,
+        to check the integrity of ground-truth data).
 
         """
 
