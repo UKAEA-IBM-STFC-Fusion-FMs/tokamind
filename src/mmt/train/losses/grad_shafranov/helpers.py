@@ -540,8 +540,10 @@ def masked_reduce(residual: Tensor, mask: Tensor | None, kind: ALLOWED_GRAD_SHAF
     This reproduces the reduction forms used by both GS losses with an explicit mask contract:
 
     - `kind="l2"`: the Euclidean norm over active cells.
+    - `kind="l2_squared"`: the squared Euclidean norm over active cells, i.e. `sum(residual**2)` (equal to the
+      masked "mse" times the number of active cells).
     - `kind="mse"` with `mask is None`: the plain mean of squares over all cells.
-    - `kind="mse"` with a mask: the mean of squares over the active (masked) cells only, i.e.
+    - `kind="mse"` with a mask: the mean of squares over the active (masked) cells only, i.e.,
       `sum(residual**2) / active_cells`, with fields having zero active cells set to NaN so they can be
       dropped by the caller's validity check.
 
@@ -554,7 +556,7 @@ def masked_reduce(residual: Tensor, mask: Tensor | None, kind: ALLOWED_GRAD_SHAF
         Residual fields shaped `(F, n_r, n_z)` or already flattened as `(F, N)`.
     mask : Tensor | None
         Optional boolean/other mask with the same number of cells per field as `residual`.
-    kind : Literal["l2", "mse"]
+    kind : Literal["l2", "l2_squared", "mse"]
         Reduction form.
 
     Returns
@@ -565,7 +567,7 @@ def masked_reduce(residual: Tensor, mask: Tensor | None, kind: ALLOWED_GRAD_SHAF
     Raises
     ------
     ValueError
-        If `kind` is not `"l2"` or `"mse"`.
+        If `kind` is not in `ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS`.
 
     """
 
@@ -573,9 +575,13 @@ def masked_reduce(residual: Tensor, mask: Tensor | None, kind: ALLOWED_GRAD_SHAF
     if mask is None:
         if kind == "l2":
             return torch.linalg.vector_norm(flat, dim=1)
+        if kind == "l2_squared":
+            return flat.square().sum(dim=1)
         if kind == "mse":
             return flat.square().mean(dim=1)
-        raise ValueError(f"[masked_reduce] Invalid `kind`: must be in ['l2', 'mse'], got {kind!r}.")
+        raise ValueError(
+            f"[masked_reduce] Invalid `kind`: must be in {ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS}, got {kind!r}."
+        )
 
     flat_mask = mask.flatten(start_dim=1).to(device=flat.device, dtype=torch.bool)
     if flat_mask.shape != flat.shape:
@@ -586,10 +592,14 @@ def masked_reduce(residual: Tensor, mask: Tensor | None, kind: ALLOWED_GRAD_SHAF
 
     if kind == "l2":
         loss = torch.linalg.vector_norm(active_residual, dim=1)
+    elif kind == "l2_squared":
+        loss = active_residual.square().sum(dim=1)
     elif kind == "mse":
         loss = active_residual.square().sum(dim=1) / active_cells.clamp_min(1)
     else:
-        raise ValueError(f"[masked_reduce] Invalid `kind`: must be in ['l2', 'mse'], got {kind!r}.")
+        raise ValueError(
+            f"[masked_reduce] Invalid `kind`: must be in {ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS}, got {kind!r}."
+        )
 
     return torch.where(active_cells > 0, loss, torch.full_like(loss, torch.nan))
 

@@ -89,7 +89,7 @@ Expects one item of `train.loss.terms` shaped as follows (all keys but `type`, `
             rhs_input:
               origin: predicted_j_tor  # predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # GS_operator | parametric_approx (only used for derived_j_tor)
-            loss_metric: mse  # mse | l2
+            loss_metric: mse  # mse | l2 | l2_squared
             outputs:  # generic loss-term key; must keep every output required by `rhs_input.origin`
               include: [<output names>]  # or `exclude: [<output names>]`
             plot_check:  # visualize GS sides during training (disabled by default)
@@ -129,7 +129,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from pathlib import Path
 from matplotlib.path import Path as MatplotlibPath
-from typing import Hashable, Any, Literal, cast
+from typing import Hashable, Any, cast
 import numpy as np
 import scipy.sparse as sp
 
@@ -164,6 +164,7 @@ from mmt.data.embeddings.torch_decoder import TorchDecoder
 from mmt.data.standardization import destandardize_torch
 from mmt.train.losses.base import BaseLoss, LossComputeContext
 from mmt.train.losses.constants import (
+    ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE,
     GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR,
     GRAD_SHAFRANOV_J_TOR_VIA_PARAMETRIC_APPROX,
     GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR,
@@ -243,13 +244,15 @@ class WeakFormGradShafranovLoss(BaseLoss):
         Method used to derive j_tor from psi in `derived_j_tor` mode, shared with the strong form: "GS_operator"
         (through the weak operator W) or "parametric_approx". Ignored for other origins.
         Optional. Default: "GS_operator".
-    loss_metric : Literal["l2", "mse"]
+    loss_metric : Literal["l2", "l2_squared", "mse"]
         Per-field reduction applied to each GS residual (`non_anchored`, `lhs_anchored`, `rhs_anchored`) over the
         active cells of the cleaning mask, before the terms are combined with `grad_shafranov_weights`:
           - "mse": mean of squared residuals over active cells (i.e., sum(r**2) / n_active).
           - "l2": Euclidean norm of the residual over active cells (i.e., sqrt(sum(r**2))). Not normalized by the
             number of cells, so its magnitude grows with grid size and mask coverage.
-        Fields with no active cells yield NaN under either metric.
+          - "l2_squared": squared Euclidean norm of the residual over active cells (i.e., sum(r**2)), which equals
+            "mse" times n_active. Not normalized by the number of cells, so fields with more active cells weigh more.
+        Fields with no active cells yield NaN under any metric.
         Optional. Default: "mse".
     output_weights : dict[Hashable, float] | None
         Deprecated. Per-output scalar weights (not currently used).
@@ -288,7 +291,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         Weights for the `non_anchored`, `lhs_anchored`, and `rhs_anchored` residual terms: `grad_shafranov_weights`
         with missing keys set to 0, or `DEFAULT_GRAD_SHAFRANOV_WEIGHTS` if none (or an empty mapping) were given. Each
         weight lies in [0, 1] and they sum to 1; terms with zero weight are skipped.
-    loss_metric : Literal["l2", "mse"]
+    loss_metric : Literal["l2", "l2_squared", "mse"]
         Per-field reduction form applied to each residual term (see `loss_metric` parameter).
     signal_stats : dict[str, dict[str, Any]]
         Per-signal standardization statistics (`mean`, `std`), keyed by signal name.
@@ -482,7 +485,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             If `rhs_input.origin` is not in `GRAD_SHAFRANOV_RHS_INPUT_ORIGINS_FULL`.
             If `rhs_input.origin="derived_j_tor"` and `rhs_input.calculation_method` is not in
             `GRAD_SHAFRANOV_J_TOR_CALCULATION_METHODS`.
-            If `loss_metric` is not "l2" or "mse".
+            If `loss_metric` is not in `ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS`.
             If `plot_check.probability` is outside [0, 1] (NaN included), or `plot_check.type` is not in
             `ALLOWED_PLOT_CHECK_TYPES`.
             If any weight is outside [0, 1], or the weights (missing keys counted as 0) do not sum to 1.
@@ -565,7 +568,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         grad_shafranov_weights: dict[Hashable, float] | None = None,
         rhs_input_origin: str | None = None,
         j_tor_calculation_method: str | None = None,
-        loss_metric: Literal["l2", "mse"] = "mse",
+        loss_metric: ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE = "mse",
         output_weights: dict[Hashable, float] | None = None,
         output_filter: set[Hashable] | None = None,
         plot_check_cfg: Mapping[str, Any] | None = None,
@@ -613,7 +616,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         j_tor_calculation_method : str | None
             Method used to derive j_tor in `derived_j_tor` mode: "GS_operator" or "parametric_approx".
             Optional. Default: None ("GS_operator").
-        loss_metric : Literal["l2", "mse"]
+        loss_metric : Literal["l2", "l2_squared", "mse"]
             Per-field reduction applied to each residual.
             Optional. Default: "mse".
         output_weights : dict[Hashable, float] | None
@@ -1513,9 +1516,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
 
         Only residuals with a positive weight in `self.gs_weights` are computed. Each one is reduced per field with
         `masked_reduce` using `self.loss_metric` ("mse": mean of squares over active cells; "l2": Euclidean norm over
-        active cells), and the results are combined as a weighted sum (the weights are validated to lie in [0, 1] and
-        sum to 1). Optionally, each side is min-max normalized per field beforehand, over all cells of the field
-        (including cells outside `cleaning_mask`); constant fields map to 0.
+        active cells; "l2_squared": sum of squares over active cells), and the results are combined as a weighted sum
+        (the weights are validated to lie in [0, 1] and sum to 1). Optionally, each side is min-max normalized per field
+        beforehand, over all cells of the field (including cells outside `cleaning_mask`); constant fields map to 0.
 
         Parameters
         ----------
