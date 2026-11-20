@@ -409,7 +409,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
     requires_destandardize: bool = False
 
     # ------------------------------------------------------------------------------------------------------------------
-    @classmethod  # TODO: This must be abstract in a future generic parent class.
+    @classmethod
     def validate_specific_terms(cls, term_def: Mapping[str, Any], path: str) -> None:
         """
         Validate the config fields specific to the Grad-Shafranov loss in this module.
@@ -436,9 +436,10 @@ class WeakFormGradShafranovLoss(BaseLoss):
 
         Notes
         -----
-        `validate_common_terms` rejects any key outside the generic loss keys and the shared Grad-Shafranov keys, and
-        it runs first. A new loss-specific key must therefore also be added to its `allowed_specific_keys`, or
-        it will be rejected before this method is reached.
+        - `validate_common_terms` rejects any key outside the generic loss keys and the shared Grad-Shafranov keys, and
+          it runs first. A new loss-specific key must therefore also be added to its `allowed_specific_keys`, or
+          it will be rejected before this method is reached.
+        - This must be an abstract method in a future generic parent class.
 
         """
 
@@ -958,7 +959,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             self._runtime_device = _device
 
     # ------------------------------------------------------------------------------------------------------------------
-    def lhs_calculation(  # TODO: This must be abstract in a future generic parent class.
+    def lhs_calculation(
         self,
         psi_fields_: Tensor | None,
         cleaning_mask_: Tensor | None = None,
@@ -1013,6 +1014,10 @@ class WeakFormGradShafranovLoss(BaseLoss):
         ValueError
             If `psi_fields_` is None.
 
+        Notes
+        -----
+        - This must be an abstract method in a future generic parent class.
+
         """
 
         if psi_fields_ is None:
@@ -1036,7 +1041,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
 
     # ------------------------------------------------------------------------------------------------------------------
     @staticmethod
-    def rhs_calculation(  # TODO: This must be abstract in a future generic parent class.
+    def rhs_calculation(
         j_tor_fields_: Tensor,
         cleaning_mask_: Tensor | None = None,
     ) -> Tensor:
@@ -1067,6 +1072,10 @@ class WeakFormGradShafranovLoss(BaseLoss):
             Float32 `μ₀ · j_tor` fields with the shape of `j_tor_fields_` (`(F, n_r, n_z)` in `compute`), masked if
             `cleaning_mask_` is given. Differentiable with respect to `j_tor_fields_` (gradients are returned in its
             original dtype).
+
+        Notes
+        -----
+        - This must be an abstract method in a future generic parent class.
 
         """
 
@@ -1172,7 +1181,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
                     "'equilibrium-dpressure_dpsi' and 'equilibrium-f_df_dpsi'."
                 )
 
-            # TODO(FIX):
+            # TODO:
             #  The predicted-profiles RHS path is not functional yet — see `j_tor_from_pprime_ffprime_psi` for the
             #  problem description and proposed fix. Disabled here so it cannot be silently used.
             raise NotImplementedError(
@@ -1547,10 +1556,11 @@ class WeakFormGradShafranovLoss(BaseLoss):
             If `cleaning_mask` does not have the same number of cells per field as the inputs, or if
             `self.loss_metric` is not in `ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS`.
 
-        """
+        Notes
+        -----
+        - Evaluate potential use of the Rc term (equal to (R_max - R_min)/2) from PINN-based approaches.
 
-        # TODO:
-        #  - Check if the Rc term (equal to (R_max - R_min)/2) from the PINNs approach should be added.
+        """
 
         # ..............................................................................................................
         # Normalize sides, if required.
@@ -1751,7 +1761,6 @@ class WeakFormGradShafranovLoss(BaseLoss):
         # Second option: From time-varying j_tor ground truth data, if available.
         elif j_tor_true_destdized is not None:
             j_tor_limiter_mask = j_tor_true_destdized > 1e-6  # (F, n_r, n_z)
-            # TODO: Adopt approach to soften the mask for better backpropagation performance.
 
         # . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . .
         # Last resort: From static reference data (i.e., from self.base_j_tor_limiter_mask_rz).
@@ -2089,7 +2098,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
             raise NotImplementedError
 
     # ------------------------------------------------------------------------------------------------------------------
-    def j_tor_from_psi_via_operator(  # TODO: This must be abstract in a future generic parent class.
+    def j_tor_from_psi_via_operator(
         self,
         psi_fields: Tensor,
         j_tor_limiter_mask: Tensor,
@@ -2119,10 +2128,11 @@ class WeakFormGradShafranovLoss(BaseLoss):
 
         Notes
         -----
-        In `compute`, this method receives ground-truth psi only, so the derived current density carries no gradient
-        to the model (as with any `j_tor_calculation_method`; see `calculate_j_tor_from_psi`). It acts as a fixed
-        target for the predicted-psi LHS in the `non_anchored` residual, and it can also be used for diagnostics (e.g.,
-        to check the integrity of ground-truth data).
+        - In `compute`, this method receives ground-truth psi only, so the derived current density carries no gradient
+          to the model (as with any `j_tor_calculation_method`; see `calculate_j_tor_from_psi`). It acts as a fixed
+          target for the predicted-psi LHS in the `non_anchored` residual, and it can also be used for diagnostics
+          (e.g., to check the integrity of ground-truth data).
+        - This must be an abstract method in a future generic parent class.
 
         """
 
@@ -2391,7 +2401,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         differentiable, and does not satisfy the vectorized `(F, n_r, n_z)` field contract.
         """
 
-        # TODO(FIX): This predicted-profiles -> j_tor path is NOT functional and is currently disabled in compute().
+        # TODO: This predicted-profiles -> j_tor path is NOT functional and is currently disabled in compute().
         #
         # PROBLEM:
         #   - It mixes NumPy ops (np.interp, np.clip, np.nanmin) with torch tensors that require grad: this breaks
