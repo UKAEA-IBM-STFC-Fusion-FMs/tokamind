@@ -1,6 +1,6 @@
 # Checkpointing and Warmstart
 
-Related documentation: [Project README](../README.md) | [Configuration Guide](config_guide.md) | [Model Flexibility](model_flexibility.md) | [Evaluation](evaluation.md)
+Related documentation: [Project README](../README.md) | [Configuration Guide](config_guide.md) | [Model Architecture](model_architecture.md) | [Evaluation](evaluation.md)
 
 This document covers checkpoint layout, strict resume, and warmstart loading.
 
@@ -113,4 +113,6 @@ Effects:
 - matching parameters are reused
 - unmatched parameters remain initialized
 
-See [Model Flexibility](model_flexibility.md) for details.
+Keep canonical signal names stable if you want to reuse their weights. A longer
+input history must still fit the model's positional embeddings. For rank-mode
+DCT3D, keep the source run's embedding indices alongside its checkpoints.

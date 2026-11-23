@@ -21,7 +21,7 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 | TokaMind paper | [arXiv:2602.15084](https://arxiv.org/abs/2602.15084) |
 | TokaMark paper | [arXiv:2602.10132](https://arxiv.org/abs/2602.10132) |
 | TokaMark repository | [UKAEA-IBM-STFC-Fusion-FMs/tokamark](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/tokamark) |
-| VAE-FAIRMAST repository | _coming soon_ |
+| VAE-FAIRMAST repository | [UKAEA-IBM-STFC-Fusion-FMs/VAE_fairmast](https://github.com/UKAEA-IBM-STFC-Fusion-FMs/VAE_fairmast) |
 | Pretrained model (HuggingFace) | [UKAEA-IBM-STFC/tokamind-base-v2](https://huggingface.co/UKAEA-IBM-STFC/tokamind-base-v2) |
 
 ## 📚 Documentation
@@ -34,7 +34,6 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 - [Datasets](docs/datasets.md)
 - [Transforms](docs/transforms.md)
 - [Model Architecture](docs/model_architecture.md)
-- [Model Flexibility](docs/model_flexibility.md)
 
 ## 🗂️ Repository Layout
 ```text
@@ -50,11 +49,10 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 │   ├── run_pretrain.py
 │   ├── run_finetune.py
 │   ├── run_eval.py
-│   ├── mast_utils/
-│   │   ├── config/                    # config loading modules
-│   │   └── ...
-    │   └── configs/
-│       └── mmt/                        # self-contained model profile: phases/ tasks/ embeddings/
+│   ├── mast_utils/                    # MAST configuration, data and evaluation helpers
+│   └── configs/
+│       ├── mmt/                       # phases, task overrides and embedding profiles
+│       └── local_tasks_def/           # additional task definitions, including GS
 ├── docs/                              # project documentation
 └── runs/                              # output runs and checkpoints
 ```
@@ -63,7 +61,7 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 
 **Recommended Python: 3.11+**
 
-For full MAST experiments, clone all repositories side-by-side in the same parent folder (steps 1–3 below). For standalone use, only step 1 is required.
+For MAST experiments, install TokaMind and TokaMark (steps 1–2). Step 3 is only needed for VAE embeddings. For standalone use, only step 1 is required.
 
 Create and activate a conda environment first:
 
@@ -89,7 +87,7 @@ pip install -e .
 
 > **Standalone use:** The core `src/mmt/` package works without any MAST/TokaMark integration. To verify your installation or explore the model independently, run the self-contained toy example:
 > ```bash
-> python src/mmt/examples/toy_train.py
+> python src/mmt/examples/toy_train.py --config src/mmt/examples/configs/toy.yaml
 > ```
 > No benchmark data or external repositories required.
 
@@ -205,8 +203,15 @@ python scripts_mast/run_finetune.py \
 ```bash
 python scripts_mast/run_eval.py \
   --task task_2-1 \
-  --model_source ft-task_2-1-ws-tokamind_base-exp1
+  --model_source ft-task_2-1-ws-tokamind_base-mmt-exp1
 ```
+
+### Grad–Shafranov tasks
+Use the same commands with a GS task such as `task_1-4-strong`.
+The `-data`, `-strong`, and `-weak` variants select data-only training or add
+the strong- or weak-form GS loss. See [Training](docs/training.md#loss-configuration)
+for the objectives and [Evaluation](docs/evaluation.md#gs-diagnostics)
+for the physics diagnostics and regional prediction errors.
 
 ## ⚙️ Configuration Model
 Configuration is convention-based and merged by phase.

@@ -32,8 +32,8 @@ The shared entry helpers use:
 - filters invalid windows by configured thresholds
 - supports temporal subsampling via `window_stride_sec`
 - `accept_nan_inputs_actuators` (default `True`): controls NaN tolerance for input/actuator signals; `True` passes partial-NaN signals through for downstream imputation, `False` masks them as invalid
-- `accept_nan_outputs` (default `True`): same control for output signals; set to `False` in finetune/pretrain to drop windows with partial-NaN outputs from the training loss
-- typical training config: `accept_nan_inputs_actuators=True`, `accept_nan_outputs=False` — keeps NaN-input windows so the model trains on the imputed-input distribution seen at eval, while excluding corrupted output targets from the loss
+- `accept_nan_outputs` (default `True`): same control for output signals. With `False`, partially missing outputs do not count toward `min_valid_outputs`.
+- The supplied MAST training phase configs allow partial NaNs for both inputs and outputs. A task can override either setting.
 
 ### 3) TrimChunksTransform
 - keeps at most `max_chunks`

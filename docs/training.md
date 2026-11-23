@@ -100,7 +100,7 @@ train:
       summary-ip: 1.2
 ```
 
-### Term types
+### Data-loss terms
 
 | Type | Space | NaN handling | Cost |
 |---|---|---|---|
@@ -108,9 +108,16 @@ train:
 | `native_sparse_mse` | Native (standardized) | Explicit: model predictions are decoded back to native space, then NaN positions from `output_native` are masked out before the mean. Only observed positions contribute. | Requires decoder forward pass per batch. |
 
 
+For GS tasks, `strong_grad_shafranov` compares the two sides of the equation
+on the grid; `weak_grad_shafranov` compares them after integration against
+test functions. The task entries in
+`scripts_mast/configs/mmt/tasks/finetune_tasks.yaml` specify the data and GS
+weights, which outputs are used, and which terms use a reference field.
+
 When multiple terms are present, the total loss is a normalized weighted sum: `total = Σ(w_i · L_i) / Σ(w_i)`.
 
-`output_weights` scales individual outputs within each term independently (not applied across terms).
+`output_weights` scales outputs within the data-loss terms. It does not set the
+GS weight; use the GS term's `weight` for that.
 
 Each term can optionally select outputs by name:
 
@@ -167,17 +174,21 @@ This controls whether `FinalizeWindowTransform` retains native output arrays in 
 Two independent knobs control how NaN values are handled during training:
 
 ### 1. Window selection: `accept_nan_outputs`
-`preprocess.valid_windows.accept_nan_outputs` (default `true`) determines whether windows with partial-NaN output signals are kept or dropped before reaching the loss.
+`preprocess.valid_windows.accept_nan_outputs` (default `true`) controls whether
+a partially missing output signal is valid. With `false`, that signal is
+masked; the window can still be used if enough other outputs are valid.
 
-Typical training setting:
+To exclude partially missing output targets, override the phase default:
 ```yaml
 preprocess:
   valid_windows:
     accept_nan_inputs_actuators: true   # keep partial-NaN inputs; zeros imputed before encoding
-    accept_nan_outputs: false           # drop windows with any NaN in output targets
+    accept_nan_outputs: false           # mask each partially missing output
 ```
 
-Setting `accept_nan_outputs: false` prevents corrupted or partially missing targets from entering the loss. Setting it to `true` (as in eval) allows those windows through — correct when the loss can handle NaN positions explicitly (e.g. `native_sparse_mse`) or when the evaluator uses `nanmean`.
+The supplied training and evaluation phase configs use `true`: partially
+missing outputs can pass selection. The loss or metric determines how their
+missing values are handled.
 
 ### 2. Encoding: `preprocess.embed_chunks.nan_imputation`
 `preprocess.embed_chunks.nan_imputation` (default `"zero"`) controls how NaN/inf values are handled before DCT3D rank tuning and before runtime `codec.encode()`.
@@ -198,7 +209,7 @@ In all runtime embedding cases, the original `window["output"][name]["values"]` 
 
 | `accept_nan_outputs` | `nan_imputation` | Loss term | Outcome |
 |---|---|---|---|
-| `false` | any | `embed_mse` | Windows with NaN outputs are dropped; remaining windows are fully observed. Cleanest training signal. |
+| `false` | any | `embed_mse` | Partially missing outputs are masked; only valid outputs contribute. |
 | `true` | `"zero"` | `embed_mse` | NaN positions become zeros in the target embedding. In standardized data this is mean imputation. Loss trains through imputed positions with no masking. Can corrupt DCT3D for signals with structured boundary NaN. |
 | `true` | `"interpolate"` | `embed_mse` | NaN positions filled by interpolation before encoding. Avoids step discontinuities — better DCT3D representation for structured boundary NaN. |
 | `true` | any | `native_sparse_mse` | NaN positions imputed before encoding, but `output_native` preserves original NaNs. Loss masks imputed positions out at the native level. |

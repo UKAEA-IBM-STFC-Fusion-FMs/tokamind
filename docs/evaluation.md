@@ -34,6 +34,9 @@ runs/<model_id>/eval/
   traces/
 ```
 
+Use a fresh `--tag <tag>` to keep a new evaluation separate from earlier
+results. Its directory and config snapshot are named `eval_<tag>/eval_<tag>.yaml`.
+
 ## What Is Evaluated
 - best checkpoint from source run (fallback to latest if needed)
 - same model spec as source run
@@ -72,6 +75,32 @@ Outputs:
   - `shots_metrics.csv` (if `per_shot: true`)
   - `windows_metrics.csv` (if `per_window: true`)
 - optional per-timestamp csv in `metrics/<task>/timestamps_metrics.csv` (if `per_timestamp: true`)
+
+## GS diagnostics
+
+The GS task options live under `eval.compute_metrics` in
+`scripts_mast/configs/mmt/tasks/eval_tasks.yaml`. They run on an existing
+checkpoint; no retraining is needed. Outputs are in `metrics/<task>/`.
+
+- `gs_metrics` reports ψ-operator error and, when current is predicted, GS
+  self-consistency and RHS current error. `smoothness` compares predicted and
+  reference roughness. Their default (unsuffixed) columns use the **one-cell-eroded limiter**.
+- `regional_mse` reports pointwise prediction error separately for ψ and, when
+  predicted, toroidal current. Its regions are the full grid, the **non-eroded**
+  limiter (boundary cells included), and the rest of the grid. The limiter is
+  fixed device geometry, not the plasma boundary.
+- `psi_error_map` and `jtor_error_map` write full-grid NPZ maps of per-cell
+  MSE, RMSE, MAE, signed bias and valid counts for the predicted field.
+- `gs_topology` is independent and requires local equilibrium reference data.
+
+The regional CSVs (`regional_mse_shots.csv`, `regional_mse_task.csv`) distinguish
+`mse` (average window MSE within each shot, then average shots equally) from
+`mse_pooled` (sum of squared errors divided by the total valid-cell count).
+TokaMark NRMSE divides each shot's root MSE by the signal standard deviation,
+then averages shots equally. It uses the same TokaMark default (random-split)
+standard deviation for all three regions, regardless of evaluation split.
+Inside and outside NRMSE do **not** add to full-grid NRMSE.
+See the generated `regional_mse_protocol.json` for units, masks and coverage.
 
 ## What Is a Trace
 A trace is a per-shot diagnostic record that aligns:
@@ -112,7 +141,9 @@ For this to work correctly, the pipeline preserves NaN values in `window["output
 
 Eval inherits `preprocess.embed_chunks` from the source training run so the token representation, including the NaN/inf imputation policy, matches training. Eval-specific sparse-window policy remains controlled by `preprocess.valid_windows`.
 
-During training, `accept_nan_outputs=False` in `SelectValidWindowsTransform` ensures windows with partial-NaN outputs are dropped before reaching the loss. During eval, `accept_nan_outputs=True` allows those windows through so the evaluator can score on the non-NaN positions using `nanmean`.
+The supplied MAST training and eval phase configs allow partially missing outputs
+(`preprocess.valid_windows.accept_nan_outputs: true`). Missing reference values
+are not treated as zero error.
 
 ## Loss Choice and NaN Behavior
 

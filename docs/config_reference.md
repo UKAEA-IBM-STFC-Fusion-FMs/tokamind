@@ -440,7 +440,7 @@ for those signals.
 
 ### `train.loss.output_weights`
 - Type: mapping
-- Description: per-output loss weighting (applied inside each term independently).
+- Description: per-output weighting for the data-loss terms; not used by the GS losses.
 
 ### `train.optimizer.use_adamw`
 - Type: `bool`
@@ -520,6 +520,9 @@ Top-level location: `eval:`
 - Type: `bool`
 - Description: writes per-timestamp diagnostic CSV.
 
+For optional GS diagnostics, spatial error maps and regional MSE/NRMSE,
+see [Evaluation](evaluation.md#gs-diagnostics).
+
 ### `eval.traces.enable`
 - Type: `bool`
 - Description: enables trace export.
@@ -543,8 +546,8 @@ Top-level location: `eval:`
 
 ### Eval
 - `paths.model_run_dir = runs/<model_id>` (or external path)
-- `paths.run_dir = <model_run_dir>/eval`
-- Config snapshot: `<model_run_dir>/eval/eval.yaml`
+- `paths.run_dir = <model_run_dir>/<eval_id>`, where `<eval_id>` is `eval` or `eval_<tag>`.
+- Config snapshot: `<model_run_dir>/<eval_id>/<eval_id>.yaml`
 
 ## Task Files
 Task runtime overrides live under `scripts_mast/configs/<model_profile>/tasks/<phase>_tasks.yaml`:
@@ -556,8 +559,8 @@ Embedding profiles live under `scripts_mast/configs/<model_profile>/embeddings/<
 
 ## Quick Validation Checklist
 1. Phase is one of `pretrain`, `finetune`, `eval`.
-2. Selected embedding profile has `_default.yaml`, or is a DCT3D-derived profile that can fall back to `dct3d/_default.yaml`.
-3. Finetune/eval include `--model_source` on CLI.
+2. The embedding profile has a default or task-specific file, unless using the virtual `identity` profile.
+3. Warmstart and eval specify `--model_source`; scratch does not need it.
 4. Eval keeps `data.keep_output_native: true`.
 5. VAE profiles do not expect DCT3D tune/source policy.
 6. `data.split` is set in pretrain/finetune configs; do not set it in eval configs.

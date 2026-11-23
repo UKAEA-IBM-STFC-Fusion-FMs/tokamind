@@ -1,6 +1,6 @@
 # Model Architecture
 
-Related documentation: [Project README](../README.md) | [Transforms](transforms.md) | [Model Flexibility](model_flexibility.md)
+Related documentation: [Project README](../README.md) | [Transforms](transforms.md) | [Checkpointing and Warmstart](checkpointing_and_warmstart.md)
 
 This document describes the `mmt` model in `src/mmt/models`.
 

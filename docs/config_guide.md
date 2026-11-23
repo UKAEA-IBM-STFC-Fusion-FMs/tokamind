@@ -80,10 +80,10 @@ For `eval`, the model architecture is inherited from the source run selected by 
 1. `<model_profile>/embeddings/<profile>/_default.yaml` if present, otherwise `<model_profile>/embeddings/dct3d/_default.yaml`
 2. `<model_profile>/phases/eval.yaml`
 3. `<model_profile>/tasks/eval_tasks.yaml["tasks"][<task>]`
-4. source-run inheritance
-5. `local_overrides.yaml` if present
+4. `local_overrides.yaml` if present
 
-Then the loader applies CLI overrides and phase-specific source/model rules.
+Then the loader applies CLI overrides and phase-specific inheritance. In eval,
+the source run supplies the model and embeddings; local overrides do not replace them.
 
 ## Embedding Profiles
 Use `--emb_profile <profile>` to select `<model_profile>/embeddings/<profile>/`.
@@ -166,13 +166,13 @@ When a source model is used, the loader resolves and stores:
 - Config snapshot: `runs/<run_id>/<run_id>.yaml`
 
 `run_id` generation:
-- Pretrain: `--run-id`, else `<task>_<tag>`, else `<task>`
-- Finetune warmstart: `ft-<task>-ws-<model_id>[-<tag>]`
-- Finetune scratch: `ft-<task>-scratch[-<tag>]`
+- Pretrain: `<run-id>[_<tag>]` if supplied, otherwise `<task>[_<tag>]`
+- Finetune warmstart: `ft-<task>-ws-<model_id>-<model_profile>[-<tag>]`
+- Finetune scratch: `ft-<task>-scratch-<model_profile>[-<tag>]`
 
 ### Eval
-- Output root: `runs/<model_id>/eval/`
-- Config snapshot: `runs/<model_id>/eval/eval.yaml`
+- Evaluation ID: `eval` by default, or `eval_<tag>` with `--tag`.
+- Config snapshot: `<source_run_dir>/<eval_id>/<eval_id>.yaml`.
 
 ## Practical Checklist
 1. Define phase defaults in `<model_profile>/phases/*.yaml`.
@@ -187,6 +187,6 @@ When a source model is used, the loader resolves and stores:
 ## Snapshot Rule
 Each run writes the fully merged config snapshot used at runtime.
 - training: `runs/<run_id>/<run_id>.yaml`
-- eval: `runs/<model_id>/eval/eval.yaml`
+- eval: `<source_run_dir>/<eval_id>/<eval_id>.yaml`
 
 Use these snapshots for exact reproducibility and debugging.
