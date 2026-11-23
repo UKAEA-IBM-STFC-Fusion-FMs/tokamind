@@ -15,7 +15,7 @@ available.  A model predicting only ``psi`` still receives the ``dstar_psi``
 diagnostics; self-consistency and RHS-current diagnostics require predicted
 ``j_tor`` and are therefore left as NaN.
 
-Inputs are already-destandardized native fields.  No standardisation work is
+Inputs are already-destandardized native fields. No standardization work is
 performed here.
 """
 
@@ -132,39 +132,41 @@ class GSMetrics:
         nan = np.full(n_fields, np.nan)
 
         try:
-            jtor = self._to_optional_fields(jtor_native, "jtor_pred", psi.shape)
+            jtor = self._to_optional_fields(values=jtor_native, name="jtor_pred", shape=psi.shape)
         except ValueError as exc:
-            self._warn_invalid_input("jtor_pred", "predicted j_tor", exc)
+            self._warn_invalid_input(key="jtor_pred", description="predicted j_tor", exc=exc)
             jtor = None
 
         psi_gt = None
         if psi_gt_native is not None:
             try:
-                psi_gt = self._to_optional_fields(psi_gt_native, "psi_gt", psi.shape)
+                psi_gt = self._to_optional_fields(values=psi_gt_native, name="psi_gt", shape=psi.shape)
             except ValueError as exc:
-                self._warn_invalid_input("psi_gt", "ground-truth psi", exc)
+                self._warn_invalid_input(key="psi_gt", description="ground-truth psi", exc=exc)
 
         jtor_gt = None
         if jtor_gt_native is not None:
             try:
-                jtor_gt = self._to_optional_fields(jtor_gt_native, "jtor_gt", psi.shape)
+                jtor_gt = self._to_optional_fields(values=jtor_gt_native, name="jtor_gt", shape=psi.shape)
             except ValueError as exc:
-                self._warn_invalid_input("jtor_gt", "ground-truth j_tor", exc)
+                self._warn_invalid_input(key="jtor_gt", description="ground-truth j_tor", exc=exc)
 
-        lhs_fd = -self._grid.delta_star_fd(psi)
-        lhs_A = -self._grid.delta_star_A(psi) if self._grid.operator is not None else None
-        lhs_fd_gt = -self._grid.delta_star_fd(psi_gt) if psi_gt is not None else None
-        lhs_A_gt = -self._grid.delta_star_A(psi_gt) if psi_gt is not None and self._grid.operator is not None else None
+        lhs_fd = -self._grid.delta_star_fd(psi=psi)
+        lhs_A = -self._grid.delta_star_A(psi=psi) if (self._grid.operator is not None) else None
+        lhs_fd_gt = -self._grid.delta_star_fd(psi=psi_gt) if (psi_gt is not None) else None
+        lhs_A_gt = (
+            -self._grid.delta_star_A(psi=psi_gt) if (psi_gt is not None) and (self._grid.operator is not None) else None
+        )
 
-        rhs = self._grid.mu0 * self._grid.r[None, :, :] * jtor if jtor is not None else None
-        rhs_gt = self._grid.mu0 * self._grid.r[None, :, :] * jtor_gt if jtor_gt is not None else None
+        rhs = self._grid.mu0 * self._grid.r[None, :, :] * jtor if (jtor is not None) else None
+        rhs_gt = self._grid.mu0 * self._grid.r[None, :, :] * jtor_gt if (jtor_gt is not None) else None
 
         fields: dict[str, np.ndarray | None] = {
-            "self_consistency_fd": lhs_fd - rhs if rhs is not None else None,
-            "dstar_psi_fd_error": lhs_fd - lhs_fd_gt if lhs_fd_gt is not None else None,
-            "rhs_jtor_error": rhs - rhs_gt if rhs is not None and rhs_gt is not None else None,
-            "self_consistency_A": lhs_A - rhs if lhs_A is not None and rhs is not None else None,
-            "dstar_psi_A_error": lhs_A - lhs_A_gt if lhs_A is not None and lhs_A_gt is not None else None,
+            "self_consistency_fd": (lhs_fd - rhs) if (rhs is not None) else None,
+            "dstar_psi_fd_error": (lhs_fd - lhs_fd_gt) if (lhs_fd_gt is not None) else None,
+            "rhs_jtor_error": (rhs - rhs_gt) if (rhs is not None and rhs_gt is not None) else None,
+            "self_consistency_A": (lhs_A - rhs) if (lhs_A is not None and rhs is not None) else None,
+            "dstar_psi_A_error": (lhs_A - lhs_A_gt) if (lhs_A is not None and lhs_A_gt is not None) else None,
         }
 
         plasma_mask = self._grid.plasma_region_from_fields(jtor_gt) if jtor_gt is not None else None
@@ -177,8 +179,8 @@ class GSMetrics:
             for metric in _METRICS:
                 field = fields[metric]
                 values[_column(metric, region)] = (
-                    self._grid.mean_abs_over_region(field, region=regions[region.key])
-                    if field is not None and region.key in regions
+                    self._grid.mean_abs_over_region(fields=field, region=regions[region.key])
+                    if (field is not None) and (region.key in regions)
                     else nan.copy()
                 )
         return _MetricsBatch(values=values, plasma_mask=plasma_mask)
