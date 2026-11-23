@@ -69,6 +69,10 @@ Key features
   (`W ψ_true`), which approximates the ground-truth RHS up to discretization error. Each term is reduced per field with
   `loss_metric` over the cleaning mask, the terms are combined with `grad_shafranov_weights`, and the loss is the mean
   over valid fields.
+- **Residual scaling** (`residual_scaling`, shared with the strong form): optionally, all three sides are multiplied by
+  the same per-field factor `R_c² · R_0 / ψ_0` before the residuals are built. `R_c = (R_max - R_min) / 2` and
+  `R_0 = (R_max + R_min) / 2` come from the grid, and `ψ_0` from ground-truth psi. This makes the residuals
+  dimensionless while keeping LHS = RHS for an exact equilibrium. Disabled by default.
 - **Gradient flow**: Gradients flow through decoders into model predictions; decoder parameters (frozen VAE weights,
   fixed indices) remain fixed.
 

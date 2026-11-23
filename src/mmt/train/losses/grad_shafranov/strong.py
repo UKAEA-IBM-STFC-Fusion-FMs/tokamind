@@ -6,6 +6,33 @@ sparse differential operator applied to predicted psi must match the RHS compute
 is computed in native (destandardized) signal space, with masking of missing (non-finite) ground-truth cells for sparse
 measurements.
 
+REMARK: This loss evaluates the discrete strong-form residual of given fields rather than solving the Grad-Shafranov
+equation for ψ.
+
+Continuous strong formulation
+-----------------------------
+The Grad-Shafranov equation for the poloidal flux ψ(R, Z) reads
+
+    -Δ*ψ = μ₀ R j_tor,    with    Δ*ψ = R ∂/∂R ((1/R) ∂ψ/∂R) + ∂²ψ/∂Z²,
+
+where j_tor is the toroidal current density. The sign convention puts `-Δ*ψ` on the LHS, so both sides are positive
+for a positive plasma current. The equation holds pointwise, so it requires second derivatives of ψ (unlike the weak
+form, which only needs first derivatives).
+
+Discrete strong residual
+------------------------
+The operator `Δ*` is discretized as a precomputed sparse matrix `GS_op`, loaded from `grad_shafranov_params_file` and
+applied to row-major-flattened ψ fields (see `lhs_calculation`). For the MAST asset in `scripts_mast/assets`, `GS_op`
+uses fourth-order finite differences: a 9-point cross stencil (two cells on each side along R and along Z) in the
+interior, off-centred stencils next to the grid border, and identity rows on the border itself, which therefore do not
+approximate the operator. The residual is evaluated only over the masked plasma region, which lies away from the
+border. The discrete residual is
+
+    r = -GS_op ψ - μ₀ R j_tor,
+
+with `R` the major radius of each cell (`R_matrix`). Unlike the weak form, the R factor multiplies j_tor explicitly,
+and the residual has units of ψ / length².
+
 Key features
 ------------
 - **Decoding & destandardization**: Predictions arrive in embedding space and are decoded to native space via
@@ -14,13 +41,32 @@ Key features
   cells are excluded from the cleaning mask, so only valid measurements contribute. A field is skipped if it fails
   `output_mask`, has a non-finite predicted-RHS j_tor, or has no cell inside the cleaning mask. Non-finite values in
   predictions are not masked.
-- **Flexible RHS sources**: Three modes for computing j_tor on the RHS:
-  - Derived from ground-truth psi (via sparse operator or parametric approximation)
-  - Predicted j_tor directly from model outputs
-  - Derived from predicted profiles (pprime, ffprime) — currently unimplemented
+- **Flexible RHS sources** (`rhs_input.origin`, shared with the weak form):
+  - `predicted_j_tor` (general case): both ψ and j_tor are model outputs. All three residual terms are available.
+  - `derived_j_tor` (reduced case): ψ is the only required model output. The current is derived from ground-truth
+    ψ using `rhs_input.calculation_method`:
+    - `GS_operator`: through the same sparse operator, `j_tor = max(0, M ⊙ (-GS_op ψ_true) / (μ₀ R))`, with `M` the
+      cleaning mask. Inside the mask (and where it is non-negative), the RHS is then ≈ `-GS_op ψ_true`, i.e., the
+      anchor. So the `non_anchored` residual `-GS_op ψ_pred - RHS` ≈ the `lhs_anchored` residual
+      `-GS_op ψ_pred + GS_op ψ_true` (the two terms duplicate each other), and the `rhs_anchored` residual is
+      degenerate (≈ 0). The recommended configuration is {non_anchored: 0.0, lhs_anchored: 1.0, rhs_anchored: 0.0},
+      giving the single-term loss: the `loss_metric` reduction of `GS_op (ψ_true - ψ_pred)`.
+    - `parametric_approx`: through a smooth power-law current profile (see `j_tor_from_psi_via_parametric_approx`),
+      with min-max normalization of the GS sides.
+
+    With either method, the derived RHS is built from ground truth only, so the `rhs_anchored` residual carries no
+    gradient to the model and `rhs_anchored` must be 0.
+  - `predicted_profiles` (pprime, ffprime): accepted by validation but not implemented yet (raises
+    `NotImplementedError` in `compute`).
 - **Three loss terms**: Weighted combination of (1) LHS-RHS residual (no ground truth), (2) LHS vs ground-truth anchor,
   (3) RHS vs ground-truth anchor, allowing flexible supervision strategies. The anchor is the LHS of ground-truth psi
-  (`-Δ*ψ_true`), which approximates the ground-truth RHS up to discretization error.
+  (`-GS_op ψ_true`), which approximates the ground-truth RHS up to discretization error. Each term is reduced per field
+  with `loss_metric` over the cleaning mask, the terms are combined with `grad_shafranov_weights`, and the loss is the
+  mean over valid fields.
+- **Residual scaling** (`residual_scaling`, shared with the weak form): optionally, all three sides are multiplied by
+  the same per-field factor `R_c² / ψ_0` before the residuals are built. `R_c = (R_max - R_min) / 2` comes from the
+  grid, and `ψ_0` from ground-truth psi. This makes the residuals dimensionless while keeping LHS = RHS for an exact
+  equilibrium. Disabled by default.
 - **Gradient flow**: Gradients flow through decoders into model predictions; decoder parameters (frozen VAE weights,
   fixed indices) remain fixed.
 
@@ -69,6 +115,8 @@ Implementation notes
   the GS operator handles all F fields of a batch in a single sparse matmul.
 - Predicted/ground-truth psi and j_tor are transposed from model native shape (B, H, W, T) to
   match GS operator orientation.
+- Both GS sides are computed in float32, so the residuals are formed in a single dtype. The sparse operator is kept in
+  float32 because CUDA sparse matrix multiplication does not support bfloat16.
 - The plasma region (j_tor limiter mask) is taken from the first available source: time-varying LCFS masks (not
   provided yet), then ground-truth j_tor (cells where j_tor > 1e-6, available when j_tor is a required output), and
   finally the static limiter mask from the asset file.
