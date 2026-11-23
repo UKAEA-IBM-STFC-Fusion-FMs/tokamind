@@ -90,13 +90,18 @@ Expects one item of `train.loss.terms` shaped as follows (all keys but `type`, `
               origin: predicted_j_tor  # predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # GS_operator | parametric_approx (only used for derived_j_tor)
             loss_metric: mse  # mse | l2 | l2_squared
+            residual_scaling:  # dimensionless scaling of the GS sides (disabled by default)
+              type: none  # none | physics
+              length_scale: grid  # grid (R_c = (R_max - R_min) / 2)
+              psi_scale: axis_boundary  # axis_boundary | range (only used for physics)
             outputs:  # generic loss-term key; must keep every output required by `rhs_input.origin`
               include: [<output names>]  # or `exclude: [<output names>]`
             plot_check:  # visualize GS sides during training (disabled by default)
               type: save_png  # show_plots | save_png | save_pdf | save_svg | null
               probability: <float>  # fraction of training steps to plot, in [0, 1]
 
-With `rhs_input.origin: derived_j_tor`, `rhs_anchored` must be 0 (see `WeakFormGradShafranovLoss`).
+With `rhs_input.origin: derived_j_tor`, `rhs_anchored` must be 0 (see `WeakFormGradShafranovLoss`). With
+`rhs_input.calculation_method: parametric_approx` under `derived_j_tor`, `residual_scaling.type` must be `none`.
 
 Data requirements
 -----------------
@@ -135,12 +140,13 @@ import scipy.sparse as sp
 
 import torch
 from torch import Tensor
-import torch.nn.functional as torch_functional
 
 from .helpers import (
     mu0,
     native_to_gs_fields,
     masked_reduce,
+    psi_axis_and_boundary,
+    psi_scale_per_field,
     output_masks_to_field_mask,
     parse_gs_grid_assets,
     prepare_target_field,
@@ -158,6 +164,7 @@ from .helpers import (
     validate_j_tor_calculation_method,
     validate_required_keys,
     validate_base_j_tor_limiter_mask,
+    validate_residual_scaling_cfg,
 )
 from .plots import make_gs_plots
 from mmt.data.embeddings.torch_decoder import TorchDecoder
@@ -165,6 +172,7 @@ from mmt.data.standardization import destandardize_torch
 from mmt.train.losses.base import BaseLoss, LossComputeContext
 from mmt.train.losses.constants import (
     ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE,
+    GRAD_SHAFRANOV_PHYSICS_RESIDUAL_SCALING,
     GRAD_SHAFRANOV_J_TOR_VIA_GS_OPERATOR,
     GRAD_SHAFRANOV_J_TOR_VIA_PARAMETRIC_APPROX,
     GRAD_SHAFRANOV_RHS_FROM_PREDICTED_J_TOR,
@@ -254,6 +262,21 @@ class WeakFormGradShafranovLoss(BaseLoss):
             "mse" times n_active. Not normalized by the number of cells, so fields with more active cells weigh more.
         Fields with no active cells yield NaN under any metric.
         Optional. Default: "mse".
+    residual_scaling : Mapping[str, Any] | None
+        Dimensionless scaling of the GS sides, as used in PINN-based approaches, applied before the residuals are
+        built: {"type": "none" | "physics", "length_scale": "grid", "psi_scale": "axis_boundary" | "range"}.
+          - "none": no scaling (the sides stay in physical units).
+          - "physics": the LHS, RHS, and anchor are all multiplied by the same per-field factor `R_c² · R_0 / ψ_0`,
+            which makes the weak-form residual (`-Δ*ψ / R` per unit cell area, units of ψ / length³) dimensionless
+            while keeping LHS = RHS for an exact equilibrium. `R_c = (R_max - R_min) / 2` and
+            `R_0 = (R_max + R_min) / 2` are the half-width and midpoint of the R extent of the grid
+            (`length_scale: grid`). `ψ_0` is computed per field from ground-truth psi over the cleaning mask, and
+            detached: `ψ_axis - ψ_boundary` (`psi_scale: axis_boundary`, which assumes the magnetic axis is a maximum
+            of psi), or `max(ψ) - min(ψ)` (`psi_scale: range`). Fields without a positive `ψ_0` are dropped.
+        "physics" cannot be combined with `rhs_input.origin="derived_j_tor"` and
+        `rhs_input.calculation_method="parametric_approx"`, which already min-max normalizes the sides.
+        Optional. Default: None (or an empty mapping), which results in {"type": "none", "length_scale": "grid",
+        "psi_scale": "axis_boundary"}.
     output_weights : dict[Hashable, float] | None
         Deprecated. Per-output scalar weights (not currently used).
         Optional. Default: None.
@@ -293,6 +316,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
         weight lies in [0, 1] and they sum to 1; terms with zero weight are skipped.
     loss_metric : Literal["l2", "l2_squared", "mse"]
         Per-field reduction form applied to each residual term (see `loss_metric` parameter).
+    residual_scaling : dict[str, str]
+        Resolved residual-scaling settings (`type`, `length_scale`, `psi_scale`), with omitted keys set to their
+        defaults (see `residual_scaling` parameter).
     signal_stats : dict[str, dict[str, Any]]
         Per-signal standardization statistics (`mean`, `std`), keyed by signal name.
     required_output_names : list[str]
@@ -308,6 +334,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
         Number of grid points along R and Z, loaded from the asset file in `__init__` (at least 2 each).
     dr, dz : float
         Uniform grid spacings along R and Z, derived from the R/Z grids in `__init__` (always positive).
+    R_c, R_0 : float
+        Half-width `(R_max - R_min) / 2` and midpoint `(R_max + R_min) / 2` of the R extent of the grid, derived in
+        `__init__`. Length scales for the physics residual scaling (see `residual_scaling`).
     R_matrix, Z_matrix : torch.Tensor
         Major-radius and vertical-elevation grid coordinates shaped `(n_r, n_z)`. R varies along axis 0 and Z along
         axis 1.
@@ -352,7 +381,8 @@ class WeakFormGradShafranovLoss(BaseLoss):
         Compute the masked weak-form GS loss in native, destandardized space: decode and destandardize the
         predictions, build the LHS/RHS and ground-truth anchor, compute the weighted residual terms, and optionally
         emit diagnostic plots. NaN target samples are excluded. Returns the loss tensor and a dict of logged values.
-    grad_shafranov_loss(gs_lhs_pred, gs_rhs_pred, gs_anchor, cleaning_mask=None, min_max_normalize_sides=False)
+    grad_shafranov_loss(gs_lhs_pred, gs_rhs_pred, gs_anchor, cleaning_mask=None, min_max_normalize_sides=False,
+                        residual_scale=None)
         Build the `non_anchored`, `lhs_anchored`, and `rhs_anchored` residuals, reduce each one per field with
         `loss_metric` over the cleaning mask, and return their `gs_weights`-weighted sum, shaped `(F,)`.
 
@@ -454,11 +484,12 @@ class WeakFormGradShafranovLoss(BaseLoss):
         Validate the config fields shared by all Grad-Shafranov losses.
 
         Checks that `term_def` contains only generic loss keys plus the Grad-Shafranov keys
-        (`grad_shafranov_params_file`, `grad_shafranov_weights`, `rhs_input`, `loss_metric`, `plot_check`), then
-        validates each one with the shared helpers in `helpers.py`. Omitted (or null) optional keys take their
-        defaults: `rhs_input.origin="predicted_j_tor"`, `rhs_input.calculation_method="GS_operator"`,
-        `loss_metric="mse"`, plotting disabled, and `DEFAULT_GRAD_SHAFRANOV_WEIGHTS` (also used for an empty
-        `grad_shafranov_weights`). If `grad_shafranov_weights` names any weight, the ones it omits count as 0.
+        (`grad_shafranov_params_file`, `grad_shafranov_weights`, `rhs_input`, `loss_metric`, `residual_scaling`,
+        `plot_check`), then validates each one with the shared helpers in `helpers.py`. Omitted (or null) optional
+        keys take their defaults: `rhs_input.origin="predicted_j_tor"`, `rhs_input.calculation_method="GS_operator"`,
+        `loss_metric="mse"`, no residual scaling, plotting disabled, and `DEFAULT_GRAD_SHAFRANOV_WEIGHTS` (also used
+        for an empty `grad_shafranov_weights`). If `grad_shafranov_weights` names any weight, the ones it omits count
+        as 0.
         Validation stops at the first invalid field.
 
         Parameters
@@ -477,16 +508,19 @@ class WeakFormGradShafranovLoss(BaseLoss):
         KeyError
             If `term_def` contains unknown keys.
             If `grad_shafranov_params_file` is missing.
-            If `rhs_input` or `grad_shafranov_weights` contains unknown keys.
+            If `rhs_input`, `grad_shafranov_weights`, or `residual_scaling` contains unknown keys.
         TypeError
             If `grad_shafranov_params_file` is not a str or Path.
-            If `rhs_input`, `plot_check`, or `grad_shafranov_weights` is provided but is not a mapping.
+            If `rhs_input`, `plot_check`, `grad_shafranov_weights`, or `residual_scaling` is provided but is not a
+            mapping.
             If a weight or `plot_check.probability` is not an int or float (bools and null are rejected).
         ValueError
             If `rhs_input.origin` is not in `GRAD_SHAFRANOV_RHS_INPUT_ORIGINS_FULL`.
             If `rhs_input.origin="derived_j_tor"` and `rhs_input.calculation_method` is not in
             `GRAD_SHAFRANOV_J_TOR_CALCULATION_METHODS`.
             If `loss_metric` is not in `ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS`.
+            If a `residual_scaling` value is not allowed (see `validate_residual_scaling_cfg`), or
+            `residual_scaling.type="physics"` is combined with `derived_j_tor` and `parametric_approx`.
             If `plot_check.probability` is outside [0, 1] (NaN included), or `plot_check.type` is not in
             `ALLOWED_PLOT_CHECK_TYPES`.
             If any weight is outside [0, 1], or the weights (missing keys counted as 0) do not sum to 1.
@@ -502,6 +536,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
                 "grad_shafranov_weights",
                 "rhs_input",
                 "loss_metric",
+                "residual_scaling",
                 "plot_check",
             },
         )
@@ -516,6 +551,13 @@ class WeakFormGradShafranovLoss(BaseLoss):
 
         _ = validate_grad_shafranov_weights(
             grad_shafranov_weights=term_def.get("grad_shafranov_weights"),
+            rhs_input_origin=rhs_input_origin,
+            j_tor_calculation_method=j_tor_calculation_method,
+            path=path,
+        )
+
+        _ = validate_residual_scaling_cfg(
+            residual_scaling=term_def.get("residual_scaling"),
             rhs_input_origin=rhs_input_origin,
             j_tor_calculation_method=j_tor_calculation_method,
             path=path,
@@ -570,6 +612,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         rhs_input_origin: str | None = None,
         j_tor_calculation_method: str | None = None,
         loss_metric: ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE = "mse",
+        residual_scaling: Mapping[str, Any] | None = None,
         output_weights: dict[Hashable, float] | None = None,
         output_filter: set[Hashable] | None = None,
         plot_check_cfg: Mapping[str, Any] | None = None,
@@ -580,9 +623,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
         Construction runs in four steps, and stops at the first failure:
 
           1. Configuration: checks that `decoders` is not empty, then resolves and validates `rhs_input_origin`,
-             `j_tor_calculation_method`, `grad_shafranov_weights` (into `gs_weights`), `loss_metric`, and
-             `plot_check_cfg` with the same helpers used by `validate_common_terms`. This way, direct instantiation
-             is checked as strictly as a config passed through the config validator.
+             `j_tor_calculation_method`, `grad_shafranov_weights` (into `gs_weights`), `loss_metric`,
+             `residual_scaling`, and `plot_check_cfg` with the same helpers used by `validate_common_terms`. This
+             way, direct instantiation is checked as strictly as a config passed through the config validator.
           2. Plotting: builds the figure title and subtitle from the resolved configuration.
           3. Outputs: resolves the psi signal ID (always required) and, if present in `output_name_to_id`, the j_tor,
              p', and FF' IDs. Then it builds `required_output_names` and `required_output_keys` for
@@ -620,6 +663,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
         loss_metric : Literal["l2", "l2_squared", "mse"]
             Per-field reduction applied to each residual.
             Optional. Default: "mse".
+        residual_scaling : Mapping[str, Any] | None
+            Dimensionless scaling of the GS sides: {"type", "length_scale", "psi_scale"}.
+            Optional. Default: None (no scaling).
         output_weights : dict[Hashable, float] | None
             Deprecated. Stored but not used.
             Optional. Default: None.
@@ -641,8 +687,9 @@ class WeakFormGradShafranovLoss(BaseLoss):
         ValueError
             If `decoders` is empty.
             If `decoders`, or `output_filter` when given, is missing any key in `required_output_keys`.
-            If `rhs_input_origin`, `j_tor_calculation_method`, `grad_shafranov_weights`, `loss_metric`, or
-            `plot_check_cfg` is invalid (see `validate_common_terms`; e.g., `rhs_anchored > 0` with `derived_j_tor`).
+            If `rhs_input_origin`, `j_tor_calculation_method`, `grad_shafranov_weights`, `loss_metric`,
+            `residual_scaling`, or `plot_check_cfg` is invalid (see `validate_common_terms`; e.g., `rhs_anchored > 0`
+            with `derived_j_tor`).
             If the asset grid has fewer than 2 points along R or Z, or a non-positive spacing (see `_load_gs_params`).
         KeyError
             If a required output name (including "equilibrium-psi") is not in `output_name_to_id`.
@@ -683,6 +730,13 @@ class WeakFormGradShafranovLoss(BaseLoss):
         self.signal_stats = {str(name): dict(stats) for name, stats in signal_stats.items()}
 
         self.loss_metric = validate_loss_metric_cfg(loss_metric=loss_metric, path=self.__class__.__name__)
+
+        self.residual_scaling = validate_residual_scaling_cfg(
+            residual_scaling=residual_scaling,
+            rhs_input_origin=self.rhs_input_origin,
+            j_tor_calculation_method=self.j_tor_calculation_method,
+            path=self.__class__.__name__,
+        )
 
         self._plot_check_cfg = plot_check_cfg or {}
         (
@@ -744,6 +798,8 @@ class WeakFormGradShafranovLoss(BaseLoss):
 
         self.n_r = None
         self.dr = None
+        self.R_c: float = 0.0
+        self.R_0: float = 0.0
         self.R_matrix = None
 
         self.n_z = None
@@ -908,6 +964,10 @@ class WeakFormGradShafranovLoss(BaseLoss):
         self.dz = float((z_axis.max() - z_axis.min()) / (self.n_z - 1))
         if self.dr <= 0 or self.dz <= 0:
             raise ValueError(f"Bad GS grid spacing dr={self.dr}, dz={self.dz}; check R/Z axis orientation.")
+
+        # Length scales for the physics residual scaling: half-width and midpoint of the R extent of the grid.
+        self.R_c = float((r_axis.max() - r_axis.min()) / 2)
+        self.R_0 = float((r_axis.max() + r_axis.min()) / 2)
 
         self.rz_points_for_lcfs_calculation = torch.column_stack([self.R_matrix.ravel(), self.Z_matrix.ravel()])
         self.zero_lcfs_rz_mask = torch.zeros_like(input=self.R_matrix, dtype=torch.bool)
@@ -1371,6 +1431,15 @@ class WeakFormGradShafranovLoss(BaseLoss):
             ref=ref,
         )
 
+        # Per-field factor for the physics residual scaling (None when disabled). Fields whose ground-truth psi gives
+        # no usable flux scale are dropped.
+        residual_scale, residual_scale_valid_fields = self._residual_scale(
+            psi_destdized_true=psi_fields_destdized["true"],
+            cleaning_mask=sides_cleaning_mask,
+        )
+        if residual_scale_valid_fields is not None:
+            valid_fields &= residual_scale_valid_fields.flatten().to(valid_fields.device)
+
         # Check for valid fields, and return if no valid fields found
         if not bool(valid_fields.any()):
             # If no valid fields, we can return from here with a physics residual loss of the form ref.sum() * 0.0,
@@ -1426,10 +1495,14 @@ class WeakFormGradShafranovLoss(BaseLoss):
                 gs_anchor=gs_anchor,
                 cleaning_mask=sides_cleaning_mask,
                 min_max_normalize_sides=perform_min_max_normalization,
+                residual_scale=residual_scale,
             )  # (F,)
 
             loss = per_field_losses[valid_fields].mean()  # Scalar
             logs["weak_gs_loss"] = float(loss.detach().cpu())
+            if residual_scale is not None:
+                mean_residual_scale = residual_scale.flatten()[valid_fields].mean()
+                logs["weak_gs_residual_scale"] = float(mean_residual_scale.detach().cpu())
 
         # ..............................................................................................................
         # 8 - Return loss and logs
@@ -1511,6 +1584,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         gs_anchor: Tensor,
         cleaning_mask: Tensor | None = None,
         min_max_normalize_sides: bool = False,
+        residual_scale: Tensor | None = None,
     ) -> Tensor:
         """
         Compute the weighted Grad-Shafranov residual loss for each field.
@@ -1543,6 +1617,11 @@ class WeakFormGradShafranovLoss(BaseLoss):
         min_max_normalize_sides : bool
             If True, min-max normalize the LHS, RHS, and anchor per field before computing the residuals.
             Optional. Default: False.
+        residual_scale : Tensor | None
+            Per-field factor shaped `(F, 1, 1)` that multiplies the LHS, RHS, and anchor before the residuals are
+            built (physics scaling; see `_residual_scale`). The same factor is used for all three, so LHS = RHS still
+            holds for an exact equilibrium.
+            Optional. Default: None (no scaling).
 
         Returns
         -------
@@ -1555,12 +1634,19 @@ class WeakFormGradShafranovLoss(BaseLoss):
         ValueError
             If `cleaning_mask` does not have the same number of cells per field as the inputs, or if
             `self.loss_metric` is not in `ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS`.
+            If `residual_scale` is given together with `min_max_normalize_sides=True`.
 
         Notes
         -----
-        - Evaluate potential use of the Rc term (equal to (R_max - R_min)/2) from PINN-based approaches.
+        - `min_max_normalize_sides` and `residual_scale` are mutually exclusive. Config validation already rejects
+          physics scaling for the only path that min-max normalizes (`derived_j_tor` with `parametric_approx`).
 
         """
+
+        if min_max_normalize_sides and (residual_scale is not None):
+            raise ValueError(
+                f"[{self.__class__.__name__}] `residual_scale` cannot be combined with `min_max_normalize_sides=True`."
+            )
 
         # ..............................................................................................................
         # Normalize sides, if required.
@@ -1569,6 +1655,14 @@ class WeakFormGradShafranovLoss(BaseLoss):
             gs_lhs_pred = self._min_max_normalize_per_field(x=gs_lhs_pred)
             gs_rhs_pred = self._min_max_normalize_per_field(x=gs_rhs_pred)
             gs_anchor = self._min_max_normalize_per_field(x=gs_anchor)
+
+        # ..............................................................................................................
+        # Scale sides, if required (physics scaling). The same factor multiplies all three tensors.
+
+        if residual_scale is not None:
+            gs_lhs_pred = gs_lhs_pred * residual_scale
+            gs_rhs_pred = gs_rhs_pred * residual_scale
+            gs_anchor = gs_anchor * residual_scale
 
         # ..............................................................................................................
         # Calculate the base GS residuals.
@@ -1594,6 +1688,51 @@ class WeakFormGradShafranovLoss(BaseLoss):
             total_gs_loss += self.gs_weights[loss_idx] * loss_val
 
         return total_gs_loss
+
+    # ------------------------------------------------------------------------------------------------------------------
+    def _residual_scale(
+        self,
+        psi_destdized_true: Tensor,
+        cleaning_mask: Tensor,
+    ) -> tuple[Tensor | None, Tensor | None]:
+        """
+        Build the per-field factor that makes the GS sides dimensionless when `residual_scaling.type="physics"`.
+
+        The weak-form residual approximates `-Δ*ψ / R - μ₀ j_tor` per unit cell area, with units of
+        ψ / length³, so the factor is `R_c² · R_0 / ψ_0`, with `R_c = (R_max - R_min) / 2` and
+        `R_0 = (R_max + R_min) / 2` from the grid and `ψ_0` computed per field from ground-truth psi
+        over `cleaning_mask` (see `psi_scale_per_field` and the `residual_scaling` parameter).
+
+        Parameters
+        ----------
+        psi_destdized_true : Tensor
+            Ground-truth psi fields in native units, shaped `(F, n_r, n_z)`.
+        cleaning_mask : Tensor
+            Boolean mask of the cells used for the residuals, shaped `(F, n_r, n_z)` or broadcastable to it.
+
+        Returns
+        -------
+        tuple[Tensor | None, Tensor | None]
+            `(residual_scale, valid_fields)`, each shaped `(F, 1, 1)`, or `(None, None)` when the scaling is disabled.
+            `residual_scale` is detached, and finite on every field; the caller must drop fields where `valid_fields`
+            is False.
+
+        Notes
+        -----
+        - This must be an abstract method in a future generic parent class.
+
+        """
+
+        if self.residual_scaling["type"] != GRAD_SHAFRANOV_PHYSICS_RESIDUAL_SCALING:
+            return None, None
+
+        psi_scale, valid_fields = psi_scale_per_field(
+            psi_fields=psi_destdized_true,
+            mask=cleaning_mask,
+            kind=self.residual_scaling["psi_scale"],
+        )
+
+        return (self.R_c**2) * self.R_0 / psi_scale, valid_fields
 
     # ------------------------------------------------------------------------------------------------------------------
     def _get_gs_safe_destdized_fields(
@@ -2265,17 +2404,8 @@ class WeakFormGradShafranovLoss(BaseLoss):
 
         """
 
-        lowest = torch.finfo(psi_fields.dtype).min
-
-        # Magnetic axis: maximum of psi inside the mask.
-        psi_axis = torch.where(mask, psi_fields, lowest).amax(dim=(-2, -1), keepdim=True)  # (F, 1, 1)
-
-        # Mask edge: cells inside the mask with at least one neighbor outside it (the grid border counts as outside).
-        outside = torch_functional.pad((~mask).float().unsqueeze(1), pad=(1, 1, 1, 1), value=1.0)  # (F, 1, ., .)
-        edge = mask & torch_functional.max_pool2d(outside, kernel_size=3, stride=1).squeeze(1).bool()  # (F, n_r, n_z)
-
-        # Boundary of a limited plasma: the highest psi contour that touches the mask edge.
-        psi_boundary = torch.where(edge, psi_fields, lowest).amax(dim=(-2, -1), keepdim=True)  # (F, 1, 1)
+        # Magnetic axis (maximum of psi inside the mask) and boundary (highest psi on the mask edge).
+        psi_axis, psi_boundary = psi_axis_and_boundary(psi_fields=psi_fields, mask=mask)  # (F, 1, 1) each
 
         span = psi_axis - psi_boundary
         valid_fields = span > 0  # (F, 1, 1)

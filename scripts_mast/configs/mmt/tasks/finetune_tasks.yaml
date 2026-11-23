@@ -150,6 +150,10 @@ tasks:
             rhs_input:
               origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -190,6 +194,10 @@ tasks:
             rhs_input:
               origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -230,6 +238,10 @@ tasks:
             rhs_input:
               origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -270,6 +282,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -310,6 +326,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -350,6 +370,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -398,6 +422,10 @@ tasks:
                 rhs_input:
                   origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
                   calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+                residual_scaling:
+                  type: none                # none (default) | physics
+                  length_scale: grid        # grid (only option for now)
+                  psi_scale: axis_boundary  # axis_boundary (default) | range
                 plot_check:
                   type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
                   probability: 0.0005
@@ -458,6 +486,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -498,6 +530,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -538,6 +574,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -578,6 +618,10 @@ tasks:
             rhs_input:
               origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -618,6 +662,10 @@ tasks:
             rhs_input:
               origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -658,6 +706,10 @@ tasks:
             rhs_input:
               origin: derived_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -698,6 +750,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -738,6 +794,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -778,6 +838,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -819,6 +883,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -859,6 +927,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005
@@ -899,6 +971,10 @@ tasks:
             rhs_input:
               origin: predicted_j_tor  # Select from: predicted_j_tor | derived_j_tor | predicted_profiles
               calculation_method: GS_operator  # Select from: GS_operator | parametric_approx
+            residual_scaling:
+              type: none                # none (default) | physics
+              length_scale: grid        # grid (only option for now)
+              psi_scale: axis_boundary  # axis_boundary (default) | range
             plot_check:
               type: save_png  # Select from: show_plots | save_png | save_pdf | save_svg | <empty>
               probability: 0.0005

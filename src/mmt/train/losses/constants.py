@@ -80,6 +80,21 @@ ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE = Literal["l2", "l2_squared", "mse"]
 ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS = get_args(ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE)
 DEFAULT_GRAD_SHAFRANOV_LOSS_METRIC: ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE = "mse"
 
+# Residual scaling (dimensionless GS sides, as in PINN-based approaches)
+GRAD_SHAFRANOV_NO_RESIDUAL_SCALING = "none"
+GRAD_SHAFRANOV_PHYSICS_RESIDUAL_SCALING = "physics"
+ALLOWED_GRAD_SHAFRANOV_RESIDUAL_SCALING_TYPES_TYPE = Literal["none", "physics"]
+ALLOWED_GRAD_SHAFRANOV_RESIDUAL_SCALING_TYPES = get_args(ALLOWED_GRAD_SHAFRANOV_RESIDUAL_SCALING_TYPES_TYPE)
+ALLOWED_GRAD_SHAFRANOV_LENGTH_SCALES_TYPE = Literal["grid"]
+ALLOWED_GRAD_SHAFRANOV_LENGTH_SCALES = get_args(ALLOWED_GRAD_SHAFRANOV_LENGTH_SCALES_TYPE)
+ALLOWED_GRAD_SHAFRANOV_PSI_SCALES_TYPE = Literal["axis_boundary", "range"]
+ALLOWED_GRAD_SHAFRANOV_PSI_SCALES = get_args(ALLOWED_GRAD_SHAFRANOV_PSI_SCALES_TYPE)
+DEFAULT_GRAD_SHAFRANOV_RESIDUAL_SCALING: dict[str, str] = {
+    "type": GRAD_SHAFRANOV_NO_RESIDUAL_SCALING,
+    "length_scale": "grid",
+    "psi_scale": "axis_boundary",
+}
+
 # ======================================================================================================================
 # Plotting options
 # ======================================================================================================================

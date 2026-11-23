@@ -25,6 +25,7 @@ from typing import Any, Hashable
 import numpy as np
 import torch
 from torch import Tensor
+import torch.nn.functional as torch_functional
 
 from mmt.data.standardization import destandardize_torch
 from mmt.train.losses.base import LossComputeContext
@@ -44,6 +45,13 @@ from mmt.train.losses.constants import (
     DEFAULT_GRAD_SHAFRANOV_WEIGHTS,
     GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR,
     ALLOWED_GRAD_SHAFRANOV_LOSS_METRICS_TYPE,
+    ALLOWED_GRAD_SHAFRANOV_RESIDUAL_SCALING_TYPES,
+    ALLOWED_GRAD_SHAFRANOV_LENGTH_SCALES,
+    ALLOWED_GRAD_SHAFRANOV_PSI_SCALES,
+    ALLOWED_GRAD_SHAFRANOV_PSI_SCALES_TYPE,
+    DEFAULT_GRAD_SHAFRANOV_RESIDUAL_SCALING,
+    GRAD_SHAFRANOV_PHYSICS_RESIDUAL_SCALING,
+    GRAD_SHAFRANOV_J_TOR_VIA_PARAMETRIC_APPROX,
 )
 
 # Vacuum permeability (single source of truth for both GS losses).
@@ -371,6 +379,61 @@ def validate_loss_metric_cfg(loss_metric: Any, path: str) -> ALLOWED_GRAD_SHAFRA
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+def validate_residual_scaling_cfg(
+    residual_scaling: Any,
+    rhs_input_origin: str,
+    j_tor_calculation_method: str,
+    path: str,
+) -> dict[str, str]:
+    """
+    Validate the residual-scaling fragment common to strong and weak GS loss configuration, and return the resolved
+    settings (`type`, `length_scale`, `psi_scale`) if all the checks pass. A missing value (None or an empty mapping)
+    gives `DEFAULT_GRAD_SHAFRANOV_RESIDUAL_SCALING` (no scaling), and omitted (or null) keys of a given mapping take
+    their defaults. `type="physics"` cannot be combined with `rhs_input_origin="derived_j_tor"` and
+    `j_tor_calculation_method="parametric_approx"`, since that path already min-max normalizes the GS sides (which
+    makes them dimensionless).
+    """
+
+    if residual_scaling is None:
+        residual_scaling = {}
+
+    if not isinstance(residual_scaling, Mapping):
+        raise TypeError(f"{path}.residual_scaling must be a mapping when provided.")
+
+    allowed_keys = sorted(DEFAULT_GRAD_SHAFRANOV_RESIDUAL_SCALING)
+    unknown_keys = sorted(str(key) for key in residual_scaling if str(key) not in allowed_keys)
+    if unknown_keys:
+        raise KeyError(f"Unknown {path}.residual_scaling keys: {unknown_keys}. Allowed keys are {allowed_keys}.")
+
+    resolved = {
+        **DEFAULT_GRAD_SHAFRANOV_RESIDUAL_SCALING,
+        **{str(key): val for key, val in residual_scaling.items() if val is not None},
+    }
+
+    allowed_values = {
+        "type": ALLOWED_GRAD_SHAFRANOV_RESIDUAL_SCALING_TYPES,
+        "length_scale": ALLOWED_GRAD_SHAFRANOV_LENGTH_SCALES,
+        "psi_scale": ALLOWED_GRAD_SHAFRANOV_PSI_SCALES,
+    }
+    for key, allowed in allowed_values.items():
+        if resolved[key] not in allowed:
+            raise ValueError(f"{path}.residual_scaling.{key} must be in {allowed}, got {resolved[key]!r}.")
+
+    if (
+        (resolved["type"] == GRAD_SHAFRANOV_PHYSICS_RESIDUAL_SCALING)
+        and (rhs_input_origin == GRAD_SHAFRANOV_RHS_FROM_DERIVED_J_TOR)
+        and (j_tor_calculation_method == GRAD_SHAFRANOV_J_TOR_VIA_PARAMETRIC_APPROX)
+    ):
+        raise ValueError(
+            f"[{path}] `residual_scaling.type='physics'` cannot be combined with `rhs_input.origin='derived_j_tor'` "
+            "and `rhs_input.calculation_method='parametric_approx'`: that path already min-max normalizes the GS "
+            "sides, which makes them dimensionless. Set residual_scaling.type: none."
+        )
+
+    return resolved
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 def validate_plot_check_cfg(plot_check: Any, path: str) -> Any:
     """
     Validate the plot-check fragment common to strong and weak GS loss configuration, and return parsed values
@@ -602,6 +665,108 @@ def masked_reduce(residual: Tensor, mask: Tensor | None, kind: ALLOWED_GRAD_SHAF
         )
 
     return torch.where(active_cells > 0, loss, torch.full_like(loss, torch.nan))
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def psi_axis_and_boundary(psi_fields: Tensor, mask: Tensor) -> tuple[Tensor, Tensor]:
+    """
+    Find the magnetic-axis and boundary flux of each field within a region mask.
+
+    `ψ_axis` is the maximum of psi inside `mask` (the magnetic axis). `ψ_boundary` is the highest psi on the mask edge
+    (mask cells with at least one neighbor outside the mask; the grid border counts as outside), i.e., the flux surface
+    of a limited plasma that touches the limiter.
+
+    Parameters
+    ----------
+    psi_fields : Tensor
+        Poloidal-flux fields shaped `(F, n_r, n_z)`. The magnetic axis is assumed to be a maximum of psi.
+    mask : Tensor
+        Boolean region mask shaped `(F, n_r, n_z)`, or broadcastable to it.
+
+    Returns
+    -------
+    tuple[Tensor, Tensor]
+        `(psi_axis, psi_boundary)`, each shaped `(F, 1, 1)` with the dtype of `psi_fields`. Fields with an empty mask
+        get the lowest finite value of the dtype for both, so their span `psi_axis - psi_boundary` is 0.
+
+    """
+
+    lowest = torch.finfo(psi_fields.dtype).min
+    mask = torch.broadcast_to(mask.to(device=psi_fields.device, dtype=torch.bool), psi_fields.shape)
+
+    # Magnetic axis: maximum of psi inside the mask.
+    psi_axis = torch.where(mask, psi_fields, lowest).amax(dim=(-2, -1), keepdim=True)  # (F, 1, 1)
+
+    # Mask edge: cells inside the mask with at least one neighbor outside it (the grid border counts as outside).
+    outside = torch_functional.pad((~mask).float().unsqueeze(1), pad=(1, 1, 1, 1), value=1.0)  # (F, 1, ., .)
+    edge = mask & torch_functional.max_pool2d(outside, kernel_size=3, stride=1).squeeze(1).bool()  # (F, n_r, n_z)
+
+    # Boundary of a limited plasma: the highest psi contour that touches the mask edge.
+    psi_boundary = torch.where(edge, psi_fields, lowest).amax(dim=(-2, -1), keepdim=True)  # (F, 1, 1)
+
+    return psi_axis, psi_boundary
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def psi_scale_per_field(
+    psi_fields: Tensor,
+    mask: Tensor,
+    kind: ALLOWED_GRAD_SHAFRANOV_PSI_SCALES_TYPE,
+) -> tuple[Tensor, Tensor]:
+    """
+    Compute a per-field flux scale `ψ_0` for the physics residual scaling, from (ground-truth) psi over a mask.
+
+    - `kind="axis_boundary"`: `ψ_axis - ψ_boundary` (see `psi_axis_and_boundary`). Assumes the magnetic axis is a
+      maximum of psi.
+    - `kind="range"`: `max(ψ) - min(ψ)` over the mask. Makes no assumption on the sign of psi.
+
+    The result is detached: the scale is a fixed normalization constant, so the model cannot lower the loss by
+    changing it.
+
+    Parameters
+    ----------
+    psi_fields : Tensor
+        Poloidal-flux fields shaped `(F, n_r, n_z)`.
+    mask : Tensor
+        Boolean region mask shaped `(F, n_r, n_z)`, or broadcastable to it.
+    kind : Literal["axis_boundary", "range"]
+        How the scale is computed.
+
+    Returns
+    -------
+    tuple[Tensor, Tensor]
+        `(psi_scale, valid_fields)`, each shaped `(F, 1, 1)`:
+        - psi_scale: positive flux scale where valid, and 1 elsewhere (so it can be divided by safely).
+        - valid_fields: boolean, False where the scale is not finite or not positive (e.g., flat fields, an empty
+          mask, or, for "axis_boundary", fields whose maximum lies on the mask edge).
+
+    Raises
+    ------
+    ValueError
+        If `kind` is not in `ALLOWED_GRAD_SHAFRANOV_PSI_SCALES`.
+
+    """
+
+    psi_fields = psi_fields.detach()
+
+    if kind == "axis_boundary":
+        psi_axis, psi_boundary = psi_axis_and_boundary(psi_fields=psi_fields, mask=mask)
+        psi_scale = psi_axis - psi_boundary
+    elif kind == "range":
+        mask = torch.broadcast_to(mask.to(device=psi_fields.device, dtype=torch.bool), psi_fields.shape)
+        finfo = torch.finfo(psi_fields.dtype)
+        psi_max = torch.where(mask, psi_fields, finfo.min).amax(dim=(-2, -1), keepdim=True)  # (F, 1, 1)
+        psi_min = torch.where(mask, psi_fields, finfo.max).amin(dim=(-2, -1), keepdim=True)  # (F, 1, 1)
+        psi_scale = psi_max - psi_min
+    else:
+        raise ValueError(
+            f"[psi_scale_per_field] Invalid `kind`: must be in {ALLOWED_GRAD_SHAFRANOV_PSI_SCALES}, got {kind!r}."
+        )
+
+    valid_fields = torch.isfinite(psi_scale) & (psi_scale > 0)  # (F, 1, 1)
+    psi_scale = torch.where(valid_fields, psi_scale, torch.ones_like(psi_scale))
+
+    return psi_scale, valid_fields
 
 
 # ----------------------------------------------------------------------------------------------------------------------
