@@ -1,10 +1,8 @@
 """Grad-Shafranov diagnostic plotting utilities."""
 
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from datetime import datetime
 
 import matplotlib.pyplot as plt
 from matplotlib import colors, cm, ticker, colormaps
@@ -319,88 +317,6 @@ def make_gs_plots(
 
         plt.savefig(
             fname=save_path,
-            transparent=None,
-            dpi="figure",
-            format=None,
-            metadata=None,
-            bbox_inches=None,
-            pad_inches=0.1,
-            facecolor="auto",
-            edgecolor="auto",
-            backend=None,
-        )
-    else:
-        plt.show()
-
-    plt.close()
-
-    # ..................................................................................................................
-
-
-# ----------------------------------------------------------------------------------------------------------------------
-def make_signal_plots(  # FIXME: This method is not used and could be removed. Otherwise, it needs revision.
-    plot_data,
-    view_data=None,
-    save_plots=False,
-    save_dir="output",
-    title="Reconstruction: true vs predicted",
-    fail_silently: bool = True,
-):
-    """
-    4-panel true-vs-predicted plot for psi and j_tor (loss-agnostic; works for weak/strong).
-
-    plot_data = {
-        "grid_data":   {"R_for_x_data": R, "Z_for_y_data": Z},
-        "signal_data": {"psi_data": psi_pred, "psi_ref_data": psi_gt,
-                        "j_tor_data": j_tor_pred, "j_tor_ref_data": j_tor_gt},
-    }
-    Each signal field is (n_r, n_z), matching R/Z.
-
-    """
-
-    if view_data is None:
-        view_data = {"elev": 40, "azim": -49, "roll": 121}
-
-    R = plot_data["grid_data"]["R_for_x_data"]
-    Z = plot_data["grid_data"]["Z_for_y_data"]
-    sig = plot_data["signal_data"]
-
-    panels = [
-        (sig.get("psi_data"), "Pred. psi"),
-        (sig.get("psi_ref_data"), "Real psi"),
-        (sig.get("j_tor_data"), "Pred. j_tor"),
-        (sig.get("j_tor_ref_data"), "Real j_tor"),
-    ]
-
-    fig = plt.figure(figsize=(14, 7))
-    fig.suptitle(t=title, fontsize=16, y=0.99)
-    gs = GridSpec(nrows=2, ncols=2, figure=fig)
-    fig.subplots_adjust(hspace=0.25, wspace=0.15)
-    positions = [(0, 0), (0, 1), (1, 0), (1, 1)]
-
-    for (z_field, subtitle), (r_, c_) in zip(panels, positions):
-        ax = fig.add_subplot(gs[r_, c_], projection="3d")
-        try:
-            map_ax = plot_surface(
-                ax=ax,
-                plot_data={"x_data": R, "y_data": Z, "z_data": z_field},
-                label_data={"x_label": "", "y_label": "", "z_label": "", "subtitle": subtitle},
-                view_data=view_data,
-            )
-            fig.colorbar(map_ax, ax=ax)
-        except Exception as ee:
-            if fail_silently:
-                pass
-            else:
-                print(f"[make_signal_plots] Plotting error: {ee}")
-
-    if save_plots:
-        os.makedirs(save_dir, exist_ok=True)
-        date_tag = f"{datetime.now()}".replace("-", "").replace(":", "").replace(" ", "_")
-        filename = f"gs_weak_loss_plots [{date_tag}].png"
-
-        plt.savefig(
-            fname=f"{save_dir}/{filename}",
             transparent=None,
             dpi="figure",
             format=None,
