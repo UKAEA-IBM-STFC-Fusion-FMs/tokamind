@@ -18,16 +18,25 @@ import warnings
 from collections.abc import Mapping, MutableMapping
 from typing import Any, Union
 
+from mmt.models.blocks import MODEL_BLOCKS
+from mmt.train.losses.constants import (
+    ALL_LOSS_TYPES,
+    EMBED_MSE_LOSS_TYPE,
+    NATIVE_SPACE_LOSS_TYPES,
+)
+from mmt.train.losses.registry import get_loss_class
+
 
 # ======================================================================================================================
 # Common required fields
 # ======================================================================================================================
 
 ALLOWED_PHASES = {"pretrain", "finetune", "eval"}
-ALLOWED_DATA_SPLITS = {"random", "temporal"}
+ALLOWED_MODEL_NAMES = set(MODEL_BLOCKS)
+ALLOWED_OUTPUT_ADAPTER_TYPES = {"deterministic"}
 
 # Loss term types that require batch['output_native'] — add one entry here when introducing a new native-space loss.
-_NATIVE_TARGET_TERMS: frozenset[str] = frozenset({"native_sparse_mse"})
+_NATIVE_TARGET_TERMS: frozenset[str] = NATIVE_SPACE_LOSS_TYPES
 
 REQUIRED_COMMON_FIELDS: list[tuple[str, type]] = [("phase", str), ("task", str)]
 
@@ -131,10 +140,7 @@ def _normalize_null_to_empty_dict(cfg: Mapping[str, Any], path: str) -> None:
 REQUIRED_RUN_CONTEXT_FIELDS: list[tuple[str, Union[type, tuple[type, ...]]]] = [
     ("seed", int),
     ("runtime", dict),
-    ("data.local", bool),
-    ("data.subset_of_shots", (int, type(None))),
 ]
-
 
 # ======================================================================================================================
 # Training validation (same spec as before)
@@ -153,51 +159,83 @@ REQUIRED_STAGE_FIELDS: list[tuple[str, Union[type, tuple[type, ...]]]] = [
     ("name", str),
     ("epochs", int),
     ("scheduler.grad_accum_steps", int),
-    ("optimizer.lr.backbone", float),
-    ("optimizer.lr.modality_heads", (float, type(None))),
-    ("optimizer.lr.output_adapters", (float, type(None))),
-    ("optimizer.lr.token_encoder", (float, type(None))),
-    ("optimizer.wd.backbone", float),
-    ("optimizer.wd.modality_heads", (float, type(None))),
-    ("optimizer.wd.output_adapters", (float, type(None))),
-    ("optimizer.wd.token_encoder", (float, type(None))),
-    ("freeze.backbone", bool),
-    ("freeze.modality_heads", bool),
-    ("freeze.output_adapters", bool),
-    ("freeze.token_encoder", bool),
+    ("optimizer.lr", dict),
+    ("optimizer.wd", dict),
+    ("freeze", dict),
 ]
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _apply_lr_wd_inheritance(stage_cfg: Mapping[str, Any]) -> None:
+def _model_blocks_for_config(cfg: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return declared model block names for the materialized config."""
+
+    model = cfg.get("model")
+    if not isinstance(model, dict):
+        return MODEL_BLOCKS["mmt"]
+
+    model_name = str(model.get("name", "mmt"))
+    if model_name not in MODEL_BLOCKS:
+        raise ValueError(f"Unsupported model.name={model_name!r}. Allowed values are: {sorted(MODEL_BLOCKS)}.")
+
+    return MODEL_BLOCKS[model_name]
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _validate_block_mapping_keys(mapping: Mapping[str, Any], *, path: str, blocks: tuple[str, ...]) -> None:
+    """
+    Validate that a block-keyed mapping exactly matches the selected model blocks.
+
+    Raises
+    ------
+    KeyError
+        If required block keys are missing or unknown block keys are present.
+
+    """
+
+    keys = set(mapping)
+    expected = set(blocks)
+    missing = sorted(expected - keys)
+    unknown = sorted(keys - expected)
+    if missing or unknown:
+        parts = []
+        if missing:
+            parts.append(f"missing={missing}")
+        if unknown:
+            parts.append(f"unknown={unknown}")
+        raise KeyError(f"{path} must match model blocks {sorted(expected)} ({', '.join(parts)}).")
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _apply_lr_wd_inheritance(stage_cfg: Mapping[str, Any], *, blocks: tuple[str, ...]) -> None:
     """Apply learning rate (lr) and weight decay (wd) inheritance from stage configuration mapping."""
 
     lr = stage_cfg["optimizer"]["lr"]
     wd = stage_cfg["optimizer"]["wd"]
 
-    backbone_lr = float(lr["backbone"])
-    backbone_wd = float(wd["backbone"])
+    inherit_block = "backbone" if "backbone" in blocks else "backbone_encoder"
+    inherit_lr = float(lr[inherit_block])
+    inherit_wd = float(wd[inherit_block])
 
-    for block in ("token_encoder", "modality_heads", "output_adapters"):
+    for block in blocks:
         if lr.get(block) is None:
-            lr[block] = backbone_lr
+            lr[block] = inherit_lr
         if wd.get(block) is None:
-            wd[block] = backbone_wd
+            wd[block] = inherit_wd
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _apply_freeze_rules(stage_cfg: Mapping[str, Any]) -> None:
+def _apply_freeze_rules(stage_cfg: Mapping[str, Any], *, blocks: tuple[str, ...]) -> None:
     """Apply freeze rules from stage configuration mapping."""
 
     lr = stage_cfg["optimizer"]["lr"]
     wd = stage_cfg["optimizer"]["wd"]
     freeze = stage_cfg["freeze"]
 
-    for block in ["token_encoder", "backbone", "modality_heads", "output_adapters"]:
+    for block in blocks:
         if freeze.get(block, False):
             if (lr.get(block, 0.0) != 0) or (wd.get(block, 0.0) != 0):
                 warnings.warn(
-                    f"[MMT config] freeze.{block}=True → forcing lr=0 and wd=0 "
+                    f"[MMT config] freeze.{block}=True -> forcing lr=0 and wd=0 "
                     f"(was lr={lr.get(block)}, wd={wd.get(block)})",
                     stacklevel=2,
                 )
@@ -206,7 +244,7 @@ def _apply_freeze_rules(stage_cfg: Mapping[str, Any]) -> None:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _validate_stage_consistency(stage_cfg: Mapping[str, Any]) -> None:
+def _validate_stage_consistency(stage_cfg: Mapping[str, Any], *, blocks: tuple[str, ...]) -> None:
     """
     Validate stage consistency based on stage configuration mapping.
 
@@ -226,13 +264,13 @@ def _validate_stage_consistency(stage_cfg: Mapping[str, Any]) -> None:
     wd = stage_cfg["optimizer"]["wd"]
     freeze = stage_cfg["freeze"]
 
-    for block in ["token_encoder", "backbone", "modality_heads", "output_adapters"]:
+    for block in blocks:
         if freeze.get(block, False) and ((lr[block] != 0) or (wd[block] != 0)):
             raise ValueError(
                 f"Inconsistent config: block '{block}' is frozen but lr={lr[block]} or wd={wd[block]} is nonzero."
             )
 
-    for block in ["token_encoder", "backbone"]:
+    for block in blocks:
         if (not freeze.get(block, False)) and (lr[block] == 0):
             raise ValueError(
                 f"Inconsistent config: freeze.{block}=False but optimizer.lr.{block}=0. "
@@ -246,13 +284,54 @@ def _validate_stage_consistency(stage_cfg: Mapping[str, Any]) -> None:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+def _effective_stage_loss_cfgs(cfg: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    """
+    Return loss configs actually used by training stages.
+
+    Stage-level ``loss`` blocks shallow-override the global ``train.loss`` block. Stages without a ``loss`` block use
+    the global loss unchanged.
+
+    Parameters
+    ----------
+    cfg : Mapping[str, Any]
+        Full experiment config.
+
+    Returns
+    -------
+    list[Mapping[str, Any]]
+        Effective loss configs. When stages are not available yet, this falls back to the global train loss.
+
+    """
+
+    train_cfg = cfg.get("train") or {}
+    global_loss = train_cfg.get("loss") or {}
+    stages = train_cfg.get("stages")
+    if not isinstance(stages, list) or not stages:
+        return [global_loss]
+
+    effective: list[Mapping[str, Any]] = []
+    for stage in stages:
+        if not isinstance(stage, Mapping):
+            effective.append(global_loss)
+            continue
+
+        stage_loss = stage.get("loss")
+        if isinstance(stage_loss, Mapping):
+            effective.append({**global_loss, **stage_loss})
+        else:
+            effective.append(global_loss)
+
+    return effective
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 def _resolve_keep_output_native(cfg: MutableMapping[str, Any], phase: str) -> None:
     """
     Compute and write ``data.keep_output_native`` — it is always derived, never set manually.
 
     Rules:
       • eval phase  → always ``True`` (native outputs are required for metrics and trace saving).
-      • train phase → ``True`` iff any ``train.loss.terms`` entry is in ``_NATIVE_TARGET_TERMS``.
+      • train phase → ``True`` iff any effective global/stage loss term is in ``_NATIVE_TARGET_TERMS``.
 
     The computed value is written back into ``cfg["data"]`` so all downstream code (collate, dataset) reads it
     transparently without knowing how it was determined.
@@ -261,10 +340,118 @@ def _resolve_keep_output_native(cfg: MutableMapping[str, Any], phase: str) -> No
     if phase == "eval":
         keep = True
     else:
-        terms = (cfg.get("train") or {}).get("loss", {}).get("terms") or []
-        keep = any(isinstance(t, dict) and t.get("type") in _NATIVE_TARGET_TERMS for t in terms)
+        keep = False
+        for loss_cfg in _effective_stage_loss_cfgs(cfg=cfg):
+            terms = loss_cfg.get("terms") or []
+            if any(isinstance(t, dict) and t.get("type", EMBED_MSE_LOSS_TYPE) in _NATIVE_TARGET_TERMS for t in terms):
+                keep = True
+                break
 
     cfg.setdefault("data", {})["keep_output_native"] = keep
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _validate_loss_terms_block(loss_cfg: Mapping[str, Any], *, path: str) -> None:
+    """
+    Validate one configured loss block with early, user-facing errors.
+
+    Parameters
+    ----------
+    loss_cfg : Mapping[str, Any]
+        Loss config block.
+    path : str
+        Human-readable config path used in error messages.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    TypeError
+        If ``terms`` or a term-specific field has the wrong type.
+    ValueError
+        If a loss term has an unsupported type or invalid Grad-Shafranov option.
+    KeyError
+        If a Grad-Shafranov loss term is missing a required field.
+
+    """
+
+    terms = loss_cfg.get("terms")
+    if terms is None:
+        return
+    if not isinstance(terms, list):
+        raise TypeError(f"{path}.terms must be a list when provided.")
+
+    supported = sorted(ALL_LOSS_TYPES)
+    for term_index, term_def in enumerate(terms):
+        if not isinstance(term_def, dict):
+            raise TypeError(f"{path}.terms[{term_index}] must be a mapping.")
+
+        term_type = str(term_def.get("type", EMBED_MSE_LOSS_TYPE))
+
+        # ..............................................................................................................
+        if term_type not in ALL_LOSS_TYPES:
+            raise ValueError(f"Unsupported {path}.terms[{term_index}].type={term_type!r}. Supported: {supported}.")
+
+        # Loss-specific fields are owned by the concrete loss class, so the generic validator can stay structural.
+        get_loss_class(term_type).validate_term_cfg(term_def=term_def, path=f"{path}.terms[{term_index}]")
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _validate_loss_terms(cfg: Mapping[str, Any]) -> None:
+    """
+    Validate global and stage-level train loss terms.
+
+    Stage-level ``loss`` blocks shallow-override the global ``train.loss`` block before validation, so stages can
+    replace ``terms`` while inheriting other global loss settings such as ``output_weights``.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    TypeError
+        If a loss block or term-specific field has the wrong type.
+    ValueError
+        If a loss term has an unsupported type or invalid Grad-Shafranov option.
+    KeyError
+        If a Grad-Shafranov loss term is missing a required field.
+
+    """
+
+    train_cfg = cfg.get("train") or {}
+    global_loss = train_cfg.get("loss") or {}
+    if not isinstance(global_loss, Mapping):
+        raise TypeError("train.loss must be a mapping.")
+
+    _validate_loss_terms_block(loss_cfg=global_loss, path="train.loss")
+
+    stages = train_cfg.get("stages") or []
+    if not isinstance(stages, list):
+        return
+
+    for stage_index, stage in enumerate(stages):
+        if not isinstance(stage, Mapping) or "loss" not in stage:
+            continue
+
+        stage_loss = stage["loss"]
+        if not isinstance(stage_loss, Mapping):
+            raise TypeError(f"train.stages[{stage_index}].loss must be a mapping when provided.")
+
+        if "output_weights" in stage_loss:
+            output_weights = stage_loss["output_weights"]
+            if output_weights is None:
+                stage_loss["output_weights"] = {}
+            elif not isinstance(output_weights, dict):
+                raise TypeError(f"train.stages[{stage_index}].loss.output_weights must be a mapping when provided.")
+
+        effective_loss = {**global_loss, **stage_loss}
+        _validate_loss_terms_block(
+            loss_cfg=effective_loss,
+            path=f"train.stages[{stage_index}].loss",
+        )
 
 
 # ======================================================================================================================
@@ -318,7 +505,7 @@ def _validate_loader(cfg: Mapping[str, Any]) -> None:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _normalize_load_parts(cfg: Mapping[str, Any]) -> None:
+def _normalize_load_parts(cfg: Mapping[str, Any], *, blocks: tuple[str, ...]) -> None:
     """
     Normalization of load parts.
 
@@ -348,7 +535,10 @@ def _normalize_load_parts(cfg: Mapping[str, Any]) -> None:
     elif not isinstance(lp, dict):
         raise TypeError("`cfg['model_source'].load_parts` must be a dict.")
 
-    for block in ("token_encoder", "backbone", "modality_heads", "output_adapters"):
+    unknown = sorted(set(lp) - set(blocks))
+    if unknown:
+        raise KeyError(f"model_source.load_parts has unknown keys {unknown}. Expected: {sorted(blocks)}.")
+    for block in blocks:
         if lp.get(block) is None:
             lp[block] = True
 
@@ -412,6 +602,14 @@ def _validate_output_adapters_hidden_dim(  # NOSONAR - Ignore cognitive complexi
     if not isinstance(oa, dict):
         raise TypeError("`cfg['model']['output_adapters']` must be a dict.")  # noqa - Ignore unreachable code warning
 
+    adapter_type = str(oa.get("type", "deterministic"))
+    if adapter_type not in ALLOWED_OUTPUT_ADAPTER_TYPES:
+        raise ValueError(
+            f"Unsupported `cfg['model']['output_adapters']['type']`={adapter_type!r}. "
+            f"Allowed values are: {sorted(ALLOWED_OUTPUT_ADAPTER_TYPES)}."
+        )
+    oa["type"] = adapter_type
+
     hd = oa.get("hidden_dim")
     if hd is None:
         oa["hidden_dim"] = {
@@ -455,6 +653,72 @@ def _validate_output_adapters_hidden_dim(  # NOSONAR - Ignore cognitive complexi
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+def _validate_model_name(cfg: Mapping[str, Any]) -> None:
+    """
+    Validate the materialized model architecture name.
+
+    Returns
+    -------
+    None
+
+    Raises
+    ------
+    TypeError
+        If `cfg["model"]` is present but not a mapping.
+    ValueError
+        If `cfg["model"].name` is unsupported, or inconsistent with `cfg["model_profile"]`.
+
+    """
+
+    model = cfg.get("model")
+    if model is None:
+        return
+    if not isinstance(model, dict):
+        raise TypeError("`cfg['model']` must be a dict.")
+
+    model_name = str(model.get("name", "mmt"))
+    if model_name not in ALLOWED_MODEL_NAMES:
+        raise ValueError(f"Unsupported model.name={model_name!r}. Allowed values are: {sorted(ALLOWED_MODEL_NAMES)}.")
+
+    model_profile = cfg.get("model_profile")
+    if model_profile is not None and str(model_profile) != model_name:
+        raise ValueError(f"model_profile={model_profile!r} is inconsistent with model.name={model_name!r}.")
+
+    chunks = (cfg.get("preprocess") or {}).get("chunks")
+    if isinstance(chunks, Mapping) and model_name == "mmt":
+        output_cfg = chunks.get("output") or {}
+        if output_cfg.get("max_chunks", 1) != 1:
+            raise ValueError(f"model.name={model_name!r} currently requires preprocess.chunks.output.max_chunks=1.")
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _validate_output_adapter_residual(cfg: Mapping[str, Any]) -> None:
+    """Validate the optional output-adapter residual switch."""
+
+    model_cfg = cfg.get("model") or {}
+    residual_cfg = (model_cfg.get("output_adapters") or {}).get("residual")
+    if residual_cfg is None:
+        return
+    if not isinstance(residual_cfg, Mapping):
+        raise TypeError("model.output_adapters.residual must be a mapping when provided.")
+
+    unknown = sorted(str(key) for key in residual_cfg if key not in {"enable", "zero_init"})
+    if unknown:
+        raise KeyError(
+            f"Unknown model.output_adapters.residual keys: {unknown}. "
+            "Only 'enable' and 'zero_init' are currently configurable; source and mapping use fixed defaults."
+        )
+
+    enable = residual_cfg.get("enable", False)
+    if not isinstance(enable, bool):
+        raise TypeError(f"model.output_adapters.residual.enable must be bool, got {type(enable).__name__}.")
+
+    zero_init = residual_cfg.get("zero_init", True)
+    if not isinstance(zero_init, bool):
+        raise TypeError(f"model.output_adapters.residual.zero_init must be bool, got {type(zero_init).__name__}.")
+
+
+# ----------------------------------------------------------------------------------------------------------------------
 def _validate_required_run_context(cfg: Mapping[str, Any]) -> None:
     """Validate presence and basic types for run-context keys, raising TypeError for type mismatches."""
 
@@ -467,50 +731,6 @@ def _validate_required_run_context(cfg: Mapping[str, Any]) -> None:
             raise TypeError(f"Expected type {getattr(_t, '__name__', str(_t))} at '{path}', got {type(val).__name__}.")
 
     # runtime must be a dict (already checked), but allow empty dict; no further checks here.
-
-
-# ----------------------------------------------------------------------------------------------------------------------
-def _validate_data_split_for_training(cfg: Mapping[str, Any]) -> None:
-    """
-    Validate and normalize cfg.data.split for training phases.
-
-    Rules:
-    - missing / null / empty -> default to "random"
-    - otherwise value must be one of {"random", "temporal"} (case-insensitive)
-
-    Returns
-    -------
-    None
-
-    Raises
-    ------
-    TypeError
-        If `cfg['data']['split']` is not a string.
-    ValueError
-        If `cfg['data']['split']` is not in allowed values.
-
-    """
-
-    data_cfg = cfg.get("data")
-    if not isinstance(data_cfg, dict):
-        raise TypeError("`cfg['data']` must be a mapping (dict).")
-
-    split = data_cfg.get("split", "random")
-    if split is None:
-        data_cfg["split"] = "random"
-        return
-    if not isinstance(split, str):
-        raise TypeError(f"Expected type str at 'data.split', got {type(split).__name__}.")
-
-    split_norm = split.strip().lower()
-    if split_norm == "":
-        data_cfg["split"] = "random"
-        return
-
-    if split_norm not in ALLOWED_DATA_SPLITS:
-        raise ValueError(f"Unsupported data.split={split!r}. Allowed values are: {sorted(ALLOWED_DATA_SPLITS)}.")
-
-    data_cfg["split"] = split_norm
 
 
 # ======================================================================================================================
@@ -549,7 +769,6 @@ def validate_config(cfg: Union[Mapping[str, Any], Any]) -> None:
         raise ValueError(f"Unsupported phase '{phase}' in `cfg['phase']` (allowed values: {sorted(ALLOWED_PHASES)}).")
 
     _validate_required_run_context(cfg=cfgd)
-
     # Derive keep_output_native from phase and loss terms — always computed, never set by the user.
     _resolve_keep_output_native(cfg=cfgd, phase=phase)
 
@@ -572,6 +791,8 @@ def validate_config(cfg: Union[Mapping[str, Any], Any]) -> None:
             )
 
     # Model config validation (common to all phases)
+    _validate_model_name(cfg=cfgd)
+    _validate_output_adapter_residual(cfg=cfgd)
     _validate_output_adapters_hidden_dim(cfg=cfgd)
 
 
@@ -600,7 +821,8 @@ def validate_train_config(  # NOSONAR - Ignore cognitive complexity
 
     # Normalize YAML-null dicts that are commonly left empty by users
     _normalize_null_to_empty_dict(cfg=cfg, path="train.loss.output_weights")
-    _validate_data_split_for_training(cfg=cfg)
+    _validate_loss_terms(cfg=cfg)
+    blocks = _model_blocks_for_config(cfg=cfg)
 
     # Validate required train fields exist
     for path, _t in REQUIRED_TRAIN_FIELDS:
@@ -624,6 +846,25 @@ def validate_train_config(  # NOSONAR - Ignore cognitive complexity
         for path, _t in REQUIRED_STAGE_FIELDS:
             _get_nested(cfg=stage, path=path)
 
+        for block_path in ("optimizer.lr", "optimizer.wd", "freeze"):
+            block_mapping = _get_nested(cfg=stage, path=block_path)
+            if not isinstance(block_mapping, dict):
+                raise TypeError(f"Expected dict at train.stages[{i}].{block_path}.")
+            _validate_block_mapping_keys(mapping=block_mapping, path=f"train.stages[{i}].{block_path}", blocks=blocks)
+
+        for block in blocks:
+            if not isinstance(stage["freeze"][block], bool):
+                raise TypeError(f"Expected bool at train.stages[{i}].freeze.{block}.")
+            for optim_key in ("lr", "wd"):
+                value = stage["optimizer"][optim_key][block]
+                if value is not None:
+                    try:
+                        stage["optimizer"][optim_key][block] = float(value)
+                    except (TypeError, ValueError) as e:
+                        raise TypeError(
+                            f"Expected number or null at train.stages[{i}].optimizer.{optim_key}.{block}."
+                        ) from e
+
         gas = stage["scheduler"]["grad_accum_steps"]
         if (not isinstance(gas, int)) or (gas < 1):
             raise ValueError(f"scheduler.grad_accum_steps must be an integer >= 1 (got {gas}) in train.stages[{i}].")
@@ -641,11 +882,11 @@ def validate_train_config(  # NOSONAR - Ignore cognitive complexity
                     f"scheduler.warmup_steps_fraction must be in [0.0, 1.0) (got {warmup_frac}) in train.stages[{i}]."
                 )
 
-        _apply_lr_wd_inheritance(stage_cfg=stage)
-        _apply_freeze_rules(stage_cfg=stage)
-        _validate_stage_consistency(stage_cfg=stage)
+        _apply_lr_wd_inheritance(stage_cfg=stage, blocks=blocks)
+        _apply_freeze_rules(stage_cfg=stage, blocks=blocks)
+        _validate_stage_consistency(stage_cfg=stage, blocks=blocks)
 
-    _normalize_load_parts(cfg=cfg)
+    _normalize_load_parts(cfg=cfg, blocks=blocks)
     _validate_loader(cfg=cfg)
 
 
@@ -662,18 +903,11 @@ def validate_eval_config(cfg: Mapping[str, Any]) -> None:
     ------
     ValueError
         If `cfg["model_source"]["run_dir"]` is not defined.
-        If ``data.split`` is set (split is a training-time setting).
+        If `data.split` is set (split is a training-time setting).
 
     """
 
     _validate_loader(cfg=cfg)
-
-    data_cfg = cfg.get("data", {}) or {}
-    if "split" in data_cfg:
-        raise ValueError(
-            "For phase='eval', data.split must not be set. "
-            "Split is a training-time setting and eval inherits behavior from the selected source run."
-        )
 
     # Eval requires a run_dir to evaluate.
     ms = cfg.get("model_source", None)

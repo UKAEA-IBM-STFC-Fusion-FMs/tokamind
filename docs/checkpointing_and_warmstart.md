@@ -16,7 +16,7 @@ runs/<run_id>/
 
 ### `checkpoints/latest`
 Contains full training state for strict resume:
-- model blocks (`token_encoder.pt`, `backbone.pt`, `modality_heads.pt`, `output_adapters.pt`)
+- model-declared blocks (`<block_name>.pt`)
 - optimizer/scheduler/scaler/rng state
 - metadata (`meta.json`)
 
@@ -53,8 +53,8 @@ Use warmstart to initialize weights from another run while starting a separate r
 Finetune and eval source selection is CLI-based:
 
 ```bash
-python scripts_mast/run_finetune.py --task <task> --init warmstart --model <run_id_or_path>
-python scripts_mast/run_eval.py --task <task> --model <run_id_or_path>
+python scripts_mast/run_finetune.py --task <task> --init warmstart --model_source <run_id_or_path>
+python scripts_mast/run_eval.py --task <task> --model_source <run_id_or_path>
 ```
 
 The loader resolves source path into `model_source.run_dir`.
@@ -96,11 +96,11 @@ model_source:
 ### Pretrain -> Finetune
 1. Run pretrain.
 2. Run finetune:
-   - warmstart: `--init warmstart --model <pretrain_run_id>`
+   - warmstart: `--init warmstart --model_source <pretrain_run_id>`
    - scratch: `--init scratch`
 
 ### Finetune -> Eval
-1. Run eval with `--model <finetune_run_id>`.
+1. Run eval with `--model_source <finetune_run_id>`.
 2. Eval loads checkpoint from source run and writes outputs under `runs/<model_id>/eval/`.
 
 ## Safe Model Changes with Warmstart

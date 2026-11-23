@@ -12,12 +12,12 @@ Key modules
 - task_signals.py      : convert task definition -> signals_by_role for MMT core
 - pipeline_ops.py      : low-level transforms/collate helpers for run_*.py
 - entry_helpers.py     : high-level run_*.py orchestration helpers
-- embedding_resolution.py : pretrain/finetune/eval embedding resolution
-- benchmark_eval.py       : benchmark-aligned evaluation runner
+- embedding_resolution/  : pretrain/finetune/eval embedding resolution (signals/policy/artifacts/resolve)
+- eval/                   : benchmark evaluation runner and GS diagnostics
 - tune_dct3d.py        : DCT3D tuning step (run + load overrides)
 """
 
-from .config import load_experiment_config
+from .config import load_experiment_config, validate_mast_config
 from .task_definition import load_task_definition
 from .task_signals import build_signals_by_role_from_task_definition
 
@@ -38,7 +38,7 @@ from .embedding_resolution import (
     resolve_finetune_embeddings,
     resolve_eval_embeddings,
 )
-from .benchmark_eval import evaluate_benchmark_and_diagnostics
+from .eval import evaluate_benchmark_and_diagnostics
 
 from .tune_dct3d import run_dct3d_tuning, load_embeddings_overrides
 
@@ -48,6 +48,7 @@ from .tune_dct3d import run_dct3d_tuning, load_embeddings_overrides
 __all__ = [
     # Config
     "load_experiment_config",
+    "validate_mast_config",
     # Task definition + signals
     "load_task_definition",
     "build_signals_by_role_from_task_definition",

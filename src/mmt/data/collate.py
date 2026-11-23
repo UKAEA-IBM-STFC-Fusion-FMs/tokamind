@@ -24,7 +24,8 @@ this transparently:
   signals present in the batch (missing per-window native values are represented as NaN, not supervised zeros).
 - ``output_mask`` is built from ``output_emb`` presence for embedded outputs, and from native value presence for
   identity outputs — so ``NativeSparseMSELoss`` sees both correctly.
-- ``output_emb`` only contains embedded outputs; ``EmbedMSELoss`` silently ignores signals absent from it.
+- ``output_emb`` only contains embedded outputs; loss config validation prevents using ``EmbedMSELoss`` to supervise
+  identity outputs.
 """
 
 from __future__ import annotations
@@ -125,6 +126,29 @@ def _get_native_val(window: dict[str, Any], name: str) -> np.ndarray | None:
     if isinstance(info, dict):
         return info.get("values")
     return info  # bare array or None
+
+
+def _get_native_time(window: dict[str, Any], name: str) -> np.ndarray | None:
+    """Extract the native output timestamps for one signal when available."""
+
+    info = (window.get("output") or {}).get(name)
+    if not isinstance(info, dict):
+        return None
+    time = info.get("time")
+    if time is None:
+        return None
+    return np.asarray(time, dtype=np.float64).reshape(-1)
+
+
+def _get_output_time(window: dict[str, Any], name: str) -> np.ndarray | None:
+    """Extract compact finalized output timestamps, falling back to native output metadata."""
+
+    compact = window.get("output_time")
+    if isinstance(compact, dict):
+        time = compact.get(name)
+        if time is not None:
+            return np.asarray(time, dtype=np.float64).reshape(-1)
+    return _get_native_time(window, name)
 
 
 # ======================================================================================================================
@@ -231,18 +255,19 @@ class MMTCollate:
             name="p_drop_outputs_overrides",
         )
 
-        # Optional: output_id -> output_name mapping (required when keep_output_native=True).
+        # Optional output ID -> name mapping. Native targets require it, while coordinate-aware models use it to
+        # collate compact output timestamp metadata even for embedding-only losses.
         self.output_id_to_name: dict[int, str] | None = None
-        if self.keep_output_native:
-            m = self.cfg.get("output_id_to_name")
-            if m is None:
+        m = self.cfg.get("output_id_to_name")
+        if m is None:
+            if self.keep_output_native:
                 raise ValueError(
                     "MMTCollate `cfg_collate['keep_output_native']=True` requires cfg_collate['output_id_to_name'] (a "
                     "dict {output_signal_id: output_name})."
                 )
-            if not isinstance(m, dict):
-                raise TypeError(f"`cfg_collate['output_id_to_name']` must be a dict, got {type(m).__name__}.")
-
+        elif not isinstance(m, dict):
+            raise TypeError(f"`cfg_collate['output_id_to_name']` must be a dict, got {type(m).__name__}.")
+        else:
             self.output_id_to_name = {int(k): str(v) for k, v in m.items()}
 
         # Reverse mapping name → id: used to discover native-only (identity) output sids from
@@ -313,6 +338,7 @@ class MMTCollate:
             mod_batch[i_, t_] = PAD_MOD
             role_batch[i_, t_] = PAD_ROLE
             pos_batch[i_, t_] = PAD_POS
+            token_time_batch[i_, t_] = np.nan
 
         # ..............................................................................................................
         # 0) Safety-check + filter None
@@ -341,9 +367,16 @@ class MMTCollate:
         id_lists: list[np.ndarray] = []
         mod_lists: list[np.ndarray] = []
         role_lists: list[np.ndarray] = []
+        token_time_lists: list[np.ndarray] = []
+        space_grids: list[np.ndarray | None] = []
 
         # out_dicts[i] = window["output_emb"] — embedded output embeddings keyed by signal_id.
         out_dicts: list[dict[int, Any]] = []
+
+        # Optional output-residual persistence baselines and their source input signal IDs.
+        baseline_dicts: list[dict[int, Any]] = []
+        baseline_source_dicts: list[dict[int, int]] = []
+        all_baseline_sids: set[int] = set()
 
         # Signals with an output_emb entry (embed_mse targets).
         all_emb_sids: set[int] = set()
@@ -356,6 +389,15 @@ class MMTCollate:
             id_lists.append(np.asarray(w["id"], dtype=np.int32))
             mod_lists.append(np.asarray(w["mod"], dtype=np.int16))
             role_lists.append(np.asarray(w["role"], dtype=np.int8))
+            token_time = np.asarray(w.get("token_time", np.full(len(w["pos"]), np.nan)), dtype=np.float32).reshape(-1)
+            if token_time.size != len(w["pos"]):
+                raise ValueError(
+                    "MMTCollate expects window['token_time'] to align with window['pos']; "
+                    f"got {token_time.size} times for {len(w['pos'])} tokens."
+                )
+            token_time_lists.append(token_time)
+            grid = w.get("space_grid")
+            space_grids.append(None if grid is None else np.asarray(grid, dtype=np.float32))
 
             out_emb = w.get("output_emb")
             if not isinstance(out_emb, dict):
@@ -364,6 +406,21 @@ class MMTCollate:
                 )
             out_dicts.append(out_emb)
             all_emb_sids.update(int(k) for k in out_emb.keys())
+
+            baseline = w.get("output_baseline_emb") or {}
+            baseline_sources = w.get("output_baseline_source_id") or {}
+            if not isinstance(baseline, dict) or not isinstance(baseline_sources, dict):
+                raise TypeError("MMTCollate expects output residual baseline fields to be mappings when present.")
+            baseline_keys = {int(k) for k in baseline}
+            source_keys = {int(k) for k in baseline_sources}
+            if baseline_keys != source_keys:
+                raise ValueError(
+                    "window['output_baseline_emb'] and window['output_baseline_source_id'] must have identical "
+                    f"output signal IDs, got baselines={sorted(baseline_keys)} sources={sorted(source_keys)}."
+                )
+            baseline_dicts.append({int(k): v for k, v in baseline.items()})
+            baseline_source_dicts.append({int(k): int(v) for k, v in baseline_sources.items()})
+            all_baseline_sids.update(baseline_keys)
 
             if self.keep_output_native and self._output_name_to_id:
                 for sname in w.get("output") or {}:
@@ -382,6 +439,7 @@ class MMTCollate:
         id_batch = np.full(shape=(B, L_max), fill_value=PAD_ID, dtype=np.int32)
         mod_batch = np.full(shape=(B, L_max), fill_value=PAD_MOD, dtype=np.int16)
         role_batch = np.full(shape=(B, L_max), fill_value=PAD_ROLE, dtype=np.int8)
+        token_time_batch = np.full(shape=(B, L_max), fill_value=np.nan, dtype=np.float32)
 
         padding_mask = np.zeros(shape=(B, L_max), dtype=np.int8)
         input_mask = np.ones(shape=(B, L_max), dtype=np.int8)
@@ -399,6 +457,7 @@ class MMTCollate:
             id_batch[i, :Li] = id_lists[i]
             mod_batch[i, :Li] = mod_lists[i]
             role_batch[i, :Li] = role_lists[i]
+            token_time_batch[i, :Li] = token_time_lists[i]
             padding_mask[i, :Li] = 1
 
         # ..............................................................................................................
@@ -500,6 +559,7 @@ class MMTCollate:
             mod_batch[i, t_restore] = int(mod_lists[i][t_restore])
             role_batch[i, t_restore] = int(role_lists[i][t_restore])
             pos_batch[i, t_restore] = int(pos_lists[i][t_restore])
+            token_time_batch[i, t_restore] = float(token_time_lists[i][t_restore])
             input_mask[i, t_restore] = 1
             actuator_mask[i, t_restore] = 1
             restored += 1
@@ -526,6 +586,9 @@ class MMTCollate:
         output_emb_batch: dict[int, list[np.ndarray]] = {}
         output_mask_batch_np: dict[int, np.ndarray] = {}
         output_native_batch_np: dict[int, np.ndarray] = {}
+        output_time_batch_np: dict[int, np.ndarray] = {}
+        output_baseline_batch_np: dict[int, np.ndarray] = {}
+        output_baseline_mask_np: dict[int, np.ndarray] = {}
 
         if self.keep_output_native and self.output_id_to_name is None:
             raise RuntimeError(
@@ -538,6 +601,25 @@ class MMTCollate:
         for sig_id in sorted(all_output_sids):
             has_emb = sig_id in all_emb_sids
             has_native = self.keep_output_native and (sig_id in all_native_sids)
+
+            out_name = self.output_id_to_name.get(sig_id) if self.output_id_to_name is not None else None
+            if out_name is not None:
+                times: list[np.ndarray | None] = [_get_output_time(window, out_name) for window in flat_windows]
+                reference_time = next((time for time in times if time is not None), None)
+                if reference_time is not None:
+                    n_steps = int(reference_time.size)
+                    normalized_times: list[np.ndarray] = []
+                    for time in times:
+                        if time is None:
+                            normalized_times.append(np.full(n_steps, np.nan, dtype=np.float64))
+                            continue
+                        if int(time.size) != n_steps:
+                            raise ValueError(
+                                f"Inconsistent output timestamp length for output={out_name!r}: "
+                                f"expected {n_steps}, got {time.size}."
+                            )
+                        normalized_times.append(np.asarray(time, dtype=np.float64))
+                    output_time_batch_np[sig_id] = np.stack(normalized_times, axis=0)
 
             # ----------------------------------------------------------------------------------------------------------
             # Embedded output: collect embeddings + mask, apply per-output dropout.
@@ -627,13 +709,67 @@ class MMTCollate:
                     output_mask_batch_np[sig_id] = nat_mask
 
         # ..............................................................................................................
-        # 8) Convert arrays to torch
+        # 8) Optional output-residual baselines
+        #
+        # A baseline is available only while the corresponding newest input token (pos=1) survives input/chunk
+        # dropout. Unavailable baselines are represented by zeros plus an explicit mask, so the model cannot bypass a
+        # forced missing-input ablation.
+        # ..............................................................................................................
+
+        for sig_id in sorted(all_baseline_sids):
+            ref_arr: np.ndarray | None = None
+            for d in baseline_dicts:
+                value = d.get(sig_id)
+                if value is not None:
+                    ref_arr = np.asarray(value).reshape(-1)
+                    break
+            if ref_arr is None:
+                continue
+
+            ref_dtype = ref_arr.dtype if ref_arr.dtype in (np.float16, np.float32) else np.float32
+            ref_shape = tuple(ref_arr.shape)
+            values: list[np.ndarray] = []
+            mask = np.zeros(B, dtype=np.int8)
+
+            for i, (baseline, sources) in enumerate(zip(baseline_dicts, baseline_source_dicts)):
+                value = baseline.get(sig_id)
+                source_sid = sources.get(sig_id)
+                source_kept = False
+                if source_sid is not None:
+                    Li = lengths[i]
+                    source_kept = bool(
+                        np.any(
+                            (id_batch[i, :Li] == int(source_sid))
+                            & (role_batch[i, :Li] == ROLE_CONTEXT)
+                            & (pos_batch[i, :Li] == 1)
+                        )
+                    )
+
+                if value is None or not source_kept:
+                    values.append(np.zeros(ref_shape, dtype=ref_dtype))
+                    continue
+
+                arr = np.asarray(value, dtype=ref_dtype).reshape(-1)
+                if tuple(arr.shape) != ref_shape:
+                    raise ValueError(
+                        f"Inconsistent output residual baseline shape for signal_id={sig_id}: "
+                        f"expected {ref_shape}, got {tuple(arr.shape)}."
+                    )
+                values.append(arr)
+                mask[i] = 1
+
+            output_baseline_batch_np[sig_id] = np.stack(values, axis=0)
+            output_baseline_mask_np[sig_id] = mask
+
+        # ..............................................................................................................
+        # 9) Convert arrays to torch
         # ..............................................................................................................
 
         pos_t = torch.from_numpy(pos_batch).long()
         id_t = torch.from_numpy(id_batch).long()
         mod_t = torch.from_numpy(mod_batch.astype(np.int64))
         role_t = torch.from_numpy(role_batch.astype(np.int64))
+        token_time_t = torch.from_numpy(token_time_batch)
 
         padding_mask_t = torch.from_numpy(padding_mask.astype(bool))
         input_mask_t = torch.from_numpy(input_mask.astype(bool))
@@ -684,9 +820,18 @@ class MMTCollate:
         output_mask_t: dict[int, torch.Tensor] = {
             sig_id: torch.from_numpy(mask_np.astype(bool)) for sig_id, mask_np in output_mask_batch_np.items()
         }
+        output_baseline_t: dict[int, torch.Tensor] = {
+            sig_id: torch.from_numpy(arr) for sig_id, arr in output_baseline_batch_np.items()
+        }
+        output_baseline_mask_t: dict[int, torch.Tensor] = {
+            sig_id: torch.from_numpy(mask_np.astype(bool)) for sig_id, mask_np in output_baseline_mask_np.items()
+        }
         output_native_t: dict[int, torch.Tensor] = {}
         if self.keep_output_native:
             output_native_t = {sig_id: torch.from_numpy(arr) for sig_id, arr in output_native_batch_np.items()}
+        output_time_t: dict[int, torch.Tensor] = {
+            sig_id: torch.from_numpy(arr.astype(np.float32, copy=False)) for sig_id, arr in output_time_batch_np.items()
+        }
 
         # ..............................................................................................................
         # 10) Assemble final batch dict
@@ -699,6 +844,7 @@ class MMTCollate:
             "id": id_t,
             "mod": mod_t,
             "role": role_t,
+            "token_time": token_time_t,
             "padding_mask": padding_mask_t,
             "input_mask": input_mask_t,
             "actuator_mask": actuator_mask_t,
@@ -706,8 +852,24 @@ class MMTCollate:
             "output_mask": output_mask_t,
         }
 
+        if any(grid is not None for grid in space_grids):
+            if any(grid is None for grid in space_grids):
+                raise ValueError("space_grid must be present for every window in a collated batch or for none.")
+            reference_grid = space_grids[0]
+            assert reference_grid is not None
+            reference_shape = tuple(reference_grid.shape)
+            if any(tuple(grid.shape) != reference_shape for grid in space_grids if grid is not None):
+                raise ValueError("Inconsistent space_grid shapes within a collated batch.")
+            batch_out["space_grid"] = torch.from_numpy(np.stack(space_grids, axis=0))
+
+        if output_baseline_t:
+            batch_out["output_baseline_emb"] = output_baseline_t
+            batch_out["output_baseline_mask"] = output_baseline_mask_t
+
         if self.keep_output_native:
             batch_out["output_native"] = output_native_t
+        if output_time_t:
+            batch_out["output_time"] = output_time_t
 
         # Keep shot/window identifiers if present (useful for debug).
         first = flat_windows[0]
@@ -715,5 +877,9 @@ class MMTCollate:
             batch_out["shot_id"] = [w.get("shot_id") for w in flat_windows]
         if "window_index" in first:
             batch_out["window_index"] = [w.get("window_index") for w in flat_windows]
+        if "t_cut" in first:
+            batch_out["t_cut"] = torch.as_tensor(
+                [float(w.get("t_cut", np.nan)) for w in flat_windows], dtype=torch.float32
+            )
 
         return batch_out

@@ -11,6 +11,7 @@ Key modules
 - codec_utils.py    : codec and decoder factories, shape helpers
 - dct3d.py          : DCT3D encoder (numpy) + DCT3DTorchDecoder
 - identity.py       : Identity encoder (numpy) + IdentityTorchDecoder
+- tune_dct3d.py     : dataset-agnostic DCT3D rank-tuning orchestration
 - vae.py            : VAE encoder (numpy) + VAETorchDecoder
 """
 

@@ -1,0 +1,30 @@
+# Local task without physics loss.
+#
+# thomson_scattering added in input, magnetics removed, same output set as task_1-4.
+
+task_name: task_1-6-data
+task_type: markovian
+
+sources_and_signals:
+  input_name: &input_keys
+    - [pf_active, coil_current]
+    - [pf_active, solenoid_current]
+    - [thomson_scattering, t_e]
+    - [thomson_scattering, n_e]
+    - [summary, ip]
+
+  actuator_name:
+
+  output_name: &output_keys
+    - [equilibrium, psi]
+    - [equilibrium, j_tor]
+
+task_window_segmenter:
+  input_keys: *input_keys
+  actuator_keys:
+  output_keys: *output_keys
+  input_length: 0.005
+  output_length: 0.005
+  delta: -0.005
+
+stride_window: 0.001

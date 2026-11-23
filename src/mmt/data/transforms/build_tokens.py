@@ -23,6 +23,9 @@ This transform writes the following fields to `window`:
     window["role"]         : np.ndarray[int8] shape (L,)
         Token roles (ROLE_CONTEXT / ROLE_ACTUATOR).
 
+    window["token_time"]   : np.ndarray[float64] shape (L,)
+        Physical centre time for each context/actuator token.
+
     window["output_emb"]   : dict[int, np.ndarray]
         Window-level output embeddings keyed by output signal_id.
 
@@ -125,8 +128,8 @@ class BuildTokensTransform:
         Returns
         -------
         dict[str, Any] | None
-            Dictionary with keys in ["emb_chunks", "pos", "id", "mod", "role", "output_emb"] if `window` is not None,
-            otherwise None.
+            Dictionary with keys in ["emb_chunks", "pos", "id", "mod", "role", "token_time", "output_emb"] if
+            `window` is not None, otherwise None.
 
         Raises
         ------
@@ -162,10 +165,7 @@ class BuildTokensTransform:
             if "chunk_index_in_window" not in ch:
                 raise KeyError("[BuildTokensTransform] `ch['chunk_index_in_window']` is required.")
 
-            return (
-                int(ch["pos"]),
-                int(ch["chunk_index_in_window"])
-            )
+            return (int(ch["pos"]), int(ch["chunk_index_in_window"]))
 
         # ..............................................................................................................
 
@@ -187,6 +187,7 @@ class BuildTokensTransform:
         role_list: list[int] = []
         mod_list: list[int] = []
         pos_list: list[int] = []
+        time_list: list[float] = []
 
         # ..............................................................................................................
         # 1) CONTEXT TOKENS (INPUT)
@@ -206,6 +207,7 @@ class BuildTokensTransform:
                 role_list.append(ROLE_CONTEXT)
                 mod_list.append(self._signal_id_to_mod_id[sid])
                 pos_list.append(pos)
+                time_list.append(float(ch_.get("time_center", np.nan)))
 
         # ..............................................................................................................
         # 2) ACTUATOR TOKENS
@@ -225,6 +227,7 @@ class BuildTokensTransform:
                 role_list.append(ROLE_ACTUATOR)
                 mod_list.append(self._signal_id_to_mod_id[sid])
                 pos_list.append(pos)
+                time_list.append(float(ch_.get("time_center", np.nan)))
 
         # ..............................................................................................................
         # 3) OUTPUTS (window-level)
@@ -242,6 +245,7 @@ class BuildTokensTransform:
         window["id"] = np.asarray(sig_list, dtype=np.int32)
         window["mod"] = np.asarray(mod_list, dtype=np.int16)
         window["role"] = np.asarray(role_list, dtype=np.int8)
+        window["token_time"] = np.asarray(time_list, dtype=np.float64)
         window["output_emb"] = output_emb
 
         logger.debug(

@@ -1,0 +1,50 @@
+# Local GS-loss integration task.
+#
+# Same signal set/windowing as benchmark task_1-4, with all the outputs from group 1 has added to the output set.
+
+task_name: task_1-5-strong
+task_type: markovian
+
+sources_and_signals:
+  input_name: &input_keys
+    - [magnetics, flux_loop_flux]
+    - [magnetics, b_field_pol_probe_ccbv_field]
+    - [magnetics, b_field_pol_probe_obr_field]
+    - [magnetics, b_field_pol_probe_obv_field]
+    - [magnetics, b_field_tor_probe_saddle_voltage]
+    - [pf_active, coil_current]
+    - [pf_active, solenoid_current]
+    - [summary, ip]
+
+  actuator_name:
+
+  output_name: &output_keys
+    - [equilibrium, psi]
+    - [equilibrium, j_tor]
+    - [equilibrium, elongation]
+    - [equilibrium, elongation_axis]
+    - [equilibrium, triangularity_upper]
+    - [equilibrium, triangularity_lower]
+    - [equilibrium, x_point_r]
+    - [equilibrium, x_point_z]
+    - [equilibrium, minor_radius]
+    - [equilibrium, magnetic_axis_r]
+    - [equilibrium, magnetic_axis_z]
+    - [equilibrium, q95]
+    - [equilibrium, beta_tor]
+    - [equilibrium, beta_pol]
+    - [equilibrium, beta_normal]
+    - [equilibrium, bvac_rmag]
+    - [equilibrium, bphi_rmag]
+    - [equilibrium, lcfs_r]
+    - [equilibrium, lcfs_z]
+
+task_window_segmenter:
+  input_keys: *input_keys
+  actuator_keys:
+  output_keys: *output_keys
+  input_length: 0.005
+  output_length: 0.005
+  delta: -0.005
+
+stride_window: 0.001

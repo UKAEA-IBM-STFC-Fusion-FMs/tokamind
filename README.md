@@ -53,7 +53,8 @@ The code corresponds to the official implementation introduced in [TokaMind: A M
 │   ├── mast_utils/
 │   │   ├── config/                    # config loading modules
 │   │   └── ...
-│   └── configs/
+    │   └── configs/
+│       └── mmt/                        # self-contained model profile: phases/ tasks/ embeddings/
 ├── docs/                              # project documentation
 └── runs/                              # output runs and checkpoints
 ```
@@ -136,9 +137,11 @@ The pretrained VAE artifacts must be obtained separately: they are not included 
 Place each model folder under `VAE_fairmast/src/vae_pipeline/data/New_VAEs/<model_dir>/`, containing
 `config_*.json`, the checkpoint referenced by `mmt_info.json`, and `mmt_info.json` itself.
 Folder names must match `encoder_kwargs.model_dir` in the task's
-`scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/vae.yaml`.
+`scripts_mast/configs/mmt/embeddings/vae/<task>.yaml`.
 
 Back in the TokaMind checkout, select `--emb_profile vae` when running the Group-1/Group-2 finetuning commands below.
+
+---
 
 ## 🤗 Pretrained Model
 
@@ -171,6 +174,7 @@ You can then warmstart a finetune directly from it — see [Checkpointing and Wa
 ```bash
 python scripts_mast/run_pretrain.py \
   --task pretrain_inputs_actuators_to_inputs_outputs \
+  --model_profile mmt \
   --emb_profile dct3d \
   --run-id tokamind_base
 ```
@@ -181,7 +185,8 @@ python scripts_mast/run_pretrain.py \
 python scripts_mast/run_finetune.py \
   --task task_2-1 \
   --init warmstart \
-  --model tokamind_base \
+  --model_profile mmt \
+  --model_source tokamind_base \
   --emb_profile dct3d \
   --tag exp1
 ```
@@ -191,6 +196,7 @@ python scripts_mast/run_finetune.py \
 python scripts_mast/run_finetune.py \
   --task task_2-1 \
   --init scratch \
+  --model_profile mmt \
   --emb_profile dct3d \
   --tag exp1
 ```
@@ -199,44 +205,48 @@ python scripts_mast/run_finetune.py \
 ```bash
 python scripts_mast/run_eval.py \
   --task task_2-1 \
-  --model ft-task_2-1-ws-tokamind_base-exp1
+  --model_source ft-task_2-1-ws-tokamind_base-exp1
 ```
 
 ## ⚙️ Configuration Model
 Configuration is convention-based and merged by phase.
 
-Base files:
-- `scripts_mast/configs/common/embeddings.yaml`
-- `scripts_mast/configs/common/pretrain.yaml`
-- `scripts_mast/configs/common/finetune_warmstart.yaml`
-- `scripts_mast/configs/common/finetune_scratch.yaml`
-- `scripts_mast/configs/common/eval.yaml`
+Each model profile is a self-contained folder holding `phases/`, `tasks/`, and `embeddings/`. Base phase files live under `phases/`:
+- `scripts_mast/configs/mmt/phases/pretrain.yaml`
+- `scripts_mast/configs/mmt/phases/finetune_warmstart.yaml`
+- `scripts_mast/configs/mmt/phases/finetune_scratch.yaml`
+- `scripts_mast/configs/mmt/phases/eval.yaml`
+
+Embedding profiles live under the same model folder:
+- `scripts_mast/configs/mmt/embeddings/dct3d/_default.yaml`
+- `scripts_mast/configs/mmt/embeddings/vae/<task>.yaml` when a task has a VAE profile
 
 Key data config knobs:
 - `data.split`: `random` (default) or `temporal` — selects the shot split strategy for pretrain/finetune.
-- `data.subset_of_shots`: limits shot count for faster runs.
+- `data.subset_size`: limits MAST shots.
 
-Task files:
-- `scripts_mast/configs/tasks_overrides/<task>/<phase>_overrides.yaml` (optional)
-- `scripts_mast/configs/tasks_overrides/<task>/embeddings_overrides/<profile>.yaml`
+Task runtime overrides are per model profile, under that profile's `tasks/` folder:
+- `scripts_mast/configs/<model_profile>/tasks/pretrain_tasks.yaml`
+- `scripts_mast/configs/<model_profile>/tasks/finetune_tasks.yaml`
+- `scripts_mast/configs/<model_profile>/tasks/eval_tasks.yaml`
 
-Finetune configs are split by init mode:
-- `scripts_mast/configs/common/finetune_warmstart.yaml`: complete warmstart config, embedding policy, training recipe, `model_source`, and `model_overrides`
-- `scripts_mast/configs/common/finetune_scratch.yaml`: complete scratch config, embedding policy, training recipe, and complete `model_scratch`
-
-Task-specific finetune deltas still live in `tasks_overrides/<task>/finetune_overrides.yaml` and apply on top of either init mode.
+Finetune configs are split by model profile and init mode:
+- `scripts_mast/configs/<model_profile>/phases/finetune_warmstart.yaml`: complete warmstart training recipe, `model_source`, and `model_overrides`
+- `scripts_mast/configs/<model_profile>/phases/finetune_scratch.yaml`: complete scratch training recipe and complete `model_scratch`
 
 Details are in:
 - [Configuration Guide](docs/config_guide.md)
 - [Configuration Reference](docs/config_reference.md)
 
 ## 🧩 Embedding Resolution
-DCT3D tuning is integrated in the training scripts and controlled through `embeddings.role_mode` and `embeddings.tuning`.
+DCT3D tuning is integrated in the training scripts. Manual DCT3D overrides and tuning settings live under
+`embeddings.dct3d` in `scripts_mast/configs/<model_profile>/embeddings/dct3d/_default.yaml`.
 NaN/inf handling for both DCT3D tuning and runtime embedding is controlled by `preprocess.embed_chunks.nan_imputation`.
 
-- `role_mode.<role>=tune`: tune DCT3D coefficients in the current run.
-- `role_mode.<role>=source`: inherit DCT3D coefficients from the source run.
-- `role_mode.<role>=config`: use config/profile defaults without tuning or source artifacts.
+- Pretrain and scratch finetune tune DCT3D signals unless they have explicit manual per-signal overrides.
+- Warmstart finetune inherits existing input/actuator artifacts from the source run, tunes new input/actuator signals,
+  and tunes outputs. Manual per-signal overrides are left untouched.
+- VAE profiles do not use DCT3D tune/source policy.
 - Eval: embeddings are loaded from the evaluated training run.
 
 Details are in [DCT3D Tuning](docs/tuning_dct3d.md).

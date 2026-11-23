@@ -6,18 +6,8 @@ Optimizer + LR schedule helpers.
 This module is intentionally *simple* and stage-driven.
 
 Expected (validated) stage config fields
----------------------------------------
-optimizer:
-  lr:
-    token_encoder: float
-    backbone: float
-    modality_heads: float
-    output_adapters: float
-  wd:
-    token_encoder: float
-    backbone: float
-    modality_heads: float
-    output_adapters: float
+----------------------------------------
+optimizer.lr, optimizer.wd, and freeze are mappings keyed by the selected model's ``get_named_blocks()`` names.
 
 The validator is expected to already:
   • apply lr/wd inheritance (e.g., token_encoder inherits from backbone when null)
@@ -28,20 +18,19 @@ Design choices
 --------------
 - **No per-batch LR toggling**. The loss is already masked by `output_mask`, so missing outputs do not contribute
   gradients.
-- Param groups are 4 coarse blocks: token_encoder, backbone, modality_heads, output_adapters. This keeps the optimizer
-  state compact and avoids brittle per-output bookkeeping.
+- Param groups are coarse model-declared blocks. This keeps the optimizer state compact while allowing different model
+  architectures to expose different transfer units.
 
 """
 
 from __future__ import annotations
 
 import math
-from typing import Iterable
-
 import torch
 import torch.nn as nn
 
 from mmt.constants import FLOAT_STABILITY_EPS
+from mmt.models.blocks import get_named_model_blocks
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -54,138 +43,41 @@ def _set_trainable(module: nn.Module | torch.Tensor, flag: bool) -> None:
 
 
 # ----------------------------------------------------------------------------------------------------------------------
-def _flatten_params(
-    modules: Iterable[nn.Module] | Iterable[torch.Tensor],
-) -> list[nn.Parameter]:
-    """Return a flat list of parameters from a list/iterable of modules."""
-    params: list[nn.Parameter] = []
-    for m in modules:
-        if isinstance(m, nn.Module):
-            params.extend(list(m.parameters()))
-    return params
-
-
-# ----------------------------------------------------------------------------------------------------------------------
-def build_param_groups(  # NOSONAR - Ignore cognitive complexity
+def build_param_groups(
     model: nn.Module,
     *,
-    lr_token_encoder: float,
-    wd_token_encoder: float,
-    lr_backbone: float,
-    wd_backbone: float,
-    lr_modality_heads: float,
-    wd_modality_heads: float,
-    lr_output_adapters: float,
-    wd_output_adapters: float,
+    lr_by_block: dict[str, float],
+    wd_by_block: dict[str, float],
 ) -> list[dict]:
     """
-    Build optimizer parameter groups for four coarse blocks:
-
-      • token_encoder   (model.tokens)
-      • backbone        (model.backbone)
-      • modality_heads  (all heads in model.modality_heads)
-      • output_adapters (all adapters in model.output_adapters)
+    Build optimizer parameter groups for model-declared blocks.
 
     Notes
     -----
     - Frozen params (requires_grad=False) are allowed in groups; PyTorch optimizers skip params with grad=None during
       step().
-    - group_type is used by logging utilities (e.g., backbone_lr()).
+    - group_type is used by logging utilities.
 
     Raises
     ------
-    AttributeError
-        If `model` does not expose attributes "tokens", "backbone", "modality_heads", or "output_adapters".
     RuntimeError
-        `model.backbone` has no parameters.
+        If a declared block has no parameters.
 
     """
 
-    for attribute in ["tokens", "backbone", "modality_heads", "output_adapters"]:
-        if not hasattr(model, attribute):
-            raise AttributeError(f"Model must expose .{attribute}.")
-
     groups: list[dict] = []
-
-    # ..................................................................................................................
-    # Token encoder
-    # ..................................................................................................................
-
-    tokens_module = getattr(model, "tokens")
-    if isinstance(tokens_module, nn.Module):
-        tok_params = list(tokens_module.parameters())
-    else:
-        tok_params = []
-    if tok_params:
+    for block_name, block in get_named_model_blocks(model=model).items():
+        params = list(block.parameters())
+        if not params:
+            raise RuntimeError(f"Model block {block_name!r} has no parameters.")
         groups.append(
             {
-                "params": tok_params,
-                "lr": float(lr_token_encoder),
-                "weight_decay": float(wd_token_encoder),
-                "group_type": "token_encoder",
+                "params": params,
+                "lr": float(lr_by_block[block_name]),
+                "weight_decay": float(wd_by_block[block_name]),
+                "group_type": block_name,
             }
         )
-
-    # ..................................................................................................................
-    # Backbone
-    # ..................................................................................................................
-
-    backbone_module = getattr(model, "backbone")
-    if isinstance(backbone_module, nn.Module):
-        back_params = list(backbone_module.parameters())
-        if not back_params:
-            raise RuntimeError("`model.backbone` has no parameters.")
-
-        groups.append(
-            {
-                "params": back_params,
-                "lr": float(lr_backbone),
-                "weight_decay": float(wd_backbone),
-                "group_type": "backbone",
-            }
-        )
-
-    # ..................................................................................................................
-    # Modality heads (single group)
-    # ..................................................................................................................
-
-    modality_heads = getattr(model, "modality_heads")
-    if isinstance(modality_heads, nn.ModuleDict):
-        mh_params = _flatten_params(modality_heads.values())
-    else:
-        mh_params = []
-    if mh_params:
-        groups.append(
-            {
-                "params": mh_params,
-                "lr": float(lr_modality_heads),
-                "weight_decay": float(wd_modality_heads),
-                "group_type": "modality_heads",
-            }
-        )
-
-    # ..................................................................................................................
-    # Output adapters (single group)
-    # ..................................................................................................................
-
-    output_adapters = getattr(model, "output_adapters")
-    if isinstance(output_adapters, nn.ModuleDict):
-        oa_params = _flatten_params(output_adapters.values())
-    else:
-        oa_params = []
-    if oa_params:
-        groups.append(
-            {
-                "params": oa_params,
-                "lr": float(lr_output_adapters),
-                "weight_decay": float(wd_output_adapters),
-                "group_type": "output_adapters",
-            }
-        )
-
-    # ..................................................................................................................
-    # Return
-    # ..................................................................................................................
 
     return groups
 
@@ -194,14 +86,8 @@ def build_param_groups(  # NOSONAR - Ignore cognitive complexity
 def build_optimizer_and_scheduler(
     model: nn.Module,
     *,
-    lr_token_encoder: float,
-    wd_token_encoder: float,
-    lr_backbone: float,
-    wd_backbone: float,
-    lr_modality_heads: float,
-    wd_modality_heads: float,
-    lr_output_adapters: float,
-    wd_output_adapters: float,
+    lr_by_block: dict[str, float],
+    wd_by_block: dict[str, float],
     total_steps: int,
     warmup_steps: int,
     use_adamw: bool,
@@ -243,14 +129,8 @@ def build_optimizer_and_scheduler(
 
     param_groups = build_param_groups(
         model=model,
-        lr_token_encoder=lr_token_encoder,
-        wd_token_encoder=wd_token_encoder,
-        lr_backbone=lr_backbone,
-        wd_backbone=wd_backbone,
-        lr_modality_heads=lr_modality_heads,
-        wd_modality_heads=wd_modality_heads,
-        lr_output_adapters=lr_output_adapters,
-        wd_output_adapters=wd_output_adapters,
+        lr_by_block=lr_by_block,
+        wd_by_block=wd_by_block,
     )
 
     OptimClass = torch.optim.AdamW if use_adamw else torch.optim.Adam  # NOSONAR # noqa - Ignore lowercase warning
@@ -271,23 +151,9 @@ def build_optimizer_and_scheduler(
 def apply_stage_freeze_policy(
     model: nn.Module,
     *,
-    freeze_token_encoder: bool,
-    freeze_backbone: bool,
-    freeze_modality_heads: bool,
-    freeze_output_adapters: bool,
+    freeze_by_block: dict[str, bool],
 ) -> None:
     """Freeze/unfreeze whole blocks at the beginning of a stage."""
 
-    if hasattr(model, "tokens"):
-        _set_trainable(module=model.tokens, flag=(not freeze_token_encoder))  # type: ignore[arg-type]
-
-    if hasattr(model, "backbone"):
-        _set_trainable(module=model.backbone, flag=(not freeze_backbone))  # type: ignore[arg-type]
-
-    if hasattr(model, "modality_heads"):
-        for head in model.modality_heads.values():  # type: ignore[attr-defined]
-            _set_trainable(module=head, flag=(not freeze_modality_heads))  # type: ignore[arg-type]
-
-    if hasattr(model, "output_adapters"):
-        for adp in model.output_adapters.values():  # type: ignore[attr-defined]
-            _set_trainable(module=adp, flag=(not freeze_output_adapters))  # type: ignore[arg-type]
+    for block_name, block in get_named_model_blocks(model=model).items():
+        _set_trainable(module=block, flag=(not freeze_by_block[block_name]))

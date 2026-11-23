@@ -8,11 +8,11 @@ Evaluation loads a trained run, runs one pass on the test split, and writes metr
 ```bash
 python scripts_mast/run_eval.py \
   --task <task> \
-  --model <run_id_or_path>
+  --model_source <run_id_or_path>
 ```
 
 ## Source Model Resolution
-`--model` accepts:
+`--model_source` accepts:
 - run id under `runs/`
 - path to a run directory
 
@@ -92,7 +92,7 @@ eval:
 ```
 
 Outputs:
-- trace artifacts under `traces/`
+- trace artifacts under `traces/` (each `.npz` holds `true`, `pred`, `window_index`)
 - each artifact is limited by `n_max` and optional signal/time filters
 
 Filter behavior:

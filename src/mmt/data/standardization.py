@@ -5,14 +5,13 @@ This module provides functions to undo signal standardization (mean/std normaliz
 numpy and torch. The two implementations share the same broadcasting conventions and are
 intended to be used together:
 
-    • ``destandardize_numpy``  — for eval/export paths after detaching from the compute graph.
-    • ``destandardize_torch``  — for training losses that operate in physical-unit space
-      (e.g., a future Grad-Shafranov loss) and for eval paths that share the same forward pass
-      as training.
+    • `destandardize_numpy`  — for eval/export paths after detaching from the compute graph.
+    • `destandardize_torch`  — for training losses that operate in physical-unit space (e.g., a future Grad-Shafranov
+      loss) and for eval paths that share the same forward pass as training.
 
 Broadcasting conventions (both functions)
 ------------------------------------------
-Given an array ``x`` of shape (B, ...) and scalar or array statistics:
+Given an array `x` of shape (B, ...) and scalar or array statistics:
   - Scalar mean/std          → broadcast directly.
   - Per-channel (C,)         → broadcast along axis 1 for arrays of shape (B, C, ...).
   - Spatial (H, W)           → broadcast along axes 1-2 for arrays of shape (B, H, W, T).
@@ -33,7 +32,7 @@ from torch import Tensor
 # ----------------------------------------------------------------------------------------------------------------------
 def destandardize_numpy(arr: np.ndarray, mean: float | np.ndarray, std: float | np.ndarray) -> np.ndarray:
     """
-    Undo standardization in numpy: ``x = x_std * std + mean``.
+    Undo standardization in numpy: `x = x_std * std + mean`.
 
     Parameters
     ----------
@@ -41,19 +40,19 @@ def destandardize_numpy(arr: np.ndarray, mean: float | np.ndarray, std: float | 
         Standardized input array of shape (B, ...).
     mean : float | np.ndarray
         Mean used during standardization. Scalar, per-channel (C,), spatial (H, W),
-        or exact match with ``arr.shape[1:]``.
+        or exact match with `arr.shape[1:]`.
     std : float | np.ndarray
-        Standard deviation used during standardization. Same shape conventions as ``mean``.
+        Standard deviation used during standardization. Same shape conventions as `mean`.
 
     Returns
     -------
     np.ndarray
-        Destandardized array of the same shape as ``arr``.
+        Destandardized array of the same shape as `arr`.
 
     Raises
     ------
     ValueError
-        If ``mean`` or ``std`` shape cannot be broadcast to ``arr``.
+        If `mean` or `std` shape cannot be broadcast to `arr`.
 
     """
 
@@ -98,24 +97,23 @@ def destandardize_numpy(arr: np.ndarray, mean: float | np.ndarray, std: float | 
 # ----------------------------------------------------------------------------------------------------------------------
 def destandardize_torch(x: Tensor, mean: Tensor, std: Tensor) -> Tensor:
     """
-    Undo standardization in torch: ``x = x_std * std + mean``.
+    Undo standardization in torch: `x = x_std * std + mean`.
 
-    Gradients are preserved with respect to ``x``. ``mean`` and ``std`` are treated as
-    fixed constants (no gradient required).
+    Gradients are preserved with respect to `x`. `mean` and `std` are treated as fixed constants (no gradient required).
 
     Parameters
     ----------
     x : Tensor
         Standardized input tensor of shape (B, ...).
     mean : Tensor
-        Mean used during standardization. Must be broadcastable to ``x``.
+        Mean used during standardization. Must be broadcastable to `x`.
     std : Tensor
-        Standard deviation used during standardization. Must be broadcastable to ``x``.
+        Standard deviation used during standardization. Must be broadcastable to `x`.
 
     Returns
     -------
     Tensor
-        Destandardized tensor of the same shape as ``x``.
+        Destandardized tensor of the same shape as `x`.
 
     """
 

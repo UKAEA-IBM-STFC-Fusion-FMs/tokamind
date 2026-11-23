@@ -34,7 +34,8 @@ from torch.optim.lr_scheduler import LRScheduler
 from torch.amp.grad_scaler import GradScaler
 
 from mmt.utils.amp_utils import amp_ctx_for_model
-from .losses import LossAggregator
+from mmt.train.losses.base import LossComputeContext
+from .losses import LossAggregator, build_loss_aggregator, resolve_loss_output_filters
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -47,6 +48,174 @@ _MAX_GRAD_NORM = 1.0
 # How many batch-level timing lines to show at INFO during the *first* global epoch.
 # If DEBUG logging is enabled, we will log timing for every batch at DEBUG.
 _LOG_FIRST_EPOCH_BATCHES_INFO = 5
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def effective_stage_loss_cfg(train_cfg: Mapping[str, Any], stage_cfg: Mapping[str, Any]) -> Mapping[str, Any]:
+    """
+    Return the loss config for one stage.
+
+    Stage-level ``loss`` blocks shallow-override the global ``train.loss`` block. Stages without ``loss`` use the
+    global block unchanged.
+
+    Parameters
+    ----------
+    train_cfg : Mapping[str, Any]
+        Train config containing the global ``loss`` block.
+    stage_cfg : Mapping[str, Any]
+        Stage config, optionally containing a ``loss`` block.
+
+    Returns
+    -------
+    Mapping[str, Any]
+        Effective loss config for the stage.
+
+    """
+
+    global_loss = train_cfg["loss"]
+    stage_loss = stage_cfg.get("loss")
+    if not isinstance(stage_loss, Mapping):
+        return global_loss
+    return {**global_loss, **stage_loss}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def canonical_loss_cfg(loss_cfg: Mapping[str, Any]) -> tuple[tuple[str, Any], ...]:
+    """
+    Return a stable representation of a loss config for equality checks.
+
+    Dictionary keys are sorted recursively so equivalent mappings compare equal even if written in a different order.
+    List order is preserved because loss terms are applied in the configured order.
+
+    Parameters
+    ----------
+    loss_cfg : Mapping[str, Any]
+        Effective loss config to normalize.
+
+    Returns
+    -------
+    tuple[tuple[str, Any], ...]
+        Canonical, comparable loss config representation.
+
+    """
+
+    def canonical_value(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return tuple(
+                (str(key), canonical_value(inner_value))
+                for key, inner_value in sorted(value.items(), key=lambda item: str(item[0]))
+            )
+        if isinstance(value, list | tuple):
+            return tuple(canonical_value(item) for item in value)
+        return value
+
+    return canonical_value(loss_cfg)
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def _resolve_output_weights_by_id(
+    *,
+    loss_cfg: Mapping[str, Any],
+    output_name_to_id: Mapping[str, int],
+    path: str,
+) -> dict[int, float]:
+    """
+    Resolve loss ``output_weights`` from output names to signal IDs.
+
+    Parameters
+    ----------
+    loss_cfg : Mapping[str, Any]
+        Effective loss config for one stage.
+    output_name_to_id : Mapping[str, int]
+        Mapping from output signal name to runtime signal ID.
+    path : str
+        Human-readable config path used in error messages.
+
+    Returns
+    -------
+    dict[int, float]
+        Output weights keyed by signal ID.
+
+    Raises
+    ------
+    KeyError
+        If a configured output weight references an unknown output.
+
+    """
+
+    output_weights_cfg = loss_cfg.get("output_weights") or {}
+    if not isinstance(output_weights_cfg, Mapping) or not output_weights_cfg:
+        return {}
+
+    unknown = [key for key in output_weights_cfg.keys() if str(key) not in output_name_to_id]
+    if unknown:
+        raise KeyError(
+            f"Unknown {path}.output_weights keys: {unknown}. "
+            f"Expected output signal names among: {sorted(output_name_to_id.keys())}."
+        )
+
+    return {int(output_name_to_id[str(name)]): float(weight) for name, weight in output_weights_cfg.items()}
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def build_loss_aggregator_for_stage(
+    *,
+    loss_cfg: Mapping[str, Any],
+    output_specs: list[Any],
+    output_name_to_id: Mapping[str, int],
+    output_decoders: dict | None,
+    signal_stats: Mapping[str, Mapping[str, Any]] | None,
+    path: str,
+    require_all_outputs: bool,
+) -> LossAggregator:
+    """
+    Build the loss aggregator for one effective stage loss config.
+
+    Parameters
+    ----------
+    loss_cfg : Mapping[str, Any]
+        Effective loss config for one stage.
+    output_specs : list[Any]
+        Model output specs.
+    output_name_to_id : Mapping[str, int]
+        Mapping from output signal name to runtime signal ID.
+    output_decoders : dict | None
+        Per-output decoders.
+    signal_stats : Mapping[str, Mapping[str, Any]] | None
+        Per-signal metadata used by native destandardized losses.
+    path : str
+        Human-readable config path used in error messages.
+    require_all_outputs : bool
+        Whether all model outputs must be supervised by this loss config.
+
+    Returns
+    -------
+    LossAggregator
+        Built loss aggregator for the stage.
+
+    """
+
+    output_weights_by_id = _resolve_output_weights_by_id(
+        loss_cfg=loss_cfg,
+        output_name_to_id=output_name_to_id,
+        path=path,
+    )
+    term_output_filters = resolve_loss_output_filters(
+        loss_cfg=loss_cfg,
+        output_specs=output_specs,
+        decoders=output_decoders,
+        path=path,
+        require_all_outputs=require_all_outputs,
+    )
+
+    return build_loss_aggregator(
+        loss_cfg=loss_cfg,
+        output_weights_by_id=output_weights_by_id if output_weights_by_id else None,
+        decoders=output_decoders,
+        term_output_filters=term_output_filters,
+        output_name_to_id=output_name_to_id,
+        signal_stats=signal_stats,
+    )
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -152,6 +321,9 @@ def move_batch_to_device(  # NOSONAR - Ignore cognitive complexity
         "padding_mask",
         "input_mask",
         "actuator_mask",
+        "space_grid",
+        "token_time",
+        "t_cut",
     ]:
         val = batch.get(key, None)
         if isinstance(val, Tensor):
@@ -194,6 +366,11 @@ def move_batch_to_device(  # NOSONAR - Ignore cognitive complexity
     if isinstance(output_mask, dict):
         batch["output_mask"] = {k: _to(tens=v) for k, v in output_mask.items()}
 
+    # Output query timestamps used by coordinate-aware models.
+    output_time = batch.get("output_time", None)
+    if isinstance(output_time, dict):
+        batch["output_time"] = {k: _to(tens=v) for k, v in output_time.items()}
+
     # Optional: native output
     output_native = batch.get("output_native", None)
     if isinstance(output_native, dict):
@@ -209,10 +386,11 @@ def move_batch_to_device(  # NOSONAR - Ignore cognitive complexity
 
 # ----------------------------------------------------------------------------------------------------------------------
 def backbone_lr(optimizer: torch.optim.Optimizer) -> float | None:
-    """Return the current learning rate of the backbone param group (for logging)."""
-    for g in optimizer.param_groups:
-        if g.get("group_type") == "backbone":
-            return float(g.get("lr", 0.0))
+    """Return the current learning rate of the primary backbone param group (for logging)."""
+    for preferred_block in ("backbone", "backbone_encoder"):
+        for g in optimizer.param_groups:
+            if g.get("group_type") == preferred_block:
+                return float(g.get("lr", 0.0))
     return None
 
 
@@ -242,18 +420,18 @@ def log_train_setup(
     logger.info("Params       : total=%d, trainable=%d", n_params, n_trainable)
     logger.info("Train loader : %d batches/epoch", train_loader_len)
 
-    # Loss config (does not change across stages)
+    # Global loss config. Individual stages may override it with their own loss block.
     loss_cfg = train_cfg.get("loss", {})
     terms = loss_cfg.get("terms", [])
     if terms:
         for t in terms:
-            logger.info("Loss term    : type=%s weight=%s", t.get("type"), t.get("weight", 1.0))
+            logger.info("Default loss : type=%s weight=%s", t.get("type"), t.get("weight", 1.0))
     else:
         output_weights = loss_cfg.get("output_weights")
         if isinstance(output_weights, dict) and output_weights:
             logger.info("Loss weights : %r", output_weights)
         else:
-            logger.info("Loss weights : (uniform across outputs)")
+            logger.info("Default loss : (uniform across outputs)")
 
     logger.info("Stages:")
     for s in stages:
@@ -263,6 +441,11 @@ def log_train_setup(
         logger.info("      lr          : %r", s["optimizer"]["lr"])
         logger.info("      wd          : %r", s["optimizer"]["wd"])
         logger.info("      grad_acc    : %d", s["scheduler"]["grad_accum_steps"])
+        if isinstance(s.get("loss"), Mapping):
+            stage_loss_cfg = {**loss_cfg, **s["loss"]}
+            stage_terms = stage_loss_cfg.get("terms", [])
+            for term in stage_terms:
+                logger.info("      loss        : type=%s weight=%s", term.get("type"), term.get("weight", 1.0))
 
     pat = train_cfg["early_stop"]["patience"]
     dlt = train_cfg["early_stop"]["delta"]
@@ -293,6 +476,10 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
     global_step: int,
     max_batches: int | None = None,
     epoch_global: int | None = None,
+    epoch_in_stage: int | None = None,
+    stage_index: int | None = None,
+    stage_name: str | None = None,
+    run_dir: str | None = None,
 ) -> tuple[float, dict[str, float], int]:
     """
     Run one epoch over a DataLoader, in either train or eval mode.
@@ -352,7 +539,21 @@ def run_one_epoch(  # NOSONAR - Ignore cognitive complexity
                 preds = out.get("pred", {})
 
             # Compute loss outside autocast. The loss functions force float32 for AMP stability.
-            loss_t, loss_logs = loss_aggregator.compute(preds=preds, batch=batch)
+            loss_context = LossComputeContext(
+                stage_index=stage_index,
+                stage_name=stage_name,
+                epoch_global=epoch_global,
+                epoch_in_stage=epoch_in_stage,
+                global_step=global_step,
+                batch_index=batch_idx,
+                train=train,
+                run_dir=run_dir,
+            )
+            loss_t, loss_logs = loss_aggregator.compute(
+                preds=preds,
+                batch=batch,
+                context=loss_context,
+            )
 
             # Optional: per-output loss logging (enable with logger level DEBUG).
             if loss_logs and logger.isEnabledFor(logging.DEBUG):

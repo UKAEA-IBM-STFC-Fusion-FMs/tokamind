@@ -39,7 +39,7 @@ Usage
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import Any, Literal
 import numpy as np
 from scipy.fftpack import dct, idct
 
@@ -48,6 +48,16 @@ from torch import Tensor
 import torch.nn.functional as F  # noqa - Ignore lowercase warning
 
 from .torch_decoder import TorchDecoder
+
+
+# Transient bootstrap encoder kwargs used to construct initial SignalSpecs before rank-mode tuning overwrites tuned
+# DCT3D signals. These values are still used as spatial DCT3D fallbacks by non-DCT3D profiles for signals they do not
+# explicitly override.
+DCT3D_BOOTSTRAP_DEFAULTS: dict[str, dict[str, Any]] = {
+    "timeseries": {"encoder_name": "dct3d", "encoder_kwargs": {"keep_h": 1, "keep_w": 1, "keep_t": 10}},
+    "profile": {"encoder_name": "dct3d", "encoder_kwargs": {"keep_h": 5, "keep_w": 1, "keep_t": 10}},
+    "video": {"encoder_name": "dct3d", "encoder_kwargs": {"keep_h": 16, "keep_w": 16, "keep_t": 5}},
+}
 
 
 # ======================================================================================================================
@@ -150,7 +160,7 @@ def _torch_idct_ortho_last(x: Tensor) -> Tensor:
     x_v[:, 0] *= (n**0.5) * 2.0
     x_v[:, 1:] *= ((n / 2.0) ** 0.5) * 2.0
 
-    # irfft only reads the first m = n//2+1 complex values; build only those.
+    # Build the positive-frequency half spectrum, then mirror it for a full-spectrum inverse FFT.
     m = n // 2 + 1
     k = torch.arange(m, dtype=x_v.dtype, device=x_v.device).reshape(1, m) * np.pi / (2.0 * n)
     w_r = torch.cos(k)
@@ -161,7 +171,13 @@ def _torch_idct_ortho_last(x: Tensor) -> Tensor:
     v_r = v_t_r * w_r - v_t_i * w_i
     v_i = v_t_r * w_i + v_t_i * w_r
 
-    v = torch.fft.irfft(torch.complex(v_r, v_i), n=n, dim=1)
+    half_spectrum = torch.complex(v_r, v_i)
+    if n % 2 == 0:
+        tail = half_spectrum[:, 1:-1].conj().flip(dims=[1])
+    else:
+        tail = half_spectrum[:, 1:].conj().flip(dims=[1])
+    full_spectrum = torch.cat([half_spectrum, tail], dim=1)
+    v = torch.fft.ifft(full_spectrum, n=n, dim=1).real
     out = v.new_empty(v.shape)
     out[:, ::2] = v[:, : n - (n // 2)]
     out[:, 1::2] = v.flip(dims=[1])[:, : n // 2]

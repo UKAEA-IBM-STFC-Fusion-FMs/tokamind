@@ -19,7 +19,9 @@ Training is split into one or more sequential stages, each with independent lear
 
 The full finetune recipe depends on the init mode and lives in the init-mode-specific config file:
 
-**`--init warmstart`** (`finetune_warmstart.yaml`) — two stages:
+The `mmt` profile uses the `token_encoder`, `backbone`, `modality_heads`, and `output_adapters` blocks.
+
+**`--init warmstart`** (`mmt/phases/finetune_warmstart.yaml`) — two stages:
 ```yaml
 train:
   stages:
@@ -72,7 +74,8 @@ train:
 ```
 
 ### LR/WD inheritance
-If `lr.<block>` or `wd.<block>` is `null`, it inherits the `backbone` value. Use this to set a single rate that applies uniformly across all unfrozen blocks.
+If `lr.<block>` or `wd.<block>` is `null`, it inherits the `backbone` value. Use this to set a single rate that applies
+uniformly across all unfrozen blocks.
 
 ### Freeze rules
 Setting `freeze.<block>: true` forces `lr` and `wd` to zero for that block regardless of what is specified. A warning is logged if non-zero values are overridden.
@@ -104,33 +107,58 @@ train:
 | `embed_mse` | Embedding (coefficient) | Implicit: NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; the loss trains against the embedding of the imputed signal with no explicit NaN awareness. | Cheapest — no decoding. |
 | `native_sparse_mse` | Native (standardized) | Explicit: model predictions are decoded back to native space, then NaN positions from `output_native` are masked out before the mean. Only observed positions contribute. | Requires decoder forward pass per batch. |
 
+
 When multiple terms are present, the total loss is a normalized weighted sum: `total = Σ(w_i · L_i) / Σ(w_i)`.
 
 `output_weights` scales individual outputs within each term independently (not applied across terms).
+
+Each term can optionally select outputs by name:
+
+```yaml
+train:
+  loss:
+    terms:
+      - type: embed_mse
+        weight: 1.0
+        outputs:
+          include:
+            - soft_x_rays-horizontal_cam_lower
+
+      - type: native_sparse_mse
+        weight: 1.0
+        outputs:
+          exclude:
+            - soft_x_rays-horizontal_cam_lower
+```
+
+Use either `outputs.include` or `outputs.exclude`, not both. Empty lists and unknown output names are startup errors.
+When no `outputs` block is provided, the term applies to every output it can supervise.
 
 ### When to use which
 
 - **`embed_mse`** is the default. It is fast and works well when output signals are reliably observed or when the configured imputed coefficients are an acceptable training proxy for the signal structure.
 - **`native_sparse_mse`** is preferable when output signals have systematic NaN gaps (partial channels, timestep dropouts) and you want the loss to ignore those positions explicitly rather than train through imputed zeros.
-- Both terms can be combined with independent weights for a mixed objective.
+- Terms can be combined with independent weights for a mixed objective.
 
 ### Identity-encoded outputs
 
-When an output signal uses `encoder_name: identity` (e.g. in a `dct3d_native_outputs` embedding profile),
+When an output signal uses `encoder_name: identity` in an embedding profile,
 `EmbedChunksTransform` **skips the embedding step** for that signal and does not store an `output_emb` entry.
 This avoids holding two copies of the same data in memory — particularly important for large spatial outputs
 where caching the embedded and native arrays separately would cause
 significant RAM overhead.
 
 Consequences:
-- `native_sparse_mse` works as normal — it reads from `output_native`, which is always present.
-- `embed_mse` silently ignores identity-encoded outputs (no entry in `output_emb` → not supervised by that term).
-- Using `embed_mse` as the sole loss term with identity outputs is a no-op for those outputs; combine with `native_sparse_mse` instead.
+- Native-space terms (`native_sparse_mse`, `grad_shafranov_residual`) work as normal — they read from `output_native`, which is always present.
+- Embedding-space terms (`embed_mse`) cannot supervise identity-encoded outputs because they have no `output_emb` entry.
+- Startup validation raises if an identity output is explicitly included in an embedding-space term, or if any output is not
+  supervised by at least one capable loss term.
 
 ### `keep_output_native` auto-derivation
 `data.keep_output_native` is derived automatically by the config validator — do not set it manually:
 - eval phase → always `true`
-- train phase → `true` iff any term in `train.loss.terms` is `native_sparse_mse` (or any future native-space loss)
+- train phase → `true` iff any term in `train.loss.terms` is a native-space loss (`native_sparse_mse`,
+  `grad_shafranov_residual`)
 
 This controls whether `FinalizeWindowTransform` retains native output arrays in the window dict so the loss (and eval scoring) can access them.
 
@@ -201,7 +229,7 @@ Training stops early if validation loss does not improve by more than `delta` fo
 ## Resume vs Warmstart
 
 - **Resume** (`train.resume: true`): continues the same run directory, restoring model weights, optimizer, scheduler, scaler, and RNG state. Use to recover from interruptions.
-- **Warmstart** (`--init warmstart --model <run_id>`): loads model weights from another run and starts a fresh optimizer/scheduler/RNG. Use for finetune from pretrain.
+- **Warmstart** (`--init warmstart --model_source <run_id>`): loads model weights from another run and starts a fresh optimizer/scheduler/RNG. Use for finetune from pretrain.
 - **Scratch** (`--init scratch`): initializes from config only. No source weights loaded.
 
 Resume and warmstart are mutually exclusive. See [Checkpointing and Warmstart](checkpointing_and_warmstart.md) for details.

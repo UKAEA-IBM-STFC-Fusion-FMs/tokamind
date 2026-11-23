@@ -211,7 +211,7 @@ class TrimChunksTransform:
         trimmed_act = self._enrich_and_trim(chunks=act_chunks)
 
         logger.debug(
-            "win=%s (shot=%s) | input %d→%d | actuator %d→%d | max=%d",
+            "win=%s (shot=%s) | input %d->%d | actuator %d->%d | max=%d",
             window.get("window_index"),
             window.get("shot_id"),
             len(in_chunks),

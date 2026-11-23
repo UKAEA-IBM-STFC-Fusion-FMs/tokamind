@@ -1,6 +1,8 @@
 # Existing
 TODO.py
 runs/
+output/
+CLAUDE.md
 
 # Python bytecode & cache
 __pycache__/
@@ -43,8 +45,10 @@ Thumbs.db
 
 # Logs (if you ever create a top-level log dir)
 logs/
-/run_bash*.sh
 *.log
+
+# Per-user cluster launch scripts (each collaborator runs jobs their own way)
+cluster/
 
 # history folders with legacy results
 history/
