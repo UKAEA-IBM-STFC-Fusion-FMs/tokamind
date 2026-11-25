@@ -1347,12 +1347,12 @@ class WeakFormGradShafranovLoss(BaseLoss):
         loss: Tensor = ref.sum() * 0.0  # Scalar
         logs: dict[Hashable, float] = {}
 
-        # If the weight for the "weak_grad_shafranov" loss term is not greater than 0 and:
-        # - Plotting is not needed, then return from here a default value 0 for the loss.
-        # - Plotting is needed, calculation of all the required values for plotting is allowed, but calculations to
-        #   update the default value 0 of the loss is later disallowed.
-        if (not self._all_losses_weights.get("weak_grad_shafranov", 0) > 0) and (self._plot_check_type is None):
-            return loss, logs  # At this point, loss is 0.
+        # The aggregator supplies this instance's weight even when several terms use the same GS form.
+        term_weight = context.term_weight if context is not None else None
+        if term_weight is None:
+            term_weight = self._all_losses_weights.get("weak_grad_shafranov", 0)
+        if term_weight <= 0 and self._plot_check_type is None:
+            return loss, logs
 
         # ..............................................................................................................
         # 1 - Gather required, decoded ground truth and predicted data in native space
@@ -1491,8 +1491,7 @@ class WeakFormGradShafranovLoss(BaseLoss):
         # 7 - Calculate Grad-Shafranov residuals for every (sample, time) field, computed in one vectorized pass.
         # ..............................................................................................................
 
-        # Only update the default loss value 0 if the weight for the "weak_grad_shafranov" loss term is > 0.
-        if self._all_losses_weights.get("weak_grad_shafranov", 0) > 0:
+        if term_weight > 0:
             per_field_losses = self.grad_shafranov_loss(
                 gs_lhs_pred=gs_lhs_pred,
                 gs_rhs_pred=gs_rhs_pred,
