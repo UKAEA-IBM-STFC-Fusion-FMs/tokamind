@@ -255,8 +255,8 @@ class TuneRankedDCT3DTransform:
     ----------
     signal_specs : SignalSpecRegistry
         Registry of all signals for the current task.
-    progress_every_n_shots : int | None
-        Log progress every N shots (based on window["shot_id"] changes).
+    progress_every_n_windows : int | None
+        Log progress every N processed windows. ``None`` disables progress logging.
     roles : list[str]
         Signal roles.
     targets : Mapping[str, Any]
@@ -269,12 +269,8 @@ class TuneRankedDCT3DTransform:
         Whether to enable guardrails.
     guardrails_config : dict[str, dict[str, int]]
         Mapping (dict) with guardrails configuration for "timeseries", "profile", and "video".
-    _shots_seen : int
-        Supporting variable to hold shots seen.
     _windows_seen : int
         Supporting variable to hold windows seen.
-    _last_shot_id : Any | None
-        Supporting variable to hold last shot ID seen.
     max_budget : dict[str, int | None]
         Coefficient budget (max K). Maybe a single int (applied to all roles) or a mapping per role.
     _full_codec_cache : dict[tuple[int, int, int], DCT3DCodec]
@@ -286,8 +282,8 @@ class TuneRankedDCT3DTransform:
         Get (or create) a codec that keeps the full DCT grid.
     __call__(window)
         Call method for the class instances to behave like a function.
-    _log_progress(window)
-        Log progress for the passed window.
+    _log_progress()
+        Log progress every N processed windows.
     _accumulate_chunk_roles(window)
         Accumulate chunks for "input" and "actuator" roles.
     _accumulate_output_role(window)
@@ -328,7 +324,7 @@ class TuneRankedDCT3DTransform:
         thresholds: Mapping[str, float],
         roles: Iterable[str] = ("input", "actuator", "output"),
         max_budget: int | Mapping[str, int] | None = None,
-        progress_every_n_shots: int | None = 10,
+        progress_every_n_windows: int | None = 500,
         guardrails: Mapping[str, Any] | None = None,
         nan_imputation: Literal["zero", "interpolate"] | None = "zero",
     ) -> None:
@@ -348,9 +344,9 @@ class TuneRankedDCT3DTransform:
             Optional coefficient budget (max K). Maybe a single int (applied to all roles) or a mapping per role,
             e.g., {"input": 4096}.
             Optional. Default: None.
-        progress_every_n_shots : int | None
-            Log progress every N shots (based on window["shot_id"] changes).
-            Optional. Default: 10.
+        progress_every_n_windows : int | None
+            Log progress every N processed windows. ``None`` disables progress logging.
+            Optional. Default: 500.
         guardrails : Mapping[str, Any] | None
             Guardrails configuration to ensure minimum dimension coverage.
             Expected structure: {"enable": bool, "timeseries": {...}, "profile": {...}, "video": {...}}
@@ -367,7 +363,7 @@ class TuneRankedDCT3DTransform:
         Raises
         ------
         ValueError
-            If `progress_every_n_shots` is not positive.
+            If `progress_every_n_windows` is not positive.
             If invalid role in `roles`, i.e., not in {"input", "actuator", "output"}.
             If `roles` is empty.
             If `max_budget` is a mapping (dict) does not have a positive value for a given role in `roles`.
@@ -381,18 +377,16 @@ class TuneRankedDCT3DTransform:
         self.nan_imputation = nan_imputation
 
         # Progress logging
-        self.progress_every_n_shots: int | None
-        if progress_every_n_shots is None:
-            self.progress_every_n_shots = None
+        self.progress_every_n_windows: int | None
+        if progress_every_n_windows is None:
+            self.progress_every_n_windows = None
         else:
-            n = int(progress_every_n_shots)
+            n = int(progress_every_n_windows)
             if n <= 0:
-                raise ValueError("[TuneRankedDCT3DTransform] `progress_every_n_shots` must be positive.")
+                raise ValueError("[TuneRankedDCT3DTransform] `progress_every_n_windows` must be positive.")
 
-            self.progress_every_n_shots = n
-            self._shots_seen: int = 0
-            self._windows_seen: int = 0
-            self._last_shot_id: Any | None = None
+            self.progress_every_n_windows = n
+        self._windows_seen: int = 0
 
         # Validate roles
         allowed = {"input", "actuator", "output"}
@@ -525,7 +519,7 @@ class TuneRankedDCT3DTransform:
 
         """
 
-        self._log_progress(window=window)
+        self._log_progress()
         self._accumulate_chunk_roles(window=window)
         self._accumulate_output_role(window=window)
 
@@ -536,14 +530,9 @@ class TuneRankedDCT3DTransform:
     # ------------------------------------------------------------------------------------------------------------------
 
     # ------------------------------------------------------------------------------------------------------------------
-    def _log_progress(self, window: dict[str, Any]) -> None:
+    def _log_progress(self) -> None:
         """
-        Log progress for the passed window.
-
-        Parameters
-        ----------
-        window : dict[str, Any]
-            Window used for logging purposes.
+        Log progress every ``progress_every_n_windows`` processed windows.
 
         Returns
         -------
@@ -551,22 +540,12 @@ class TuneRankedDCT3DTransform:
 
         """
 
-        if self.progress_every_n_shots is None:
+        if self.progress_every_n_windows is None:
             return
 
         self._windows_seen += 1
-        shot_id = window.get("shot_id")
-        if (shot_id is None) or (shot_id == self._last_shot_id):
-            return
-
-        self._last_shot_id = shot_id
-        self._shots_seen += 1
-        if self._shots_seen % self.progress_every_n_shots == 0:
-            logger.info(
-                "TuneRankedDCT3D progress: shots=%d, windows=%d",
-                self._shots_seen,
-                self._windows_seen,
-            )
+        if self._windows_seen % self.progress_every_n_windows == 0:
+            logger.info("TuneRankedDCT3D progress: windows=%d", self._windows_seen)
 
     # ------------------------------------------------------------------------------------------------------------------
     def _accumulate_chunk_roles(self, window: dict[str, Any]) -> None:

@@ -11,11 +11,15 @@ Key modules
 - scheduler.py  : learning rate scheduling utilities
 """
 
-from .loop import train_finetune
+__all__ = ["train_finetune"]
 
 
 # ----------------------------------------------------------------------------------------------------------------------
+def __getattr__(name: str):
+    """Lazily expose the training entrypoint without creating import cycles."""
 
-__all__ = [
-    "train_finetune",
-]
+    if name == "train_finetune":
+        from .loop import train_finetune
+
+        return train_finetune
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

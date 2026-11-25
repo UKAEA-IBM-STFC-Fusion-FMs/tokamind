@@ -7,7 +7,7 @@ Key modules
 -----------
 - api.py        : high-level checkpoint save/load/resume operations
 - warmstart.py  : warm-start utilities for loading partial checkpoints
-- blocks.py     : internal checkpoint block management
+- block_io.py   : per-block checkpoint save/load I/O
 - io.py         : low-level checkpoint I/O operations
 - rng.py        : RNG state management for reproducibility
 """

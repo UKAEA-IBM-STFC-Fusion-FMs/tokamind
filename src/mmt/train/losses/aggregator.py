@@ -2,28 +2,45 @@
 Loss aggregator for the Multi-Modal Transformer.
 
 This module provides:
-    • ``LossAggregator``        — combines multiple ``BaseLoss`` terms into a single weighted scalar loss.
-    • ``build_loss_aggregator`` — factory that instantiates an aggregator from the ``train.loss`` config block.
+    • `LossAggregator`        — combines multiple `BaseLoss` terms into a single weighted scalar loss.
+    • `build_loss_aggregator` — factory that instantiates an aggregator from the `train.loss` config block.
 
 Each term contributes an independent scalar loss; the aggregator combines them as a normalized weighted sum across
 terms. Per-output weights (if any) are handled inside each individual term.
 
-The ``build_loss_aggregator`` factory supports the following term types:
-    • ``embed_mse``         — MSE in embedding (coeff) space; no decoding required.
-    • ``native_sparse_mse`` — MSE in native standardized space; requires pre-built torch decoders.
+The `build_loss_aggregator` factory supports the following term types:
+    • `embed_mse`         — MSE in embedding (coeff) space; no decoding required.
+    • `native_sparse_mse` — MSE in native standardized space; requires pre-built torch decoders.
+    • `strong_grad_shafranov` — Strong-form Grad-Shafranov in native destandardized space.
+    • `weak_grad_shafranov` — Weak-form Grad-Shafranov in native destandardized space.
 """
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any, Hashable
 
 import torch
 from torch import Tensor
 
-from .base import BaseLoss
-from .embed import EmbedMSELoss
-from .native_sparse import NativeSparseMSELoss
+from mmt.train.losses.constants import (
+    ALL_LOSS_TYPES,
+    DEFAULT_LOSS_TERMS,
+    EMBED_MSE_LOSS_TYPE,
+    STRONG_GRAD_SHAFRANOV_LOSS_TYPE,
+    GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY,
+    GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY,
+    WEAK_GRAD_SHAFRANOV_LOSS_TYPE,
+    NATIVE_SPARSE_MSE_LOSS_TYPE,
+    DEFAULT_GRAD_SHAFRANOV_LOSS_METRIC,
+    DEFAULT_GRAD_SHAFRANOV_WEIGHTS,
+)
+
+from .base import BaseLoss, LossComputeContext
+from .embed_mse import EmbedMSELoss
+from .grad_shafranov import StrongFormGradShafranovLoss, WeakFormGradShafranovLoss
+from .native_sparse_mse import NativeSparseMSELoss
 
 if TYPE_CHECKING:
     from mmt.data.embeddings.torch_decoder import TorchDecoder
@@ -40,21 +57,29 @@ class LossAggregator:
     Parameters
     ----------
     terms : list[tuple[BaseLoss, float]]
-        List of ``(loss_term, term_weight)`` pairs. Weights do not need to sum to 1.
+        List of `(loss_term, term_weight)` pairs. Weights do not need to sum to 1.
 
     """
 
     # ------------------------------------------------------------------------------------------------------------------
-    def __init__(self, terms: list[tuple[BaseLoss, float]]) -> None:
+    def __init__(
+        self,
+        terms: list[tuple[BaseLoss, float]],
+        term_configs: Sequence[Mapping[str, Any]] | None = None,
+    ) -> None:
         if not terms:
             raise ValueError("LossAggregator requires at least one loss term.")
 
         self._terms = terms
+        self._term_configs = list(term_configs or [{} for _ in terms])
+        if len(self._term_configs) != len(self._terms):
+            raise ValueError(f"Expected {len(self._terms)} term configs, got {len(self._term_configs)}.")
+        self._stage_loss_terms = tuple(self._term_configs)
 
     # ------------------------------------------------------------------------------------------------------------------
     @property
     def requires_native_target(self) -> bool:
-        """True if any term needs ``batch['output_native']``."""
+        """True if any term needs `batch['output_native']`."""
         return any(t.requires_native_target for t, _ in self._terms)
 
     # ------------------------------------------------------------------------------------------------------------------
@@ -62,6 +87,7 @@ class LossAggregator:
         self,
         preds: Mapping[Hashable, Tensor],
         batch: Mapping[str, Any],
+        context: LossComputeContext | None = None,
     ) -> tuple[Tensor, dict[str, Any]]:
         """
         Compute the aggregated loss for one batch.
@@ -69,15 +95,18 @@ class LossAggregator:
         Parameters
         ----------
         preds:
-            Model predictions in embedding space, keyed by signal_id. Shape: ``(B, D)`` per key.
+            Model predictions in embedding space, keyed by signal_id. Shape: `(B, D)` per key.
         batch:
-            Collated batch dict. Expected keys: ``output_emb``, ``output_mask``, and optionally ``output_native`` (when
-            any term has ``requires_native_target=True``).
+            Collated batch dict. Expected keys: `output_emb`, `output_mask`, and optionally `output_native` (when
+            any term has `requires_native_target=True`).
+        context:
+            Optional metadata for logging/plotting. The aggregator augments it with per-term weight/config before
+            forwarding it to each loss term.
 
         Returns
         -------
         tuple[Tensor, dict]
-            ``(total_loss, logs)`` where logs contains per-term and per-output loss values.
+            `(total_loss, logs)` where logs contains per-term and per-output loss values.
 
         Raises
         ------
@@ -103,14 +132,25 @@ class LossAggregator:
         logs: dict[str, Any] = {}
 
         for i, (term, weight) in enumerate(self._terms):
+            term_name = type(term).__name__
+            base_context = context or LossComputeContext()
+            term_context = replace(
+                base_context,
+                term_index=i,
+                term_name=term_name,
+                term_weight=float(weight),
+                term_config=self._term_configs[i],
+                stage_loss_terms=self._stage_loss_terms,
+            )
+
             term_loss, term_logs = term.compute(
                 preds=preds,
                 y_emb=y_emb,
                 y_native=y_native,
                 output_mask=output_mask,
+                context=term_context,
             )
 
-            term_name = type(term).__name__
             key_prefix = f"{term_name}_{i}" if (n_terms > 1) else term_name
 
             raw = float(term_loss.detach().cpu())
@@ -140,18 +180,27 @@ def build_loss_aggregator(
     loss_cfg: Mapping[str, Any],
     output_weights_by_id: Mapping[Hashable, float] | None = None,
     decoders: dict[Hashable, TorchDecoder] | None = None,
+    term_output_filters: Sequence[set[Hashable] | None] | None = None,
+    output_name_to_id: Mapping[str, Hashable] | None = None,
+    signal_stats: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> LossAggregator:
     """
-    Build a ``LossAggregator`` from the ``train.loss`` config block.
+    Build a `LossAggregator` from the `train.loss` config block.
 
     Parameters
     ----------
     loss_cfg : Mapping[str, Any]
-        The ``train.loss`` config dict. If ``terms`` is absent, defaults to a single ``embed_mse`` term.
+        The `train.loss` config dict. If `terms` is absent, defaults to a single `embed_mse` term.
     output_weights_by_id : Mapping[Hashable, float] | None
         Per-output weights keyed by signal_id (int). Applied to embed_mse terms.
     decoders : dict[Hashable, TorchDecoder] | None
         Per-signal torch decoders, required for ``native_sparse_mse`` terms.
+    term_output_filters : Sequence[set[Hashable] | None] | None
+        Optional per-term signal ID filters, aligned with ``loss_cfg["terms"]``.
+    output_name_to_id : Mapping[str, Hashable] | None
+        Mapping from configured output signal names to runtime prediction keys. Required for Grad-Shafranov terms.
+    signal_stats : Mapping[str, Mapping[str, Any]] | None
+        Per-signal mean/std metadata. Required for Grad-Shafranov terms.
 
     Returns
     -------
@@ -161,31 +210,132 @@ def build_loss_aggregator(
     ------
     ValueError
         If an unknown term type is encountered.
-        If a ``native_sparse_mse`` term is requested but ``decoders`` is None or empty.
+        If a native-space term is requested but `decoders` is None or empty.
 
     """
 
-    terms_cfg: list[dict[str, Any]] = loss_cfg.get("terms", [{"type": "embed_mse", "weight": 1.0}])
-    ow = dict(output_weights_by_id) if output_weights_by_id else {}
+    terms_cfg: list[Mapping[str, Any]] = list(loss_cfg.get("terms", DEFAULT_LOSS_TERMS))
+    ow = dict(output_weights_by_id) if output_weights_by_id else None
+    output_filters = [None] * len(terms_cfg) if term_output_filters is None else list(term_output_filters)
+    if len(output_filters) != len(terms_cfg):
+        raise ValueError(f"Expected {len(terms_cfg)} loss output filters, got {len(output_filters)}.")
 
     built: list[tuple[BaseLoss, float]] = []
 
-    for term_def in terms_cfg:
-        term_type = str(term_def.get("type", "embed_mse"))
+    for term_def, output_filter in zip(terms_cfg, output_filters, strict=True):
+        term_type = str(term_def.get("type", EMBED_MSE_LOSS_TYPE))
         term_weight = float(term_def.get("weight", 1.0))
 
-        if term_type == "embed_mse":
-            built.append((EmbedMSELoss(output_weights=ow if ow else None), term_weight))
+        # ..............................................................................................................
+        # Embed MSE loss term
 
-        elif term_type == "native_sparse_mse":
+        if term_type == EMBED_MSE_LOSS_TYPE:
+            built.append((EmbedMSELoss(output_weights=ow, output_filter=output_filter), term_weight))
+
+        # ..............................................................................................................
+        # Native sparse MSE loss term
+
+        elif term_type == NATIVE_SPARSE_MSE_LOSS_TYPE:
             if not decoders:
                 raise ValueError(
-                    "Loss term 'native_sparse_mse' requires decoders to be provided, but got None or empty dict. "
+                    f"Loss term '{NATIVE_SPARSE_MSE_LOSS_TYPE}' requires decoders to be provided, "
+                    "but got None or empty dict. "
                     "Build and pass a dict[signal_id, TorchDecoder] when using this term."
                 )
-            built.append((NativeSparseMSELoss(decoders=decoders, output_weights=ow if ow else None), term_weight))
+            built.append(
+                (
+                    NativeSparseMSELoss(
+                        decoders=decoders,
+                        output_weights=ow,
+                        output_filter=output_filter,
+                    ),
+                    term_weight,
+                )
+            )
+
+        # ..............................................................................................................
+        # Strong Grad-Shafranov loss term
+
+        elif term_type == STRONG_GRAD_SHAFRANOV_LOSS_TYPE:
+            if not decoders:
+                raise ValueError(
+                    f"Loss term '{STRONG_GRAD_SHAFRANOV_LOSS_TYPE}' requires `decoders`, but got None or empty dict. "
+                    "Build and pass a dict[signal_id, TorchDecoder] when using this term."
+                )
+            if output_name_to_id is None:
+                raise ValueError(f"Loss term '{STRONG_GRAD_SHAFRANOV_LOSS_TYPE}' requires `output_name_to_id`.")
+
+            if signal_stats is None:
+                raise ValueError(f"Loss term '{STRONG_GRAD_SHAFRANOV_LOSS_TYPE}' requires `signal_stats`.")
+
+            # Config shape (params file presence/type, rhs_input keys/values) is validated up-front in
+            # validator._validate_loss_terms, and the constructor backstops direct instantiation; here we just read.
+            rhs_input_cfg = term_def.get("rhs_input") or {}
+            plot_check_cfg = term_def.get("plot_check") or {}
+            all_losses_weights = {term_["type"]: term_["weight"] for term_ in terms_cfg}
+            plot_check_cfg["all_losses_weights"] = all_losses_weights
+
+            built.append(
+                (
+                    StrongFormGradShafranovLoss(
+                        decoders=decoders,
+                        signal_stats=signal_stats,
+                        output_name_to_id=output_name_to_id,
+                        grad_shafranov_params_file=term_def.get("grad_shafranov_params_file", ""),
+                        grad_shafranov_weights=term_def.get("grad_shafranov_weights", DEFAULT_GRAD_SHAFRANOV_WEIGHTS),
+                        rhs_input_origin=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY),
+                        j_tor_calculation_method=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY),
+                        loss_metric=term_def.get("loss_metric", DEFAULT_GRAD_SHAFRANOV_LOSS_METRIC),
+                        residual_scaling=term_def.get("residual_scaling"),
+                        output_weights=ow,
+                        output_filter=output_filter,
+                        plot_check_cfg=plot_check_cfg,
+                    ),
+                    term_weight,
+                )
+            )
+        # ..............................................................................................................
+        # Weak Grad-Shafranov loss term
+
+        elif term_type == WEAK_GRAD_SHAFRANOV_LOSS_TYPE:
+            if not decoders:
+                raise ValueError(
+                    f"Loss term '{WEAK_GRAD_SHAFRANOV_LOSS_TYPE}' requires `decoders`, but got None or empty dict. "
+                    "Build and pass a dict[signal_id, TorchDecoder] when using this term."
+                )
+
+            if output_name_to_id is None:
+                raise ValueError(f"Loss term '{WEAK_GRAD_SHAFRANOV_LOSS_TYPE}' requires `output_name_to_id`.")
+
+            if signal_stats is None:
+                raise ValueError(f"Loss term '{WEAK_GRAD_SHAFRANOV_LOSS_TYPE}' requires `signal_stats`.")
+
+            rhs_input_cfg = term_def.get("rhs_input") or {}
+            plot_check_cfg = term_def.get("plot_check") or {}
+            all_losses_weights = {term_["type"]: term_["weight"] for term_ in terms_cfg}
+            plot_check_cfg["all_losses_weights"] = all_losses_weights
+
+            built.append(
+                (
+                    WeakFormGradShafranovLoss(
+                        decoders=decoders,
+                        signal_stats=signal_stats,
+                        output_name_to_id=output_name_to_id,
+                        grad_shafranov_params_file=term_def.get("grad_shafranov_params_file", ""),
+                        grad_shafranov_weights=term_def.get("grad_shafranov_weights", DEFAULT_GRAD_SHAFRANOV_WEIGHTS),
+                        rhs_input_origin=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_ORIGIN_KEY),
+                        j_tor_calculation_method=rhs_input_cfg.get(GRAD_SHAFRANOV_RHS_INPUT_CALCULATION_METHOD_KEY),
+                        loss_metric=term_def.get("loss_metric", DEFAULT_GRAD_SHAFRANOV_LOSS_METRIC),
+                        residual_scaling=term_def.get("residual_scaling"),
+                        output_weights=ow,
+                        output_filter=output_filter,
+                        plot_check_cfg=plot_check_cfg,
+                    ),
+                    term_weight,
+                )
+            )
 
         else:
-            raise ValueError(f"Unknown loss term type '{term_type}'. Supported: 'embed_mse', 'native_sparse_mse'.")
+            raise ValueError(f"Unknown loss term type '{term_type}'. Supported: {sorted(ALL_LOSS_TYPES)}.")
 
-    return LossAggregator(terms=built)
+    return LossAggregator(terms=built, term_configs=terms_cfg)

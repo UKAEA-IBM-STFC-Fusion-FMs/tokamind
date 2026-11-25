@@ -20,20 +20,21 @@ Config conventions
 Helpers assume the config layout:
 
     scripts_mast/configs/
-    common/
-        embeddings.yaml
-        eval.yaml
-        finetune.yaml
-        pretrain.yaml
-
-    tasks_overrides/
-        <task>/
-        finetune_overrides.yaml
-        eval_overrides.yaml
-        embeddings_overrides/
-                <embedding_profile>.yaml
-                vae.yaml
-
+    mmt/                             # one self-contained folder per model profile
+        phases/
+            eval.yaml
+            finetune_warmstart.yaml
+            finetune_scratch.yaml
+            pretrain.yaml
+        tasks/
+            pretrain_tasks.yaml
+            finetune_tasks.yaml
+            eval_tasks.yaml
+        embeddings/
+            dct3d/
+                _default.yaml
+            vae/
+                <task>.yaml
 Notes
 -----
 - This module may import benchmark FAIR MAST utilities from `scripts/...`.
@@ -51,14 +52,15 @@ import torch.multiprocessing as mp
 from mmt.data import (
     ChunkWindowsTransform,
     SelectValidWindowsTransform,
-    TrimChunksTransform,
     EmbedChunksTransform,
     BuildTokensTransform,
+    OutputResidualBaselineTransform,
     FinalizeWindowTransform,
     ComposeTransforms,
     MMTCollate,
 )
 from mmt.data.signal_spec import SignalSpecRegistry
+from mmt.utils import setup_device
 from mmt.utils.config.schema import ExperimentConfig
 
 
@@ -79,20 +81,14 @@ def setup_device_and_mp() -> torch.device:
 
     Notes
     -----
+    - The device pick (cuda -> mps -> cpu) is delegated to ``mmt.utils.setup_device``,
+      the single source of truth shared across integration layers.
     - We force the multiprocessing start method to `spawn` because some datasets/transforms are not fork-safe and
       PyTorch DataLoader workers often behave better with spawn.
 
     """
 
-    if torch.cuda.is_available():
-        selected_device = "cuda"
-    else:
-        if torch.backends.mps.is_available():
-            selected_device = "mps"
-        else:
-            selected_device = "cpu"
-
-    device = torch.device(selected_device)
+    device = setup_device()
 
     # Needed for DataLoader(num_workers>0) on some platforms.
     # force=True avoids "context has already been set" errors in notebooks/tests.
@@ -111,7 +107,7 @@ def extract_signal_stats(dict_metadata: Mapping[str, Any]) -> dict[str, dict[str
     """
     Extract simple (mean/std) statistics per signal from FAIR MAST metadata.
 
-    This is primarily used by evaluation code (metrics/traces) to de-normalize outputs.
+    This is primarily used by evaluation code and native-physics training losses to de-normalize outputs.
 
     Parameters
     ----------
@@ -132,7 +128,7 @@ def extract_signal_stats(dict_metadata: Mapping[str, Any]) -> dict[str, dict[str
             continue
         for name, meta in role_meta.items():
             if isinstance(meta, dict) and ("mean" in meta) and ("std" in meta):
-                stats[name] = meta
+                stats[str(name)] = dict(meta)
 
     return stats
 
@@ -150,6 +146,7 @@ def build_default_transform(
     signal_specs: SignalSpecRegistry,
     codecs: Mapping[int, Any],
     keep_output_native: bool,
+    native_output_names: set[str] | None = None,
 ) -> ComposeTransforms:
     """
     Build the standard MMT transform chain used by pretrain/finetune/eval.
@@ -158,7 +155,6 @@ def build_default_transform(
 
       ChunkWindowsTransform
       → SelectValidWindowsTransform
-      → TrimChunksTransform
       → EmbedChunksTransform
       → BuildTokensTransform
 
@@ -175,6 +171,8 @@ def build_default_transform(
     keep_output_native : bool
         If True, the final window dict will keep native output payloads (needed for eval metrics/traces). If False,
         native outputs are dropped by FinalizeWindowTransform to reduce RAM usage (especially when caching).
+    native_output_names : set[str] | None
+        Optional native output signal names to keep when ``keep_output_native=True``. If None, keep all native outputs.
 
     Returns
     -------
@@ -184,32 +182,35 @@ def build_default_transform(
     """
 
     cfg_prep = cfg_mmt.preprocess
-    cfg_chunks = cfg_prep["chunk"]
-    cfg_trim = cfg_prep["trim_chunks"]
+    cfg_chunks = cfg_prep["chunks"]
     cfg_valid_win = cfg_prep["valid_windows"]
     nan_imputation = (cfg_prep.get("embed_chunks") or {}).get("nan_imputation", "zero")
+    output_residual_enabled = bool((cfg_mmt.model["output_adapters"].get("residual") or {}).get("enable", False))
 
-    return ComposeTransforms(
+    transforms: list[Any] = [
+        ChunkWindowsTransform(dict_metadata=dict_metadata, chunks_cfg=cfg_chunks),
+        SelectValidWindowsTransform(
+            min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
+            min_valid_chunks=cfg_valid_win["min_valid_chunks"],
+            min_valid_outputs=cfg_valid_win["min_valid_outputs"],
+            accept_nan_inputs_actuators=cfg_valid_win.get("accept_nan_inputs_actuators", True),
+            accept_nan_outputs=cfg_valid_win.get("accept_nan_outputs", True),
+            window_stride_sec=cfg_valid_win["window_stride_sec"],
+        ),
+    ]
+    if output_residual_enabled:
+        transforms.append(OutputResidualBaselineTransform(signal_specs=signal_specs, codecs=codecs))
+    transforms.extend(
         [
-            ChunkWindowsTransform(
-                dict_metadata=dict_metadata,
-                chunk_length_sec=cfg_chunks["chunk_length"],
-                stride_sec=cfg_chunks["stride"],
-            ),
-            SelectValidWindowsTransform(
-                min_valid_inputs_actuators=cfg_valid_win["min_valid_inputs_actuators"],
-                min_valid_chunks=cfg_valid_win["min_valid_chunks"],
-                min_valid_outputs=cfg_valid_win["min_valid_outputs"],
-                accept_nan_inputs_actuators=cfg_valid_win.get("accept_nan_inputs_actuators", True),
-                accept_nan_outputs=cfg_valid_win.get("accept_nan_outputs", True),
-                window_stride_sec=cfg_valid_win["window_stride_sec"],
-            ),
-            TrimChunksTransform(max_chunks=cfg_trim["max_chunks"]),
             EmbedChunksTransform(signal_specs=signal_specs, codecs=codecs, nan_imputation=nan_imputation),
             BuildTokensTransform(signal_specs=signal_specs),
-            FinalizeWindowTransform(keep_output_native=keep_output_native),
+            FinalizeWindowTransform(
+                keep_output_native=keep_output_native,
+                native_output_names=native_output_names,
+            ),
         ]
     )
+    return ComposeTransforms(transforms)
 
 
 # ======================================================================================================================
@@ -380,8 +381,7 @@ def make_collate_fn(  # NOSONAR - Ignore cognitive complexity
     cfg["p_drop_actuators_overrides"] = act_over
     cfg["p_drop_outputs_overrides"] = out_over
 
-    # For eval-only native output collation, collate needs ID->name mapping once.
-    if keep_output_native:
-        cfg["output_id_to_name"] = {int(spec.signal_id): spec.name for spec in signal_specs.specs_for_role("output")}
+    # Collate uses this compact mapping for native targets and for output query timestamps under embedding-only loss.
+    cfg["output_id_to_name"] = {int(spec.signal_id): spec.name for spec in signal_specs.specs_for_role("output")}
 
     return MMTCollate(cfg_collate=cfg)

@@ -1,0 +1,45 @@
+# Local GS-loss integration task.
+#
+# Same signal set/windowing as benchmark task_2-3, but renamed task_2-3-strong to specify the used GS version.
+
+task_name: task_2-3-strong
+task_type: markovian
+
+sources_and_signals:
+  input_name: &input_keys
+    - - magnetics
+      - flux_loop_flux
+    - - magnetics
+      - b_field_pol_probe_ccbv_field
+    - - magnetics
+      - b_field_pol_probe_obr_field
+    - - magnetics
+      - b_field_pol_probe_obv_field
+    - - magnetics
+      - b_field_tor_probe_saddle_voltage
+    - - pf_active
+      - coil_current
+    - - pf_active
+      - solenoid_current
+    - - summary
+      - ip
+
+  actuator_name: &actuator_keys
+    - - pf_active
+      - coil_voltage
+    - - summary
+      - power_nbi
+
+  output_name: &output_keys
+    - - equilibrium
+      - psi
+
+task_window_segmenter:
+  input_keys: *input_keys
+  actuator_keys: *actuator_keys
+  output_keys: *output_keys
+  input_length: 0.005
+  output_length: 0.025
+  delta: 0
+
+stride_window: 0.001

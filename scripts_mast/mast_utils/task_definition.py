@@ -32,9 +32,27 @@ from .benchmark_imports import benchmark_get_task_config
 
 LOCAL_TASK_DEFS_MAP: dict[str, str] = {
     "_test": "local_tasks_def/_test.yaml",
-    "pretrain_inputs_actuators_to_inputs_outputs": "local_tasks_def/pretrain_inputs_actuators_to_inputs_outputs.yaml",
-    "pretrain_all_to_inputs_outputs": "local_tasks_def/pretrain_all_to_inputs_outputs.yaml",
-    "pretrain_inputs_actuators_to_outputs": "local_tasks_def/pretrain_inputs_actuators_to_outputs.yaml",
+    "task_1-3-data": "local_tasks_def/grad_shafranov/task_1-3-data.yaml",
+    "task_1-3-strong": "local_tasks_def/grad_shafranov/task_1-3-strong.yaml",
+    "task_1-3-weak": "local_tasks_def/grad_shafranov/task_1-3-weak.yaml",
+    "task_1-4-data": "local_tasks_def/grad_shafranov/task_1-4-data.yaml",
+    "task_1-4-strong": "local_tasks_def/grad_shafranov/task_1-4-strong.yaml",
+    "task_1-4-weak": "local_tasks_def/grad_shafranov/task_1-4-weak.yaml",
+    "task_1-5-data": "local_tasks_def/grad_shafranov/task_1-5-data.yaml",
+    "task_1-5-strong": "local_tasks_def/grad_shafranov/task_1-5-strong.yaml",
+    "task_1-5-weak": "local_tasks_def/grad_shafranov/task_1-5-weak.yaml",
+    "task_2-3-data": "local_tasks_def/grad_shafranov/task_2-3-data.yaml",
+    "task_2-3-strong": "local_tasks_def/grad_shafranov/task_2-3-strong.yaml",
+    "task_2-3-weak": "local_tasks_def/grad_shafranov/task_2-3-weak.yaml",
+    "task_2-4-data": "local_tasks_def/grad_shafranov/task_2-4-data.yaml",
+    "task_2-4-strong": "local_tasks_def/grad_shafranov/task_2-4-strong.yaml",
+    "task_2-4-weak": "local_tasks_def/grad_shafranov/task_2-4-weak.yaml",
+    "task_2-5-data": "local_tasks_def/grad_shafranov/task_2-5-data.yaml",
+    "task_2-5-strong": "local_tasks_def/grad_shafranov/task_2-5-strong.yaml",
+    "task_2-5-weak": "local_tasks_def/grad_shafranov/task_2-5-weak.yaml",
+    "pretrain_inputs_actuators_to_inputs_outputs": "local_tasks_def/pretrain/pretrain_inputs_actuators_to_inputs_outputs.yaml",
+    "pretrain_all_to_inputs_outputs": "local_tasks_def/pretrain/pretrain_all_to_inputs_outputs.yaml",
+    "pretrain_inputs_actuators_to_outputs": "local_tasks_def/pretrain/pretrain_inputs_actuators_to_outputs.yaml",
 }
 
 

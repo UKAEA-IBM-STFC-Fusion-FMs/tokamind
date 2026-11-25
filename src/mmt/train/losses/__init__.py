@@ -1,16 +1,18 @@
 """
 Loss package for the Multi-Modal Transformer.
 
-This package provides a composable loss system consisting of individual loss terms combined by a
-``LossAggregator``. Each term is an instance of ``BaseLoss`` and declares what batch fields it needs.
+This package provides a composable loss system consisting of individual loss terms combined by a `LossAggregator`. Each
+term is an instance of `BaseLoss` and declares what batch fields it needs.
 
 Available loss terms
 --------------------
-• ``EmbedMSELoss``        — MSE in embedding (coeff) space. Default term, no decoding required.
-• ``NativeSparseMSELoss`` — MSE in native standardized space. Requires decoders and ``keep_output_native=True``.
+• `EmbedMSELoss`        — MSE in embedding (coeff) space. Default term, no decoding required.
+• `NativeSparseMSELoss` — MSE in native standardized space. Requires decoders and `keep_output_native=True`.
+• `StrongFormGradShafranovLoss` — Strong-form Grad-Shafranov loss in destandardized native space.
+• `WeakFormGradShafranovLoss` — Weak-form Grad-Shafranov loss in destandardized native space.
 
-Config schema (``train.loss``)
--------------------------------
+Config schema (`train.loss`)
+-----------------------------
 Old format (single embed-MSE term, still supported)::
 
     loss:
@@ -19,17 +21,28 @@ Old format (single embed-MSE term, still supported)::
 New format (explicit terms)::
 
     loss:
-      output_weights: {}   # applied to embed_mse term when using old-style weight lookup
+      output_weights: {}   # optional per-signal weights applied inside each term
       terms:
         - type: embed_mse
           weight: 1.0
+          outputs:
+            include: [output_a, output_b]
         - type: native_sparse_mse
           weight: 0.5
+          outputs:
+            exclude: [output_a, output_b]
+        - type: strong_grad_shafranov
+          weight: 0.1
+          rhs_input:
+            origin: predicted_j_tor
+            calculation_method: GS_operator  # REMARK: Only used when origin is derived_j_tor.
+          outputs:
+            include: [equilibrium-psi, equilibrium-j_tor]
 
 Notes
 -----
 For orthonormal encoders (DCT/FPCA) using all coefficients, coeff-space MSE and native-space MSE differ only by a
-constant factor ``K / N``:
+constant factor `K / N`:
 
     native_MSE ≈ (K / N) * coeff_MSE
 
@@ -39,16 +52,29 @@ scaling; losses are expressed in their respective space's MSE units.
 
 from __future__ import annotations
 
+from .constants import DEFAULT_LOSS_TERMS
+
 from .aggregator import LossAggregator, build_loss_aggregator
-from .base import BaseLoss
-from .embed import EmbedMSELoss
-from .native_sparse import NativeSparseMSELoss
+from .base import BaseLoss, LossComputeContext
+from .embed_mse import EmbedMSELoss
+from .filters import resolve_loss_output_filters, resolve_native_loss_output_names
+from .grad_shafranov import StrongFormGradShafranovLoss, WeakFormGradShafranovLoss
+from .native_sparse_mse import NativeSparseMSELoss
+from .registry import LOSS_REGISTRY, get_loss_class
 
 
 __all__ = [
     "BaseLoss",
+    "LossComputeContext",
     "EmbedMSELoss",
     "NativeSparseMSELoss",
+    "StrongFormGradShafranovLoss",
+    "WeakFormGradShafranovLoss",
     "LossAggregator",
+    "DEFAULT_LOSS_TERMS",
     "build_loss_aggregator",
+    "resolve_loss_output_filters",
+    "resolve_native_loss_output_names",
+    "LOSS_REGISTRY",
+    "get_loss_class",
 ]

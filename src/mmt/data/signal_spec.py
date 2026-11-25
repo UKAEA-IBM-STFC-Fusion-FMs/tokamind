@@ -102,6 +102,11 @@ class SignalSpec:
         dataset.
     native_shape : tuple[int, int, int]
         Canonical 3-D shape `(H, W, T)` used internally by codecs. Derived from `values_shape` and `dt`.
+    is_constant : bool
+        Whether the signal is constant over the window (e.g., a trajectory
+        parameters). Constant scalars are broadcast conditioning rather than
+        time-indexed tokens in grid models. Populated from source metadata
+        (`meta["is_constant"]`); defaults to False (time-varying).
 
     Notes
     -----
@@ -119,6 +124,7 @@ class SignalSpec:
     embedding_dim: int
     values_shape: tuple[int, ...]
     native_shape: tuple[int, int, int]
+    is_constant: bool = False
 
     # ------------------------------------------------------------------------------------------------------------------
     @property
@@ -278,6 +284,7 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
     signals_by_role: Mapping[str, Mapping[str, str]],
     dict_metadata: Mapping[str, Mapping[str, Any]],
     chunk_length_sec: float,
+    chunk_length_sec_by_role: Mapping[str, float] | None = None,
     log_summary: bool = True,
 ) -> SignalSpecRegistry:
     """
@@ -309,6 +316,11 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
     chunk_length_sec : float
         Chunk length used for input/actuator chunking (seconds). This is used to derive chunk counts/strides and to
         validate embeddings.
+    chunk_length_sec_by_role : Mapping[str, float] | None
+        Optional role-specific chunk lengths.  When supplied, ``input`` and
+        ``actuator`` use their own durations; unspecified roles fall back to
+        ``chunk_length_sec``.  Outputs always retain their metadata-defined
+        target duration.
 
     log_summary : bool
         If True, print the grouped SignalSpec summary to `mmt.SignalSpec` logger.
@@ -376,12 +388,13 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
             sig_override = role_overrides.get(name)
             if isinstance(sig_override, dict):
                 encoder_name = sig_override.get("encoder_name", encoder_name)
-                encoder_kwargs = dict(sig_override.get("encoder_kwargs", encoder_kwargs) or {})
+                override_kwargs = sig_override.get("encoder_kwargs")
+                encoder_kwargs = dict(override_kwargs if override_kwargs is not None else encoder_kwargs)
 
             # ..........................................................................................................
             # Embedding length: chunk-level for inputs/actuators, window-level for outputs
 
-            length_sec = float(chunk_length_sec)
+            length_sec = float((chunk_length_sec_by_role or {}).get(role, chunk_length_sec))
             if role == "output":
                 # Output window is taken directly from metadata
                 length_sec = float(meta["length_in_seconds"])
@@ -395,6 +408,7 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
                 values_shape=values_shape,
                 dt=dt,
                 chunk_length_sec=length_sec,
+                modality=modality,
             )
 
             # Native shape used by codec logic: canonical (H, W, T).
@@ -416,6 +430,7 @@ def build_signal_specs(  # NOSONAR - Ignore cognitive complexity
                 embedding_dim=int(embedding_dim),
                 values_shape=values_shape,
                 native_shape=native_shape,
+                is_constant=bool(meta.get("is_constant", False)),
             )
             specs.append(spec)
             next_id += 1

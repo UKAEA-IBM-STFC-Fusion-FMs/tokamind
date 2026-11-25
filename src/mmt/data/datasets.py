@@ -43,13 +43,17 @@ outputs.
 
 from __future__ import annotations
 
-from collections.abc import Iterator
+from collections.abc import Iterator, Mapping
 from typing import Any, Iterable
+import contextlib
 import logging
 import os
 import random
+import threading
+import time
 import numpy as np
 import psutil
+import torch
 
 from torch.utils.data import DataLoader, Dataset, IterableDataset
 
@@ -60,6 +64,109 @@ logger = logging.getLogger("mmt.Cache")
 
 # We print the number of total preprocessed windows every _LOG_INTERVAL windows.
 _LOG_INTERVAL = 50000
+
+# ======================================================================================================================
+# Optional CUDA heartbeat
+# ======================================================================================================================
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+def resolve_gpu_heartbeat(cluster_cfg: Mapping[str, Any] | None) -> float | None:
+    """
+    Resolve the CUDA cache-heartbeat log cadence from a ``cluster`` config block.
+
+    Reads ``cluster.gpu_heartbeat.enable`` and ``log_interval_sec``. A missing/null/non-positive
+    ``log_interval_sec`` keeps the heartbeat enabled but disables periodic heartbeat logs.
+
+    Parameters
+    ----------
+    cluster_cfg : Mapping[str, Any] | None
+        The ``cluster`` section of the merged config (``cfg.raw.get("cluster")``), or None.
+
+    Returns
+    -------
+    float | None
+        Positive log cadence in seconds, 0.0 for silent heartbeat, or None when disabled.
+
+    """
+
+    heartbeat_cfg = (cluster_cfg or {}).get("gpu_heartbeat") or {}
+    enabled = heartbeat_cfg.get("enable", False)
+    if isinstance(enabled, str):
+        enabled = enabled.strip().lower() in {"1", "true", "yes", "on"}
+    if not enabled:
+        return None
+
+    raw = heartbeat_cfg.get("log_interval_sec")
+    if raw is None:
+        return 0.0
+    if not isinstance(raw, (int, float, str)):
+        logger.warning("cluster.gpu_heartbeat.log_interval_sec=%r is invalid; disabling heartbeat logs.", raw)
+        return 0.0
+    log_interval_sec = float(raw)
+    return log_interval_sec if log_interval_sec > 0.0 else 0.0
+
+
+# ----------------------------------------------------------------------------------------------------------------------
+@contextlib.contextmanager
+def _cuda_heartbeat(log_interval_sec: float | None, *, label: str = "") -> Iterator[None]:
+    """
+    Keep a reserved-but-idle GPU busy so cluster watchdogs don't reap the job during cache materialization.
+
+    The heartbeat runs a tiny deterministic CUDA matmul burst in a daemon thread while CPU cache
+    materialization is active. It is a no-op when disabled or CUDA is unavailable.
+
+    Parameters
+    ----------
+    log_interval_sec : float | None
+        Positive log cadence in seconds. 0 runs silently. None disables the heartbeat.
+    label : str
+        Optional logging prefix, usually the cache split label.
+
+    """
+
+    if log_interval_sec is None or not torch.cuda.is_available():
+        yield
+        return
+
+    matrix_n = 2048
+    burst_sec = 0.2
+    idle_sec = 0.8
+    stop = threading.Event()
+
+    def _beat() -> None:
+        do_log = log_interval_sec > 0.0
+        if do_log:
+            logger.info(
+                "%sGPU heartbeat enabled during cache materialization (log every %.0f s)",
+                label,
+                log_interval_sec,
+            )
+        try:
+            left = torch.full((matrix_n, matrix_n), 1.0001, device="cuda")
+            right = torch.full((matrix_n, matrix_n), 0.9999, device="cuda")
+            out = torch.empty_like(left)
+            next_log = time.monotonic() + log_interval_sec if do_log else None
+            while not stop.is_set():
+                burst_end = time.monotonic() + burst_sec
+                while time.monotonic() < burst_end and not stop.is_set():
+                    torch.mm(left, right, out=out)
+                    torch.cuda.synchronize()
+                if next_log is not None and time.monotonic() >= next_log:
+                    logger.info("%sGPU heartbeat still alive", label)
+                    next_log = time.monotonic() + log_interval_sec
+                stop.wait(timeout=idle_sec)
+        except Exception as exc:  # pragma: no cover - only reachable on cluster/runtime CUDA failures.
+            logger.warning("%sGPU heartbeat disabled after CUDA op failed: %s", label, exc)
+            return
+
+    thread = threading.Thread(target=_beat, name="mmt-cuda-heartbeat", daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join(timeout=5.0)
 
 
 # ======================================================================================================================
@@ -234,6 +341,7 @@ class WindowCachedDataset(Dataset):
         seed: int = 0,
         dtype: str | None = None,
         split_name: str | None = None,
+        gpu_heartbeat: float | None = None,
     ) -> "WindowCachedDataset":
         """
         Create a WindowCachedDataset from an IterableDataset.
@@ -260,6 +368,10 @@ class WindowCachedDataset(Dataset):
         split_name : str | None
             Split label for logging (e.g., "train", "val", "test").
             Optional. Default: None.
+        gpu_heartbeat : float | None
+            Heartbeat log cadence in seconds. When set and CUDA is available, the GPU is kept busy
+            while materializing this split.
+            Optional. Default: None.
 
         Returns
         -------
@@ -276,6 +388,7 @@ class WindowCachedDataset(Dataset):
             seed=seed,
             dtype=dtype,
             split_name=split_name,
+            gpu_heartbeat=gpu_heartbeat,
         )
 
 
@@ -373,6 +486,7 @@ def materialize_tokenized_split_to_ram(  # NOSONAR - Ignore cognitive complexity
     seed: int = 0,
     dtype: str | None = None,
     split_name: str | None = None,
+    gpu_heartbeat: float | None = None,
 ) -> WindowCachedDataset:
     """Materialize windows from an IterableDataset into a RAM-backed window dataset.
 
@@ -404,6 +518,10 @@ def materialize_tokenized_split_to_ram(  # NOSONAR - Ignore cognitive complexity
         Optional. Default: None
     split_name : str | None
         Split label for logging (e.g., "train", "val", "test").
+        Optional. Default: None.
+    gpu_heartbeat : float | None
+        Heartbeat log cadence in seconds. When set and CUDA is available, the GPU is kept busy
+        while materializing this split.
         Optional. Default: None.
 
     Returns
@@ -458,21 +576,22 @@ def materialize_tokenized_split_to_ram(  # NOSONAR - Ignore cognitive complexity
 
     flat_windows: list[dict[str, Any]] = []
 
-    for n, w in enumerate(_iter_windows(), start=1):
-        if dtype_np is not None:
-            _cast_window_embeddings_inplace(w, dtype=dtype_np)
+    with _cuda_heartbeat(gpu_heartbeat, label=prefix):
+        for n, w in enumerate(_iter_windows(), start=1):
+            if dtype_np is not None:
+                _cast_window_embeddings_inplace(w, dtype=dtype_np)
 
-        flat_windows.append(w)
+            flat_windows.append(w)
 
-        if max_windows is not None and n >= int(max_windows):
-            break
+            if max_windows is not None and n >= int(max_windows):
+                break
 
-        if n % _LOG_INTERVAL == 0:
-            logger.info(
-                "Cached %d windows so far (RAM: %.3f GB)",
-                len(flat_windows),
-                get_ram_gb(),
-            )
+            if n % _LOG_INTERVAL == 0:
+                logger.info(
+                    "Cached %d windows so far (RAM: %.3f GB)",
+                    len(flat_windows),
+                    get_ram_gb(),
+                )
 
     # Shuffle after caching if requested (since IterableDataset does not support DataLoader shuffle).
     if shuffle_shots and flat_windows:

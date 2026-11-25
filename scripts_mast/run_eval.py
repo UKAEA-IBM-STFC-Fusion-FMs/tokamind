@@ -24,22 +24,23 @@ import argparse
 import logging
 from pathlib import Path
 
-from mmt.utils import validate_config, sdpa_math_only_ctx
-from mmt.checkpoints import load_best_weights
-from mmt.data import build_decoders
-
 from mast_utils import (
-    load_experiment_config,
-    load_task_definition,
+    build_mast_datasets,
+    build_model_and_optional_warmstart,
     build_signals_by_role_from_task_definition,
+    build_window_data,
+    evaluate_benchmark_and_diagnostics,
     extract_signal_stats,
     init_run_context,
-    build_mast_datasets,
-    build_window_data,
-    build_model_and_optional_warmstart,
+    load_experiment_config,
+    load_task_definition,
     resolve_eval_embeddings,
-    evaluate_benchmark_and_diagnostics,
+    validate_mast_config,
 )
+
+from mmt.checkpoints import load_best_weights
+from mmt.data import build_decoders
+from mmt.utils import sdpa_math_only_ctx, validate_config
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -54,21 +55,36 @@ def parse_args_eval() -> argparse.Namespace:
 
     """
 
-    parser = argparse.ArgumentParser(description="Run evaluation for a given task (convention-based configs).")
+    parser = argparse.ArgumentParser(
+        description="Run evaluation for a given task (convention-based configs).",
+        allow_abbrev=False,
+    )
     parser.add_argument(
         "--task",
         type=str,
         default="_test",
-        help="Task folder name under scripts_mast/configs/tasks_overrides/<task>/",
+        help="Task identifier. Task-specific eval config lives in scripts_mast/configs/<model_profile>/tasks/eval_tasks.yaml, "
+        "where <model_profile> is inferred from --model_source (not selected on the CLI for eval).",
     )
     parser.add_argument(
-        "--model",
+        "--model_source",
         type=str,
         # required=True,  # NOSONAR - Ignore weak warning
         default="_test",
         help="Model to evaluate (run_id or path). Example: ft_task_1-1_from_base_v1",
     )
-    args, _ = parser.parse_known_args()
+    parser.add_argument(
+        "--tag",
+        type=str,
+        default=None,
+        help="Optional text eval tag. Outputs are saved under eval_<tag>/ instead of eval/.",
+    )
+    parser.add_argument(
+        "--tag-date",
+        action="store_true",
+        help="Append a UTC timestamp with second precision to the evaluation directory name.",
+    )
+    args = parser.parse_args()
 
     return args
 
@@ -92,9 +108,12 @@ def main() -> None:
     cfg_mmt = load_experiment_config(
         task=args.task,
         phase="eval",
-        model=args.model,
+        model_source=args.model_source,
+        tag=args.tag,
+        tag_date=args.tag_date,
     )
     validate_config(cfg=cfg_mmt)
+    validate_mast_config(cfg=cfg_mmt)
 
     # ..................................................................................................................
     # Runtime context (device, seed, logging)
@@ -107,7 +126,7 @@ def main() -> None:
 
     amp_enabled = cfg_eval.get("amp", {}).get("enable", True)
 
-    # Benchmark task config (with overrides such as subset_of_shots/local)
+    # Benchmark task config (with overrides such as subset_size/local)
     cfg_task = load_task_definition(task_key=args.task)
 
     # ..................................................................................................................
@@ -133,7 +152,7 @@ def main() -> None:
         dict_metadata=dict_task_metadata,
     )
 
-    train_run_dir = Path(cfg_mmt.model_source["run_dir"])
+    train_run_dir = Path(str(cfg_mmt.model_source["run_dir"]))
     signal_specs, codecs = resolve_eval_embeddings(
         cfg_mmt=cfg_mmt,
         signals_by_role=signals_by_role,
@@ -201,7 +220,7 @@ def main() -> None:
     # Evaluation: metrics + optional traces
     # ..................................................................................................................
 
-    run_dir = cfg_mmt.paths["run_dir"]
+    run_dir = Path(str(cfg_mmt.paths["run_dir"]))
     cfg_compute_metrics = cfg_eval.get("compute_metrics", {})
     cfg_traces = cfg_eval.get("traces", {})
 
@@ -222,6 +241,12 @@ def main() -> None:
         or cfg_compute_metrics.get("per_shot", False)
         or cfg_compute_metrics.get("per_window", False)
         or cfg_compute_metrics.get("per_timestamp", False)
+        or bool((cfg_compute_metrics.get("gs_metrics") or {}).get("enable", False))
+        or bool((cfg_compute_metrics.get("smoothness") or {}).get("enable", False))
+        or bool((cfg_compute_metrics.get("gs_topology") or {}).get("enable", False))
+        or bool((cfg_compute_metrics.get("psi_error_map") or {}).get("enable", False))
+        or bool((cfg_compute_metrics.get("jtor_error_map") or {}).get("enable", False))
+        or bool((cfg_compute_metrics.get("regional_mse") or {}).get("enable", False))
         or cfg_traces.get("enable", False)
     )
 
@@ -240,6 +265,9 @@ def main() -> None:
                 amp_enabled=amp_enabled,
                 compute_metrics_cfg=cfg_compute_metrics,
                 traces_cfg=cfg_traces,
+                source_store_manager=mast_dataset_test.sig.store_manager,
+                source_zarr_root=cfg_data.get("local_path"),
+                source_local=cfg_data.get("local", True),
             )
 
         if "task_metrics" in result:
@@ -247,8 +275,8 @@ def main() -> None:
         logger.info("Task metrics dir: %s", result.get("metrics_task_dir"))
     else:
         logger.info(
-            "[eval] compute_metrics: per_task, per_shot, per_window, per_timestamp and traces are disabled; skipping "
-            "evaluation."
+            "[eval] compute_metrics: per_task, per_shot, per_window, per_timestamp, GS residual, smoothness, "
+            "topology, psi/J_tor error maps, regional MSE, and traces are disabled; skipping evaluation."
         )
 
     logger.info("Done.")

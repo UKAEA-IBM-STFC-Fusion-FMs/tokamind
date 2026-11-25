@@ -32,8 +32,8 @@ The shared entry helpers use:
 - filters invalid windows by configured thresholds
 - supports temporal subsampling via `window_stride_sec`
 - `accept_nan_inputs_actuators` (default `True`): controls NaN tolerance for input/actuator signals; `True` passes partial-NaN signals through for downstream imputation, `False` masks them as invalid
-- `accept_nan_outputs` (default `True`): same control for output signals; set to `False` in finetune/pretrain to drop windows with partial-NaN outputs from the training loss
-- typical training config: `accept_nan_inputs_actuators=True`, `accept_nan_outputs=False` — keeps NaN-input windows so the model trains on the imputed-input distribution seen at eval, while excluding corrupted output targets from the loss
+- `accept_nan_outputs` (default `True`): same control for output signals. With `False`, partially missing outputs do not count toward `min_valid_outputs`.
+- The supplied MAST training phase configs allow partial NaNs for both inputs and outputs. A task can override either setting.
 
 ### 3) TrimChunksTransform
 - keeps at most `max_chunks`
@@ -55,8 +55,8 @@ The shared entry helpers use:
 - **identity-encoded outputs are not embedded**: if an output signal uses `encoder_name: identity`, the
   embedding step is skipped entirely for that signal — `window["output_emb"]` will not contain an entry for
   it. This avoids duplicating large output arrays in memory (the native values kept by `FinalizeWindowTransform`
-  are sufficient for `native_sparse_mse`). As a consequence, `embed_mse` silently ignores identity-encoded
-  outputs; use `native_sparse_mse` for those signals.
+  are sufficient for `native_sparse_mse`). Loss config validation rejects identity outputs selected for `embed_mse`;
+  use `native_sparse_mse` for those signals.
 
 ### 5) BuildTokensTransform
 - converts embedded chunks into token fields
@@ -98,4 +98,3 @@ preprocess:
   `runs/<run_id>/embeddings/dct3d.yaml`
 - implementation: `src/mmt/data/transforms/tune_ranked_dct3d.py`
 - detailed behavior: see [DCT3D Tuning](tuning_dct3d.md)
-

@@ -18,7 +18,7 @@ IMPORTANT:
         from mmt.utils.config import validate_config
         validate_config(cfg.raw)
 
-    No config validation is performed here.
+    Only runtime-context checks are performed here, such as resolving loss output names against model output specs.
 
 -------------------------------------------------------------------------------
 DATASET: CACHED AND STREAMED BEHAVIOR
@@ -59,11 +59,17 @@ from collections.abc import Mapping
 from typing import Any, cast
 
 import torch
+from torch import nn
 from torch.utils.data import DataLoader
 
-from mmt.models.mmt import MultiModalTransformer
-from mmt.train.loop_utils import backbone_lr, log_train_setup, run_one_epoch
-from mmt.train.losses import build_loss_aggregator
+from mmt.train.loop_utils import (
+    backbone_lr,
+    build_loss_aggregator_for_stage,
+    canonical_loss_cfg,
+    effective_stage_loss_cfg,
+    log_train_setup,
+    run_one_epoch,
+)
 from mmt.train.scheduler import build_optimizer_and_scheduler, apply_stage_freeze_policy
 from mmt.checkpoints import save_best, save_latest, resume_from_latest
 from mmt.utils.amp_utils import get_amp_config
@@ -81,7 +87,7 @@ logger = logging.getLogger("mmt.Train")
 
 # ----------------------------------------------------------------------------------------------------------------------
 def train_finetune(  # NOSONAR - Ignore cognitive complexity
-    model: MultiModalTransformer,
+    model: nn.Module,
     train_loader: DataLoader,
     val_loader: DataLoader,
     *,
@@ -89,14 +95,15 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     train_cfg: Mapping[str, Any],
     loader_cfg: Mapping[str, Any],
     output_decoders: dict | None = None,
+    signal_stats: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """
     Finetune the MMT model using the (already-validated) train configuration.
 
     Parameters
     ----------
-    model : MultiModalTransformer
-        MMT model to be fine-tuned.
+    model : torch.nn.Module
+        MMT-compatible model to be fine-tuned.
     train_loader : DataLoader
         Training DataLoader returned by initialize_mmt_dataloader().
     val_loader : DataLoader
@@ -112,6 +119,9 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
         ``train_cfg["loss"]["terms"]`` has ``requires_decode=True`` (e.g., ``native_sparse_mse``). Pass the result of
         ``build_decoders()`` from ``codec_utils``.
          Optional. Default: None.
+    signal_stats : Mapping[str, Mapping[str, Any]] | None
+        Per-signal mean/std metadata, required by losses that operate in destandardized native units.
+        Optional. Default: None.
 
     Returns
     -------
@@ -143,29 +153,23 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
     early_patience = int(train_cfg["early_stop"]["patience"])
     early_delta = float(train_cfg["early_stop"]["delta"])
 
-    # NOTE: config defines loss weights by *signal name*; model preds are keyed by signal_id (int).
-    # Resolve name -> signal_id once here (same convention used for output adapters).
-    _ow_cfg: dict = train_cfg["loss"].get("output_weights") or {}
-    output_weights_by_id: dict[int, float] = {}
-    if isinstance(_ow_cfg, dict) and _ow_cfg:
-        name_to_sid = {spec.name: spec.signal_id for spec in getattr(model, "output_specs", [])}
-        unknown = [k for k in _ow_cfg.keys() if (str(k) not in name_to_sid)]
-        if unknown:
-            raise KeyError(
-                f"Unknown output_weights keys: {unknown}. "
-                f"Expected output signal names among: {sorted(name_to_sid.keys())}."
-            )
-        for name, w in _ow_cfg.items():
-            output_weights_by_id[int(name_to_sid[str(name)])] = float(w)
+    output_specs = list(getattr(model, "output_specs", []))
+    output_name_to_id = {str(spec.name): int(spec.signal_id) for spec in output_specs}
 
-        # Overwrite train_cfg for consistent logging downstream.
-        train_cfg["loss"]["output_weights"] = output_weights_by_id
-
-    loss_aggregator = build_loss_aggregator(
-        loss_cfg=train_cfg["loss"],
-        output_weights_by_id=output_weights_by_id if output_weights_by_id else None,
-        decoders=output_decoders,
-    )
+    stage_loss_cfgs = [effective_stage_loss_cfg(train_cfg=train_cfg, stage_cfg=stage) for stage in stages]
+    stage_loss_keys = [canonical_loss_cfg(loss_cfg) for loss_cfg in stage_loss_cfgs]
+    loss_aggregators = [
+        build_loss_aggregator_for_stage(
+            loss_cfg=stage_loss_cfgs[stage_index],
+            output_specs=output_specs,
+            output_name_to_id=output_name_to_id,
+            output_decoders=output_decoders,
+            signal_stats=signal_stats,
+            path=f"train.stages[{stage_index}].loss" if "loss" in stage else "train.loss",
+            require_all_outputs="loss" not in stage,
+        )
+        for stage_index, stage in enumerate(stages)
+    ]
 
     use_adamw = train_cfg["optimizer"]["use_adamw"]
 
@@ -278,20 +282,15 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
         freeze_cfg = stage["freeze"]
         lr_cfg = stage["optimizer"]["lr"]
         wd_cfg = stage["optimizer"]["wd"]
+        loss_aggregator = loss_aggregators[stage_idx]
 
         grad_accum_steps = int(stage["scheduler"]["grad_accum_steps"])
         warmup_frac = float(stage["scheduler"].get("warmup_steps_fraction", 0.0))
         warmup_frac = float(max(0.0, min(1.0, warmup_frac)))
 
-        lr_token_encoder = float(lr_cfg["token_encoder"])
-        lr_backbone = float(lr_cfg["backbone"])
-        lr_modality_heads = float(lr_cfg["modality_heads"])
-        lr_output_adapters = float(lr_cfg["output_adapters"])
-
-        wd_token_encoder = float(wd_cfg["token_encoder"])
-        wd_backbone = float(wd_cfg["backbone"])
-        wd_modality_heads = float(wd_cfg["modality_heads"])
-        wd_output_adapters = float(wd_cfg["output_adapters"])
+        lr_by_block = {str(k): float(v) for k, v in lr_cfg.items()}
+        wd_by_block = {str(k): float(v) for k, v in wd_cfg.items()}
+        freeze_by_block = {str(k): bool(v) for k, v in freeze_cfg.items()}
 
         # ---- Stage steps / scheduler steps ----
         steps_per_epoch = math.ceil(train_batches_per_epoch / max(1, grad_accum_steps))
@@ -301,23 +300,14 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
         # ---- Stage freezing ----
         apply_stage_freeze_policy(
             model=model,
-            freeze_token_encoder=freeze_cfg["token_encoder"],  # NEW
-            freeze_backbone=freeze_cfg["backbone"],
-            freeze_modality_heads=freeze_cfg["modality_heads"],
-            freeze_output_adapters=freeze_cfg["output_adapters"],
+            freeze_by_block=freeze_by_block,
         )
 
         # ---- New optimizer + scheduler per stage ----
         optimizer, scheduler = build_optimizer_and_scheduler(
             model=model,
-            lr_token_encoder=lr_token_encoder,
-            lr_backbone=lr_backbone,
-            lr_modality_heads=lr_modality_heads,
-            lr_output_adapters=lr_output_adapters,
-            wd_token_encoder=wd_token_encoder,
-            wd_backbone=wd_backbone,
-            wd_modality_heads=wd_modality_heads,
-            wd_output_adapters=wd_output_adapters,
+            lr_by_block=lr_by_block,
+            wd_by_block=wd_by_block,
             total_steps=total_steps,
             warmup_steps=warmup_steps,
             use_adamw=use_adamw,
@@ -347,6 +337,17 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
         logger.info(f"  epochs={epochs}, grad_accum={grad_accum_steps}")
         logger.info(f"  total_steps={total_steps}, warmup_steps={warmup_steps}")
 
+        # A new stage can optimize a different loss scale, so compare validation only within matching loss configs.
+        first_epoch_in_stage = start_epoch_in_stage if stage_idx == start_stage_idx else 1
+        if stage_idx > 0 and first_epoch_in_stage <= 1 and stage_loss_keys[stage_idx] != stage_loss_keys[stage_idx - 1]:
+            logger.info(
+                "  loss config changed from previous stage; resetting best validation and early-stop counter "
+                "for this stage."
+            )
+            # After a reset, best.pt tracks the best checkpoint within the current loss regime.
+            best_val = float("inf")
+            bad_epochs = 0
+
         # Create history list for this stage
         history["stages"][name] = []
 
@@ -355,7 +356,7 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
         for epoch_in_stage in range(
-            start_epoch_in_stage if stage_idx == start_stage_idx else 1,
+            first_epoch_in_stage,
             epochs + 1,
         ):
             epoch_global = total_epochs_run + epoch_in_stage
@@ -375,6 +376,10 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 global_step=global_step,
                 max_batches=train_batches_per_epoch,
                 epoch_global=epoch_global,
+                epoch_in_stage=epoch_in_stage,
+                stage_index=stage_idx,
+                stage_name=name,
+                run_dir=run_dir,
             )
 
             # ---------------------------- VALIDATION -----------------------
@@ -392,6 +397,10 @@ def train_finetune(  # NOSONAR - Ignore cognitive complexity
                 global_step=global_step,
                 max_batches=None,  # Always full validation
                 epoch_global=epoch_global,
+                epoch_in_stage=epoch_in_stage,
+                stage_index=stage_idx,
+                stage_name=name,
+                run_dir=run_dir,
             )
 
             # ---------------------------- BEST CHECKPOINT ------------------

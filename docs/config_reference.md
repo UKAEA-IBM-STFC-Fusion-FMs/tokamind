@@ -13,7 +13,7 @@ This page documents active configuration keys used by the entry scripts.
 ### `task`
 - Type: `str`
 - Used in: pretrain, finetune, eval
-- Description: task folder name under `scripts_mast/configs/tasks_overrides/`.
+- Description: task identifier used to select entries in `configs/<model_profile>/tasks/<phase>_tasks.yaml` and optional embedding profile task files.
 - Source: CLI `--task`.
 
 ### `phase`
@@ -44,7 +44,7 @@ This page documents active configuration keys used by the entry scripts.
   - `temporal`: shots partitioned by campaign/discharge time.
   - In finetune warmstart and eval, the split is inherited from the source run; setting it explicitly in eval raises an error.
 
-### `data.subset_of_shots`
+### `data.subset_size`
 - Type: `int | null`
 - Description: limits number of shots for faster runs.
 
@@ -139,7 +139,7 @@ embeddings:
     entirely (see `encoder_name: identity` below). Output native values are never modified regardless of
     this setting.
   - Eval inherits this setting from the source training run being evaluated; it is intentionally not defined
-    in `common/eval.yaml` because it changes the token representation and must match training.
+    in `<model_profile>/phases/eval.yaml` because it changes the token representation and must match training.
 
 ### `encoder_name: identity`
 Setting `encoder_name: identity` for an **output** signal has a special memory-saving behavior:
@@ -159,60 +159,77 @@ writes `embeddings` into the chunk dict as usual).
 - Description: per-signal encoder overrides merged at runtime.
 - Typical source: run-local tuned rank overrides.
 
-### `embeddings.role_mode.{input,actuator,output}`
-- Type: `"tune" | "source" | "config"`
-- Used in: pretrain, finetune
-- Description:
-  - `tune`: tune DCT3D coefficients in the current run.
-  - `source`: inherit DCT3D coefficients from the source run. Valid only in finetune and requires `model_source.run_dir`.
-  - `config`: use merged config/profile defaults without tuning or source artifacts.
-  - Pretrain accepts only `tune` or `config`; `source` is invalid because pretrain has no source run.
+### `embeddings.dct3d.per_signal_overrides`
+- Type: mapping
+- Description: optional manual DCT3D per-signal overrides in the selected embedding profile.
+- Runtime note: normal DCT3D runs tune rank-mode artifacts. Use this only when a signal needs a fixed/manual encoder
+  config instead of the tuned artifact.
 
-### `embeddings.tuning.n_shots`
+### DCT3D fixed policy
+- Pretrain: tune all DCT3D signals except explicit manual per-signal overrides.
+- Finetune scratch: tune all DCT3D signals except explicit manual per-signal overrides.
+- Finetune warmstart: inherit existing input/actuator artifacts from the source run, tune missing input/actuator
+  signals, and tune outputs. Explicit manual per-signal overrides use the configured value directly.
+- Eval: inherit embeddings from the evaluated training run.
+
+### `embeddings.dct3d.tuning.common`
+- Type: mapping
+- Description: shared DCT3D tuning recipe. The loader deep-merges this with `embeddings.dct3d.tuning.<phase>` and
+  materializes the result into runtime `embeddings.tuning`.
+
+### `embeddings.dct3d.tuning.pretrain`
+- Type: mapping
+- Description: pretrain-specific DCT3D tuning settings.
+
+### `embeddings.dct3d.tuning.finetune`
+- Type: mapping
+- Description: finetune-specific DCT3D tuning settings. Used for both scratch and warmstart finetune.
+
+### `embeddings.dct3d.tuning.common.n_shots`
 - Type: `int`
 - Description: shot sample size for DCT3D tuning.
 
-### `embeddings.tuning.max_windows`
+### `embeddings.dct3d.tuning.common.max_windows`
 - Type: `int | null`
 - Description: max streamed windows for tuning.
 
-### `embeddings.tuning.objective.thresholds.{input,actuator,output}`
+### `embeddings.dct3d.tuning.{pretrain,finetune}.objective.thresholds.{input,actuator,output}`
 - Type: `float` in `(0, 1]`
 - Description: explained-energy targets by role.
 
-### `embeddings.tuning.objective.max_budget.{input,actuator,output}`
+### `embeddings.dct3d.tuning.{pretrain,finetune}.objective.max_budget.{input,actuator,output}`
 - Type: `int`
 - Description: maximum selected coefficients per role (hard final cap).
 
-### `embeddings.tuning.guardrails`
+### `embeddings.dct3d.tuning.common.guardrails`
 - Type: mapping
 - Description: optional minimum-dimension coverage constraints.
 
-### `embeddings.tuning.guardrails.enable`
+### `embeddings.dct3d.tuning.common.guardrails.enable`
 - Type: `bool`
 - Description: enable/disable guardrail lifting during rank tuning.
 
-### `embeddings.tuning.guardrails.timeseries.min_unique_t`
+### `embeddings.dct3d.tuning.common.guardrails.timeseries.min_unique_t`
 - Type: `int`
 - Description: minimum unique T indices required for timeseries signals.
 
-### `embeddings.tuning.guardrails.profile.min_unique_h`
+### `embeddings.dct3d.tuning.common.guardrails.profile.min_unique_h`
 - Type: `int`
 - Description: minimum unique H indices required for profile signals.
 
-### `embeddings.tuning.guardrails.profile.min_unique_t`
+### `embeddings.dct3d.tuning.common.guardrails.profile.min_unique_t`
 - Type: `int`
 - Description: minimum unique T indices required for profile signals.
 
-### `embeddings.tuning.guardrails.video.min_unique_h`
+### `embeddings.dct3d.tuning.common.guardrails.video.min_unique_h`
 - Type: `int`
 - Description: minimum unique H indices required for video signals.
 
-### `embeddings.tuning.guardrails.video.min_unique_w`
+### `embeddings.dct3d.tuning.common.guardrails.video.min_unique_w`
 - Type: `int`
 - Description: minimum unique W indices required for video signals.
 
-### `embeddings.tuning.guardrails.video.min_unique_t`
+### `embeddings.dct3d.tuning.common.guardrails.video.min_unique_t`
 - Type: `int`
 - Description: minimum unique T indices required for video signals.
 
@@ -277,14 +294,14 @@ Top-level location: `loader:`
 - Description: optional cap for streaming-epoch batch count.
 
 ## Finetune Model Configuration
-Finetune configuration is split across init-mode files:
+Finetune configuration is split across model-profile/init-mode files:
 
 | Key | File | Scope |
 |---|---|---|
-| `data` / `preprocess` / `collate` / `loader` | `common/finetune_warmstart.yaml` or `common/finetune_scratch.yaml` | duplicated per init mode |
-| `model_scratch` | `common/finetune_scratch.yaml` | complete scratch model |
-| `model_overrides` | `common/finetune_warmstart.yaml` | warmstart-only source-model overrides |
-| `train` | `common/finetune_warmstart.yaml` or `common/finetune_scratch.yaml` | per init mode |
+| `data` / `preprocess` / `collate` / `loader` | `<model_profile>/phases/finetune_warmstart.yaml` or `<model_profile>/phases/finetune_scratch.yaml` | duplicated per model/init mode |
+| `model_scratch` | `<model_profile>/phases/finetune_scratch.yaml` | complete scratch model |
+| `model_overrides` | `<model_profile>/phases/finetune_warmstart.yaml` | warmstart-only source-model overrides |
+| `train` | `<model_profile>/phases/finetune_warmstart.yaml` or `<model_profile>/phases/finetune_scratch.yaml` | per model/init mode |
 
 ### `model_scratch`
 - Type: mapping
@@ -328,7 +345,12 @@ Top-level location in runtime config snapshot: `model:`
 
 ### `model.modality_heads`
 - Type: mapping
-- Description: per-modality intermediate head sizes.
+- Description: per-modality intermediate head sizes for `model.name: mmt`.
+
+### `model.output_adapters.type`
+- Type: `str` — `deterministic`
+- Default: `deterministic`
+- Description: emits a single prediction per output (`pred[sid]`).
 
 ### `model.output_adapters.hidden_dim.default`
 - Type: `int | "d_model"`
@@ -366,16 +388,18 @@ Top-level location: `train:`
 - Description: toggles autocast mixed precision.
 
 ### `train.loss.terms`
-- Type: `list[{type, weight}]`
+- Type: `list[{type, weight, outputs?}]`
 - Default: `[{type: embed_mse, weight: 1.0}]` (applied when `terms` is absent)
 - Description: list of loss terms combined as a normalized weighted sum.
 
 Supported term types:
 
-| Type | Description |
-|---|---|
-| `embed_mse` | MSE in embedding (coefficient) space. No decoding required. NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; DCT3D tuning uses the same policy. The loss trains against the embedding of the imputed signal with no explicit NaN masking. |
-| `native_sparse_mse` | MSE in native standardized space. Decodes predictions back to native space, then explicitly masks out NaN positions from `output_native` before computing the mean. Only observed positions contribute. Requires decoders to be built at startup. |
+| Type                    | Description                                                                                                                                                                                                                                                                           |
+|-------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `embed_mse`             | MSE in embedding (coefficient) space. No decoding required. NaN positions are imputed before encoding according to `preprocess.embed_chunks.nan_imputation`; DCT3D tuning uses the same policy. The loss trains against the embedding of the imputed signal with no explicit NaN masking. |
+| `native_sparse_mse`     | MSE in native standardized space. Decodes predictions back to native space, then explicitly masks out NaN positions from `output_native` before computing the mean. Only observed positions contribute. Requires decoders to be built at startup.                                     |
+| `strong_grad_shafranov` | Strong-form Grad-Shafranov PDE in native destandardized space. Requires decoders and Grad-Shafranov term fields (`grad_shafranov_params_file`, `rhs_input`). Must include `equilibrium-psi`.                                                                                          |
+| `weak_grad_shafranov`   | Weak-form Grad-Shafranov PDE in native destandardized space. Requires decoders and Grad-Shafranov term fields (`grad_shafranov_params_file`). Must include `equilibrium-psi`.                                                                                              |
 
 Example:
 ```yaml
@@ -390,9 +414,33 @@ train:
 
 Multiple terms are combined as a normalized weighted sum: `total = sum(w_i * L_i) / sum(w_i)`.
 
+### `train.loss.terms[].outputs`
+- Type: mapping with exactly one optional key: `include` or `exclude`
+- Description: per-term output filter by output signal name. If omitted, the term applies to every output it can
+  supervise. `include` and `exclude` are mutually exclusive. Empty lists and unknown output names are startup errors.
+
+Example:
+```yaml
+train:
+  loss:
+    terms:
+      - type: embed_mse
+        outputs:
+          include:
+            - soft_x_rays-horizontal_cam_lower
+      - type: native_sparse_mse
+        outputs:
+          exclude:
+            - soft_x_rays-horizontal_cam_lower
+```
+
+Startup validation also checks that every output is supervised by at least one capable loss term. `embed_mse` cannot
+supervise identity-encoded outputs because identity outputs are not written to `output_emb`; use `native_sparse_mse`
+for those signals.
+
 ### `train.loss.output_weights`
 - Type: mapping
-- Description: per-output loss weighting (applied inside each term independently).
+- Description: per-output weighting for the data-loss terms; not used by the GS losses.
 
 ### `train.optimizer.use_adamw`
 - Type: `bool`
@@ -426,14 +474,15 @@ Top-level location: `model_source:`
 - Description: resolved absolute source run directory.
 
 Mode notes:
-- finetune warmstart: `model_source` is set from CLI `--model`.
+- finetune warmstart: `model_source` is set from CLI `--model_source`.
 - finetune scratch: `model_source` is `null`.
 - eval: `model_source` is required.
 
 ### `model_source.load_parts.*`
 - Type: `bool`
-- Keys: `token_encoder`, `backbone`, `modality_heads`, `output_adapters`
-- Description: block-level warmstart load filter.
+- Keys: model-specific block names.
+- Description: block-level warmstart load filter. Keys are `token_encoder`, `backbone`, `modality_heads`, and
+  `output_adapters`.
 - Used in: finetune warmstart.
 
 ## Evaluation
@@ -471,6 +520,9 @@ Top-level location: `eval:`
 - Type: `bool`
 - Description: writes per-timestamp diagnostic CSV.
 
+For optional GS diagnostics, spatial error maps and regional MSE/NRMSE,
+see [Evaluation](evaluation.md#gs-diagnostics).
+
 ### `eval.traces.enable`
 - Type: `bool`
 - Description: enables trace export.
@@ -494,18 +546,21 @@ Top-level location: `eval:`
 
 ### Eval
 - `paths.model_run_dir = runs/<model_id>` (or external path)
-- `paths.run_dir = <model_run_dir>/eval`
-- Config snapshot: `<model_run_dir>/eval/eval.yaml`
+- `paths.run_dir = <model_run_dir>/<eval_id>`, where `<eval_id>` is `eval` or `eval_<tag>`.
+- Config snapshot: `<model_run_dir>/<eval_id>/<eval_id>.yaml`
 
 ## Task Files
-Per task under `scripts_mast/configs/tasks_overrides/<task>/`:
-- Optional: `pretrain_overrides.yaml`, `finetune_overrides.yaml`, `eval_overrides.yaml`
-- Required for pretrain/finetune: `embeddings_overrides/<profile>.yaml`
+Task runtime overrides live under `scripts_mast/configs/<model_profile>/tasks/<phase>_tasks.yaml`:
+- Optional: `tasks.<task>` entries for pretrain, finetune, and eval.
+
+Embedding profiles live under `scripts_mast/configs/<model_profile>/embeddings/<profile>/`:
+- Required: `_default.yaml` for base profiles.
+- Optional: `<task>.yaml` when a task has real profile-specific settings.
 
 ## Quick Validation Checklist
 1. Phase is one of `pretrain`, `finetune`, `eval`.
-2. Task embedding profile file exists for pretrain/finetune.
-3. Finetune/eval include `--model` on CLI.
+2. The embedding profile has a default or task-specific file, unless using the virtual `identity` profile.
+3. Warmstart and eval specify `--model_source`; scratch does not need it.
 4. Eval keeps `data.keep_output_native: true`.
-5. Finetune with `embeddings.role_mode.*=config` uses config/profile defaults without source artifacts or tuning.
+5. VAE profiles do not expect DCT3D tune/source policy.
 6. `data.split` is set in pretrain/finetune configs; do not set it in eval configs.

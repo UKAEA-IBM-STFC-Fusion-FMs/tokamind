@@ -29,8 +29,7 @@ run_dir/
 
 Model requirements
 ------------------
-Models used with this API must expose explicit get_*_state_dict() and load_*_state_dict(state, strict) methods for each
-learnable block (token encoder, backbone, modality heads, output adapters).
+Models used with this API must expose ``get_named_blocks()`` with stable block names.
 """
 
 from __future__ import annotations
@@ -48,7 +47,7 @@ from torch.optim import Optimizer
 from torch.optim.lr_scheduler import LRScheduler
 from torch.amp.grad_scaler import GradScaler
 
-from .blocks import save_model_quadruplet, load_model_quadruplet
+from .block_io import save_model_blocks, load_model_blocks
 from .io import atomic_save, atomic_json_save, torch_load_full, best_or_latest_dir
 from .rng import capture_rng_state, restore_rng_state
 
@@ -73,12 +72,7 @@ def save_best(
     extra_meta: Mapping[str, Any] | None = None,
 ) -> None:
     """
-    Save a strict best snapshot:
-      run_dir/checkpoints/best/
-        backbone.pt
-        modality_heads.pt
-        output_adapters.pt
-        meta.json
+    Save a strict best snapshot with one ``<block_name>.pt`` file per model-declared block.
 
     Parameters
     ----------
@@ -103,7 +97,7 @@ def save_best(
     best_dir = os.path.join(run_dir, "checkpoints", "best")
     os.makedirs(best_dir, exist_ok=True)
 
-    save_model_quadruplet(model=model, subdir=best_dir)
+    save_model_blocks(model=model, subdir=best_dir)
 
     meta = {
         "epoch_best": int(epoch),
@@ -131,16 +125,7 @@ def save_latest(
     extra_meta: Mapping[str, Any] | None = None,
 ) -> None:
     """
-    Save a strict "resume point":
-      run_dir/checkpoints/latest/
-        backbone.pt
-        modality_heads.pt
-        output_adapters.pt
-        optimizer.pt
-        scheduler.pt
-        scaler.pt
-        rng.pt
-        meta.json
+    Save a strict "resume point" with model blocks, optimizer/scheduler/scaler, RNG state, and metadata.
 
     Parameters
     ----------
@@ -175,7 +160,7 @@ def save_latest(
     lat = os.path.join(run_dir, "checkpoints", "latest")
     os.makedirs(name=lat, exist_ok=True)
 
-    save_model_quadruplet(model=model, subdir=lat)
+    save_model_blocks(model=model, subdir=lat)
 
     if optimizer is not None:
         atomic_save(obj=optimizer.state_dict(), path=os.path.join(lat, "optimizer.pt"))
@@ -216,7 +201,7 @@ def resume_from_latest(
     The train loop decides whether resume is allowed (train.resume = true).
 
     Restores:
-      - model quadruplet (token encoder, backbone, heads, adapters) [if load_model=True]
+      - model-declared blocks [if load_model=True]
       - optimizer / scheduler / scaler states
       - RNG state
       - meta.json (epoch, best_val_so_far, etc.)
@@ -316,14 +301,11 @@ def resume_from_latest(
 
     # Now restore the model + training state.
     if load_model:
-        load_model_quadruplet(
+        load_model_blocks(
             model=model,
             subdir=lat,
             map_location=map_location,
-            strict_token=True,
-            strict_backbone=True,
-            strict_heads=True,
-            strict_adapters=True,
+            strict=True,
         )
 
     _maybe_load(obj=optimizer, filename="optimizer.pt")
@@ -372,14 +354,11 @@ def load_best_weights(
         return -1, float("inf"), {}
 
     ckpt = cast(str, ckpt)  # -> To avoid type mismatch warning
-    load_model_quadruplet(
+    load_model_blocks(
         model=model,
         subdir=ckpt,
         map_location=map_location,
-        strict_token=True,
-        strict_backbone=True,
-        strict_heads=True,
-        strict_adapters=True,
+        strict=True,
     )
 
     meta_path = os.path.join(ckpt, META_FILENAME)

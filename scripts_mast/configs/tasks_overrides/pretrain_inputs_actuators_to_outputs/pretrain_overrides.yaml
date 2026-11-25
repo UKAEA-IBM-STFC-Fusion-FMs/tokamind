@@ -1,5 +1,0 @@
-# Task-specific overrides for the PRETRAIN phase.
-# Use this file only when a given pretrain task needs settings beyond the
-# shared defaults in config/common/pretrain.yaml (e.g. different
-# LR/epochs, warm-start settings, etc.).
-

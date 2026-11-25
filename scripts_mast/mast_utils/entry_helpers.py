@@ -18,13 +18,14 @@ Design notes:
 -------------
 - These helpers are intentionally high-level orchestration functions
 - Low-level primitives (transforms, collate, etc.) remain in pipeline_ops.py
-- Embedding resolution logic lives in embedding_resolution.py / tune_dct3d.py
+- Embedding resolution logic lives in embedding_resolution/ / tune_dct3d.py
 """
 
 from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from pathlib import Path
 from typing import Any, Literal, Union, cast
 
 import torch
@@ -32,9 +33,10 @@ import torch
 from mmt.data.signal_spec import SignalSpecRegistry
 from mmt.utils.config.schema import ExperimentConfig
 from mmt.utils import set_seed, setup_logging
-from mmt.data import initialize_mmt_dataloader, WindowCachedDataset
+from mmt.data import initialize_mmt_dataloader, resolve_gpu_heartbeat, WindowCachedDataset
 from mmt.models import MultiModalTransformer
 from mmt.checkpoints import load_parts_from_run_dir
+from mmt.train.losses import resolve_native_loss_output_names
 
 
 from .benchmark_imports import (
@@ -50,6 +52,11 @@ from .pipeline_ops import (
     make_collate_fn,
 )
 from .tokamark_split import resolve_split_assets, apply_signal_stats_override
+
+
+# ======================================================================================================================
+# Cluster runtime helpers
+# ======================================================================================================================
 
 
 # ======================================================================================================================
@@ -93,7 +100,7 @@ def init_run_context(
     log_filename = f"{cfg_mmt.run_id}.log" if (phase != "eval") else f"{cfg_mmt.eval_id}.log"
 
     logger = setup_logging(
-        run_dir=cfg_mmt.paths["run_dir"],
+        run_dir=Path(str(cfg_mmt.paths["run_dir"])),
         logger_name="mmt",
         filename=log_filename,
         console=True,
@@ -163,7 +170,7 @@ def build_mast_datasets(
 
     # Shot splits
     train_shots, test_shots, val_shots = get_train_test_val_shots(
-        max_index=cfg_data["subset_of_shots"],
+        max_index=cfg_data["subset_size"],
         data_splits_file_path=split_assets["data_splits_file_path"],
     )
 
@@ -233,6 +240,7 @@ def build_window_data(  # NOSONAR - Ignore cognitive complexity
     signal_specs: SignalSpecRegistry,
     codecs: Mapping[int, Any],
     phase: Literal["pretrain", "finetune", "eval"],
+    output_decoders: Mapping[int, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """
     Build window iterables, datasets, and dataloaders.
@@ -262,6 +270,9 @@ def build_window_data(  # NOSONAR - Ignore cognitive complexity
         Codec mapping (signal_id -> codec).
     phase : Literal["pretrain", "finetune", "eval"]
         Phase name, either "pretrain", "finetune", or "eval".
+    output_decoders : Mapping[int, Any] | None
+        Optional output decoders keyed by signal ID. Used in train phases to retain native outputs only for
+        ``native_sparse_mse`` terms that actually need them.
 
     Returns
     -------
@@ -284,6 +295,20 @@ def build_window_data(  # NOSONAR - Ignore cognitive complexity
     cfg_collate = cfg_mmt.raw.get("collate", {})
     keep_output_native = cfg_data.get("keep_output_native", False)
     debug_mode = cfg_mmt.runtime["debug_logging"]
+    native_output_names: set[str] | None = None
+
+    if keep_output_native and (phase != "eval"):
+        resolved_native_output_names = resolve_native_loss_output_names(
+            loss_cfg=cfg_mmt.train.get("loss", {}),
+            output_specs=list(signal_specs.specs_for_role("output")),
+            decoders=output_decoders,
+        )
+        if resolved_native_output_names:
+            native_output_names = resolved_native_output_names
+        else:
+            logging.getLogger("mmt.WindowData").warning(
+                "data.keep_output_native=True but no native-loss outputs were resolved; keeping all native outputs."
+            )
 
     # Build transform pipeline (shared across all splits)
     mmt_transform = build_default_transform(
@@ -292,10 +317,12 @@ def build_window_data(  # NOSONAR - Ignore cognitive complexity
         signal_specs=signal_specs,
         codecs=codecs,
         keep_output_native=keep_output_native,
+        native_output_names=native_output_names,
     )
 
     # Caching config
     enable_cache = cfg_cache.get("enable", False)
+    gpu_heartbeat = resolve_gpu_heartbeat(cfg_mmt.raw.get("cluster"))
 
     result = {}
 
@@ -342,6 +369,7 @@ def build_window_data(  # NOSONAR - Ignore cognitive complexity
                 seed=cfg_mmt.seed,
                 dtype=cfg_cache.get("dtype", None),
                 split_name=split_name,
+                gpu_heartbeat=gpu_heartbeat,
             )
         else:
             window_dataset = window_iterable
@@ -407,6 +435,7 @@ def build_model_and_optional_warmstart(
     Build MMT model and optionally warmstart from source.
 
     This helper consolidates the model construction + warmstart logic that is duplicated across all three entry scripts.
+    The model architecture is selected by ``model.name``.
 
     Parameters
     ----------
@@ -426,28 +455,45 @@ def build_model_and_optional_warmstart(
     MultiModalTransformer
         Model ready for training/eval.
 
+    Raises
+    ------
+    ValueError
+        If ``model.name`` is not supported.
+
     """
 
     cfg_model = cfg_mmt.model
     cfg_backbone = cfg_model["backbone"]
-    cfg_modality_heads = cfg_model["modality_heads"]
     cfg_output_adapters = cfg_model["output_adapters"]
-    max_positions = cfg_mmt.preprocess["trim_chunks"]["max_chunks"]
+    output_adapter_type = str(cfg_output_adapters.get("type", "deterministic"))
+    residual_cfg = cfg_output_adapters.get("residual") or {}
+    output_residual_enabled = bool(residual_cfg.get("enable", False))
+    output_residual_zero_init = bool(residual_cfg.get("zero_init", True))
+    max_positions = cfg_mmt.preprocess["chunks"]["input"]["max_chunks"]
+    model_name = cfg_model.get("name", "mmt")
 
-    # Construct model
-    model = MultiModalTransformer(
-        signal_specs=signal_specs,
-        d_model=cfg_backbone["d_model"],
-        n_layers=cfg_backbone["n_layers"],
-        n_heads=cfg_backbone["n_heads"],
-        dim_ff=cfg_backbone["dim_ff"],
-        dropout=cfg_backbone["dropout"],
-        backbone_activation=cfg_backbone["activation"],
-        max_positions=max_positions,
-        modality_heads_cfg=cfg_modality_heads,
-        output_adapters_cfg=cfg_output_adapters,
-        debug_tokens=False,
-    )
+    # Construct the currently supported model.
+    if model_name == "mmt":
+        cfg_modality_heads = cfg_model["modality_heads"]
+        model = MultiModalTransformer(
+            signal_specs=signal_specs,
+            d_model=cfg_backbone["d_model"],
+            n_layers=cfg_backbone["n_layers"],
+            n_heads=cfg_backbone["n_heads"],
+            dim_ff=cfg_backbone["dim_ff"],
+            dropout=cfg_backbone["dropout"],
+            backbone_activation=cfg_backbone["activation"],
+            max_positions=max_positions,
+            modality_heads_cfg=cfg_modality_heads,
+            output_adapters_cfg=cfg_output_adapters,
+            debug_tokens=False,
+            output_adapter_type=output_adapter_type,
+            output_residual_enabled=output_residual_enabled,
+            output_residual_zero_init=output_residual_zero_init,
+        )
+    else:
+        raise ValueError(f"Unknown model.name={model_name!r}.")
+
     model.to(device)
 
     # Optional warmstart

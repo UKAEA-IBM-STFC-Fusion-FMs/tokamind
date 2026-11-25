@@ -137,6 +137,7 @@ def compute_embedding_dim_for_encoder(  # NOSONAR - Ignore cognitive complexity
     values_shape: tuple[int, ...],
     dt: float,
     chunk_length_sec: float,
+    modality: str | None = None,
 ) -> int:
     """
     Compute the encoded dimension for a single chunk of a signal.
@@ -155,6 +156,9 @@ def compute_embedding_dim_for_encoder(  # NOSONAR - Ignore cognitive complexity
         Sampling interval in seconds.
     chunk_length_sec : float
         Chunk length in seconds.
+    modality : str | None
+        Signal modality. Required to distinguish a scalar time series with a
+        singleton storage axis from a genuine one-point profile.
 
     Returns
     -------
@@ -372,7 +376,8 @@ def build_codecs(  # NOSONAR - Ignore cognitive complexity
     ------
     ValueError
         If `config_dir` is not available for DCT3D rank mode.
-        If `encoder_name` attribute of an item in `signal_specs.specs` is not in ["dct3d", "identity", "vae"].
+        If `encoder_name` attribute of an item in `signal_specs.specs` is not in
+        ["dct3d", "identity", "vae"].
     KeyError
         If `encoder_kwargs["coeff_indices_path"]` is not available for DCT3D rank mode.
         If `encoder_kwargs["model_dir"]` is not available for a given VAE signal.

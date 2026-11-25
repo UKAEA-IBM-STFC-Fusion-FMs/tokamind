@@ -11,6 +11,7 @@ Key modules
 - select_valid_windows.py   : filter windows based on validity criteria
 - embed_chunks.py           : apply codecs to compress/embed chunks
 - build_tokens.py           : convert embedded chunks to model tokens
+- output_residual.py        : encode latest-input persistence baselines in output space
 - finalize_window.py        : prepare final window batch format
 - tune_ranked_dct3d.py      : DCT3D coefficient tuning transform
 - compose.py                : compose multiple transforms into pipeline

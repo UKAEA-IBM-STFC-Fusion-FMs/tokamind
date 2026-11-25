@@ -17,7 +17,7 @@ Key modules
 # Datasets
 # ----------------------------------------------------------------------------------------------------------------------
 
-from .datasets import WindowCachedDataset
+from .datasets import WindowCachedDataset, resolve_gpu_heartbeat
 
 # ----------------------------------------------------------------------------------------------------------------------
 # Transforms
@@ -28,6 +28,7 @@ from .transforms.trim_chunks import TrimChunksTransform
 from .transforms.select_valid_windows import SelectValidWindowsTransform
 from .transforms.embed_chunks import EmbedChunksTransform
 from .transforms.build_tokens import BuildTokensTransform
+from .transforms.output_residual import OutputResidualBaselineTransform
 from .transforms.finalize_window import FinalizeWindowTransform
 from .transforms.tune_ranked_dct3d import TuneRankedDCT3DTransform
 from .transforms.compose import ComposeTransforms
@@ -45,17 +46,25 @@ from .signal_spec import SignalSpec, build_signal_specs, infer_modality
 # ----------------------------------------------------------------------------------------------------------------------
 
 from .embeddings.codec_utils import build_codecs, build_decoders
+from .embeddings.tune_dct3d import (
+    build_dct3d_tuning_transform,
+    load_dct3d_rank_overrides,
+    run_dct3d_tuning_from_windows,
+    save_dct3d_rank_overrides,
+)
 
 
 # ----------------------------------------------------------------------------------------------------------------------
 
 __all__ = [
     "WindowCachedDataset",
+    "resolve_gpu_heartbeat",
     "ChunkWindowsTransform",
     "TrimChunksTransform",
     "SelectValidWindowsTransform",
     "EmbedChunksTransform",
     "BuildTokensTransform",
+    "OutputResidualBaselineTransform",
     "FinalizeWindowTransform",
     "TuneRankedDCT3DTransform",
     "ComposeTransforms",
@@ -66,4 +75,8 @@ __all__ = [
     "infer_modality",
     "build_codecs",
     "build_decoders",
+    "build_dct3d_tuning_transform",
+    "run_dct3d_tuning_from_windows",
+    "save_dct3d_rank_overrides",
+    "load_dct3d_rank_overrides",
 ]

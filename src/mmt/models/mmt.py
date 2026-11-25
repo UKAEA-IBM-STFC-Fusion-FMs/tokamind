@@ -27,8 +27,16 @@ from mmt.data.signal_spec import SignalSpecRegistry
 
 from .token_encoder import TokenEncoder
 from .modality_heads import ModalityHead
-from .output_adapters import OutputAdapter, resolve_output_adapter_hiddens
+from .output_adapters import (
+    OutputAdapter,
+    OutputAdapterItem,
+    apply_output_residual,
+    apply_output_adapters,
+    resolve_output_adapter_hiddens,
+    zero_initialize_output_corrections,
+)
 from .backbone import Backbone
+from .blocks import MMT_BLOCK_NAMES
 
 
 # ----------------------------------------------------------------------------------------------------------------------
@@ -256,6 +264,9 @@ class MultiModalTransformer(nn.Module):
         output_adapters_cfg: Mapping[str, Any],
         backbone_activation: str = "relu",
         debug_tokens: bool = False,
+        output_adapter_type: str = "deterministic",
+        output_residual_enabled: bool = False,
+        output_residual_zero_init: bool = True,
     ) -> None:
         """
 
@@ -308,6 +319,13 @@ class MultiModalTransformer(nn.Module):
         debug_tokens : bool
             Enable extra consistency checks in the TokenEncoder.
             Optional. Default: False.
+        output_adapter_type : str
+            Output adapter type. Only ``"deterministic"`` is supported.
+            Optional. Default: "deterministic".
+        output_residual_enabled : bool
+            Whether same-name outputs predict zero-initialized corrections on
+            top of latest-input output-space baselines.
+            Optional. Default: False.
 
         Returns
         -------
@@ -326,6 +344,11 @@ class MultiModalTransformer(nn.Module):
 
         super().__init__()
         self.signal_specs = signal_specs
+        self.output_adapter_type = str(output_adapter_type)
+        self.output_residual_enabled = bool(output_residual_enabled)
+        self.output_residual_zero_init = bool(output_residual_zero_init)
+        if self.output_adapter_type != "deterministic":
+            raise ValueError(f"Unsupported output_adapter_type={self.output_adapter_type!r}. Expected 'deterministic'.")
 
         # ..............................................................................................................
         # 1) Token encoder + backbone
@@ -427,6 +450,20 @@ class MultiModalTransformer(nn.Module):
             self.output_dims[spec.signal_id] = K_t
             self.output_sid_to_key[spec.signal_id] = adapter_key
 
+        input_names = {str(spec.name) for spec in signal_specs.specs_for_role("input")}
+        self.output_residual_ids: set[int] = (
+            {int(spec.signal_id) for spec in output_specs if str(spec.name) in input_names}
+            if self.output_residual_enabled
+            else set()
+        )
+        if self.output_residual_enabled and not self.output_residual_ids:
+            raise ValueError("Output residual mode requires at least one same-name input/output signal pair.")
+        if self.output_residual_ids and self.output_residual_zero_init:
+            zero_initialize_output_corrections(
+                output_adapters=self.output_adapters,
+                adapter_keys=(self.output_sid_to_key[sid] for sid in self.output_residual_ids),
+            )
+
         self._print_init_summary(
             modalities=modalities,
             per_mod_hidden=per_mod_hidden,
@@ -460,12 +497,18 @@ class MultiModalTransformer(nn.Module):
 
         logger.info("MultiModalTransformer initialized:")
         logger.info(f"  backbone: d_model={self.backbone_out_dim}")
+        logger.info(
+            "  output residual: enabled=%s mapped_outputs=%d zero_init=%s",
+            self.output_residual_enabled,
+            len(self.output_residual_ids),
+            self.output_residual_zero_init,
+        )
 
         logger.info("  modality heads:")
         for mod in modalities:
             logger.info(f"    - {mod}: hidden={per_mod_hidden[mod]}, out_dim={per_mod_dim[mod]}")
 
-        logger.info("  Output adapters:")
+        logger.info(f"  Output adapters (type={self.output_adapter_type}):")
         for spec in self.output_specs:
             sid = spec.signal_id
             mod = self.output2modality[sid]
@@ -533,67 +576,58 @@ class MultiModalTransformer(nn.Module):
         # 5) Per-output adapters
         # ..............................................................................................................
 
-        preds: dict[int, torch.Tensor] = {}
+        adapter_items: list[OutputAdapterItem] = []
         for spec in self.output_specs:
             sid = spec.signal_id
             g = self.output2modality[sid]
             adapter_key = self.output_sid_to_key[sid]
-            adapter = self.output_adapters[adapter_key]
-            preds[sid] = adapter(modality_latent[g])
+            adapter_items.append((sid, adapter_key, modality_latent[g]))
 
         # ..............................................................................................................
         # Return
         # ..............................................................................................................
 
-        return {"h_cls": h_cls, "modality_latent": modality_latent, "pred": preds}
+        adapter_output = apply_output_adapters(
+            output_adapters=self.output_adapters,
+            items=adapter_items,
+            output_adapter_type=self.output_adapter_type,
+        )
+        adapter_output = apply_output_residual(
+            adapter_output=adapter_output,
+            baseline_emb=batch.get("output_baseline_emb"),
+            residual_output_ids=set(self.output_residual_ids),
+        )
+
+        out = {
+            "h_cls": h_cls,
+            "modality_latent": modality_latent,
+            **adapter_output,
+        }
+
+        return out
 
     # ==================================================================================================================
-    # Checkpoint I/O — three explicit parts: backbone, modality_heads, output_adapters
+    # Model block API
     # ==================================================================================================================
 
     # ------------------------------------------------------------------------------------------------------------------
-    def get_token_encoder_state_dict(self) -> dict:
-        """Get token encoder state dictionary."""
-        return self.tokens.state_dict()
+    def get_named_blocks(self) -> dict[str, nn.Module]:
+        """
+        Return learnable model blocks keyed by stable checkpoint/config names.
 
-    # ------------------------------------------------------------------------------------------------------------------
-    def get_backbone_state_dict(self) -> dict:
-        """Get backbone state dictionary."""
-        return self.backbone.state_dict()
+        Returns
+        -------
+        dict[str, nn.Module]
+            Mapping from block name to module.
 
-    # ------------------------------------------------------------------------------------------------------------------
-    def load_backbone_state_dict(self, state: Mapping, strict: bool = True) -> tuple[Any, Any]:
-        """Load backbone state dictionary, and return missing and unexpected keys."""
-        missing, unexpected = self.backbone.load_state_dict(state_dict=state, strict=strict)
-        return missing, unexpected
+        """
 
-    # ------------------------------------------------------------------------------------------------------------------
-    def get_modality_heads_state_dict(self) -> dict:
-        """Get modality heads state dictionary."""
-        return self.modality_heads.state_dict()
-
-    # ------------------------------------------------------------------------------------------------------------------
-    def load_token_encoder_state_dict(self, state: Mapping, strict: bool = True) -> tuple[Any, Any]:
-        """Load token encoder state dictionary, and return missing and unexpected keys."""
-        # Same API pattern as backbone/heads/adapters:
-        missing, unexpected = self.tokens.load_state_dict(state_dict=state, strict=strict)
-        return missing, unexpected
-
-    # ------------------------------------------------------------------------------------------------------------------
-    def load_modality_heads_state_dict(self, state: dict, strict: bool = True) -> tuple[Any, Any]:
-        """Load modality heads state dictionary, and return missing and unexpected keys."""
-        missing, unexpected = self.modality_heads.load_state_dict(state_dict=state, strict=strict)
-        return missing, unexpected
-
-    # ------------------------------------------------------------------------------------------------------------------
-    def get_output_adapters_state_dict(self) -> dict:
-        """Get output adapters state dictionary."""
-        return self.output_adapters.state_dict()
-
-    # ------------------------------------------------------------------------------------------------------------------
-    def load_output_adapters_state_dict(self, state: dict, strict: bool = True) -> tuple[Any, Any]:
-        """Load output adapters state dictionary, and return missing and unexpected keys."""
-        missing, unexpected = self.output_adapters.load_state_dict(state_dict=state, strict=strict)
-        return missing, unexpected
+        blocks = {
+            "token_encoder": self.tokens,
+            "backbone": self.backbone,
+            "modality_heads": self.modality_heads,
+            "output_adapters": self.output_adapters,
+        }
+        return {name: blocks[name] for name in MMT_BLOCK_NAMES}
 
     # ------------------------------------------------------------------------------------------------------------------

@@ -44,12 +44,17 @@ ulimit for open file descriptors can be low.
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import torch
 from torch.utils.data import DataLoader, IterableDataset, Dataset
 
+from mmt.data.datasets import WindowCachedDataset
 from mmt.utils.seed import make_worker_seed_fn
+
+
+logger = logging.getLogger(__name__)
 
 
 # ======================================================================================================================
@@ -202,6 +207,15 @@ def initialize_mmt_dataloader(
 
     # Detect streaming mode
     is_streaming = isinstance(dataset, IterableDataset)
+    is_cached = isinstance(dataset, WindowCachedDataset)
+    effective_num_workers = int(num_workers)
+
+    if is_cached and effective_num_workers > 0:
+        logger.warning(
+            "WindowCachedDataset already lives in RAM; forcing DataLoader num_workers=0 "
+            "to avoid duplicating the cached windows across worker processes."
+        )
+        effective_num_workers = 0
 
     # IterableDataset → DataLoader shuffle MUST be False.
     effective_shuffle = (not is_streaming) and bool(shuffle)
@@ -210,21 +224,21 @@ def initialize_mmt_dataloader(
         ds_type = "IterableDataset (STREAMING)" if is_streaming else "Map-style Dataset (CACHED)"
         print(
             f"[MMT] Building DataLoader' "
-            f"→ {ds_type}, batch_size={batch_size}, "
-            f"shuffle={effective_shuffle}, num_workers={num_workers}"
+            f"-> {ds_type}, batch_size={batch_size}, "
+            f"shuffle={effective_shuffle}, num_workers={effective_num_workers}"
         )
 
     # Performance / robustness defaults for multiprocessing.
     # NOTE: PyTorch only accepts these arguments when num_workers > 0.
     dl_kwargs: dict[str, Any] = {}
-    if int(num_workers) > 0:
+    if effective_num_workers > 0:
         dl_kwargs["prefetch_factor"] = 1
 
     # Actual DataLoader creation
     loader = DataLoader(
         dataset=dataset,
         batch_size=batch_size,
-        num_workers=num_workers,
+        num_workers=effective_num_workers,
         shuffle=effective_shuffle,
         drop_last=drop_last,
         collate_fn=collate_fn,

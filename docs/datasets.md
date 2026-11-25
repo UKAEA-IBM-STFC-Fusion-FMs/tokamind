@@ -48,7 +48,7 @@ MAST signals can contain NaN values (missing channels, partial dropouts). The pi
 
 - **At window selection**: `SelectValidWindowsTransform` has two independent NaN-tolerance flags:
   - `accept_nan_inputs_actuators` (default `True`): partial-NaN input/actuator signals pass through with NaN intact for downstream imputation.
-  - `accept_nan_outputs` (default `True`): partial-NaN output signals pass through. Set to `False` in finetune/pretrain configs to drop windows with partial-NaN outputs from training, preventing corrupted targets from entering the loss.
+  - `accept_nan_outputs` (default `True`): partial-NaN output signals pass through. With `False`, each such signal is masked; the window is dropped if fewer than `min_valid_outputs` valid outputs remain.
   - In all cases, entirely-NaN or empty signals are always masked as invalid regardless of these flags.
 - **At representation building**: `preprocess.embed_chunks.nan_imputation` (default `"zero"`) controls
   non-finite value handling before DCT3D tuning and before runtime `codec.encode()`. This keeps coefficient

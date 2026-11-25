@@ -441,7 +441,7 @@ class SelectValidWindowsTransform:
 
         logger.debug(
             "win %s (shot %s) | valid_inputs_actuators=%d, valid_outputs=%d "
-            "(min_x=%d, min_y=%d, min_chunks=%d, stride=%s) → %s",
+            "(min_x=%d, min_y=%d, min_chunks=%d, stride=%s) -> %s",
             w_idx,
             shot_id,
             n_inputs_actuators,

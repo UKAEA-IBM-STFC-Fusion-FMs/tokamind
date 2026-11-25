@@ -25,16 +25,24 @@ dependencies = [
     "PyYAML>=6.0",
     "psutil>=7.2",
     "scipy>=1.17",
+    "freegs>=0.8.2",
 ]
 
 [project.optional-dependencies]
 dev = [
   "pre-commit>=3.8",
+  "pytest>=8.0",
   "ruff>=0.6",
 ]
 
+[tool.pytest.ini_options]
+pythonpath = ["scripts_mast"]
+testpaths = ["tests"]
+
 [tool.ruff]
 line-length = 120
+
+[tool.ruff.lint.per-file-ignores]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

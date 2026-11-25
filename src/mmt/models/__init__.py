@@ -17,4 +17,6 @@ from .mmt import MultiModalTransformer
 
 # ----------------------------------------------------------------------------------------------------------------------
 
-__all__ = ["MultiModalTransformer"]
+__all__ = [
+    "MultiModalTransformer",
+]

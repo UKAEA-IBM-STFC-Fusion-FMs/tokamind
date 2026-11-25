@@ -16,7 +16,7 @@ collate.
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
-from typing import TYPE_CHECKING, Any
+from typing import Any
 import numpy as np
 import logging
 
@@ -27,7 +27,7 @@ from mmt.train.loop_utils import move_batch_to_device
 from mmt.utils.amp_utils import amp_ctx_for_model
 from .decode import decode_and_destandardize
 
-if TYPE_CHECKING:
+if True:  # TYPE_CHECKING:  # FIXME: This does not work for ROH
     from mmt.data.embeddings.torch_decoder import TorchDecoder
 
 
@@ -56,6 +56,7 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
     dict[str, np.ndarray],
     np.ndarray,
     np.ndarray,
+    dict[str, np.ndarray] | None,
 ]:
     """
     Run one evaluation step and return outputs in native physical units.
@@ -89,8 +90,12 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
 
     Returns
     -------
-    tuple[dict[str, np.ndarray], dict[str, np.ndarray], dict[str, np.ndarray], np.ndarray, np.ndarray]
-        Tuple (y_true_native, y_pred_native, y_mask, shot_ids, window_indices).
+    tuple
+        ``(y_true_native, y_pred_native, y_mask, shot_ids, window_indices, output_time)``.
+        ``output_time`` is ``dict[name -> (B, T)]`` of per-output-slice
+        physical times (from ``batch["output_time"]``, ID→name keyed), or ``None`` when the batch carries no
+        ``output_time`` (e.g. collate did not populate it). These times are used by eval-only reference metrics
+        (e.g. the LCFS/X-point topology metric) to align each predicted slice to the source equilibrium time axis.
 
     Raises
     ------
@@ -140,13 +145,14 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
     y_true_id = batch["output_native"]  # dict[int, Tensor] (standardized)
     y_mask_id = batch["output_mask"]  # dict[int, Tensor] (bool per window)
     y_true_emb_id = batch["output_emb"]
+    output_time_id = batch.get("output_time")  # dict[int, Tensor (B, T)] of per-slice physical times, or None
 
     model.eval()
     with torch.no_grad():
         with amp_ctx_for_model(model=model, enable=amp_enabled):
             out = model(batch)
 
-    y_pred_std_id = out.get("pred", {})  # dict[int, Tensor] (standardized coeffs)
+        y_pred_std_id = out.get("pred", {})  # dict[int, Tensor] (standardized coeffs)
 
     # ..................................................................................................................
     # Optional debug: MSE in *standardized coeff space*, same space as training loss (pred vs output_emb).
@@ -190,6 +196,14 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
     y_mask = {k: v.detach().cpu().bool().numpy() for k, v in y_mask_t.items()}
     y_pred_std = {k: _tensor_to_numpy(v) for k, v in y_pred_std_t.items()}
 
+    # Per-output physical times (ID → name keyed), used by eval-only reference metrics to align each predicted
+    # slice to the source equilibrium time axis. None when the batch carries no output_time.
+    output_time: dict[str, np.ndarray] | None = None
+    if output_time_id is not None:
+        output_time = {
+            id_to_name[sid]: _tensor_to_numpy(tens) for sid, tens in output_time_id.items() if sid in id_to_name
+        }
+
     # ..................................................................................................................
     # 4) Decode + destandardize predictions
     # ..................................................................................................................
@@ -221,6 +235,6 @@ def forward_decode_native(  # NOSONAR - Ignore cognitive complexity
                 f"pred min/max=({yp.min():.3f}, {yp.max():.3f})"
             )
 
-    return y_true_native, y_pred_native, y_mask, shot_ids, window_indices
+    return y_true_native, y_pred_native, y_mask, shot_ids, window_indices, output_time
 
     # ..................................................................................................................

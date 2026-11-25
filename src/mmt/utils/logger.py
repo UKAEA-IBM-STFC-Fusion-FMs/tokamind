@@ -8,11 +8,11 @@ This module provides a small helper to set up a logger that writes to both:
 
 Typical usage in a script:
 
-    from mmt.utils.logging import setup_logging
-    from mmt.utils.config_loader import load_experiment_config
+    from mmt.utils.logger import setup_logging
+    from mast_utils import load_experiment_config
 
-    cfg = load_experiment_config("mmt/configs/task_2-1/finetune_default.yaml")
-    logger = setup_logging(cfg.paths["output_root"], logger_name="mmt.finetune")
+    cfg = load_experiment_config(task="task_2-1", phase="finetune", finetune_init="warmstart", model_source="<run_id>")
+    logger = setup_logging(cfg.paths["run_dir"], logger_name="mmt.finetune")
 
     logger.info("Starting finetuning")
     logger.info(f"Task: {cfg.task}, phase: {cfg.phase}")
