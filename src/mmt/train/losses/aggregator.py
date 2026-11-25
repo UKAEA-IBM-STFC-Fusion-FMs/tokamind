@@ -271,8 +271,10 @@ def build_loss_aggregator(
             # Config shape (params file presence/type, rhs_input keys/values) is validated up-front in
             # validator._validate_loss_terms, and the constructor backstops direct instantiation; here we just read.
             rhs_input_cfg = term_def.get("rhs_input") or {}
-            plot_check_cfg = term_def.get("plot_check") or {}
-            all_losses_weights = {term_["type"]: term_["weight"] for term_ in terms_cfg}
+            plot_check_cfg = dict(term_def.get("plot_check") or {})
+            all_losses_weights = {
+                term_.get("type", EMBED_MSE_LOSS_TYPE): term_.get("weight", 1.0) for term_ in terms_cfg
+            }
             plot_check_cfg["all_losses_weights"] = all_losses_weights
 
             built.append(
@@ -311,8 +313,10 @@ def build_loss_aggregator(
                 raise ValueError(f"Loss term '{WEAK_GRAD_SHAFRANOV_LOSS_TYPE}' requires `signal_stats`.")
 
             rhs_input_cfg = term_def.get("rhs_input") or {}
-            plot_check_cfg = term_def.get("plot_check") or {}
-            all_losses_weights = {term_["type"]: term_["weight"] for term_ in terms_cfg}
+            plot_check_cfg = dict(term_def.get("plot_check") or {})
+            all_losses_weights = {
+                term_.get("type", EMBED_MSE_LOSS_TYPE): term_.get("weight", 1.0) for term_ in terms_cfg
+            }
             plot_check_cfg["all_losses_weights"] = all_losses_weights
 
             built.append(
